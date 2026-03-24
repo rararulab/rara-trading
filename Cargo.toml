@@ -1,50 +1,36 @@
-[package]
-name = "rara-trading"
-version = "0.1.0"
-edition = "2024"
-description = "TODO: describe your CLI"
-license = "MIT"
-repository = "https://github.com/rararulab/rara-trading"
+[workspace]
+members = [".", "crates/rara-domain"]
+resolver = "3"
 
-[dependencies]
-async-trait = "0.1"
-barter = "0.12"
-barter-data = "0.11"
-barter-execution = "0.7"
-barter-instrument = "0.3"
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
 bon = "3"
-ccxt-rust = { version = "0.1", features = ["rest"] }
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
-config = "0.15"
-dirs = "6"
-feed-rs = "2"
-futures = "0.3"
-jiff = { version = "0.2", features = ["serde"] }
-nix = { version = "0.30", features = ["signal"] }
-reqwest = { version = "0.13", features = ["json", "stream"] }
-rust_decimal = { version = "1", features = ["serde-str"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sled = "0.34"
-smol_str = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+jiff = { version = "0.2", features = ["serde"] }
+rust_decimal = { version = "1", features = ["serde-str"] }
 snafu = "0.9"
-tempfile = "3"
+async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
-toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+sled = "0.34"
+tempfile = "3"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+clap = { version = "4", features = ["derive"] }
+config = "0.15"
+toml = "0.8"
+rara-domain = { path = "crates/rara-domain" }
 
-[dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-rust_decimal_macros = "1"
-
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
@@ -53,3 +39,50 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 must_use_candidate = "allow"
 redundant_pub_crate = "allow"
+
+[package]
+name = "rara-trading"
+version = "0.1.0"
+edition.workspace = true
+description = "TODO: describe your CLI"
+license.workspace = true
+repository = "https://github.com/rararulab/rara-trading"
+
+[dependencies]
+async-trait.workspace = true
+barter = "0.12"
+barter-data = "0.11"
+barter-execution = "0.7"
+barter-instrument = "0.3"
+bon.workspace = true
+ccxt-rust = { version = "0.1", features = ["rest"] }
+chrono.workspace = true
+clap.workspace = true
+config.workspace = true
+dirs = "6"
+feed-rs = "2"
+futures = "0.3"
+jiff.workspace = true
+nix = { version = "0.30", features = ["signal"] }
+rara-domain.workspace = true
+reqwest.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sled.workspace = true
+smol_str = "0.3"
+snafu.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+rust_decimal_macros = "1"
+
+[lints]
+workspace = true

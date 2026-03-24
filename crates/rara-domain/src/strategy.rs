@@ -4,7 +4,7 @@ use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::contract::SecType;
+use crate::contract::SecType;
 
 /// Classification of trading strategy approaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

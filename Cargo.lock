@@ -2738,6 +2738,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-domain"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "jiff",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "rara-trading"
 version = "0.1.0"
 dependencies = [
@@ -2758,6 +2770,7 @@ dependencies = [
  "jiff",
  "nix",
  "predicates",
+ "rara-domain",
  "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
