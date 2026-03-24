@@ -56,47 +56,34 @@ license.workspace = true
 repository = "https://github.com/rararulab/rara-trading"
 
 [dependencies]
-async-trait.workspace = true
-barter = "0.12"
-barter-data = "0.11"
-barter-execution = "0.7"
-barter-instrument = "0.3"
-bon.workspace = true
-ccxt-rust = { version = "0.1", features = ["rest"] }
-chrono.workspace = true
 clap.workspace = true
 config.workspace = true
 dirs = "6"
-feed-rs = "2"
-futures = "0.3"
-jiff.workspace = true
-nix = { version = "0.30", features = ["signal"] }
 rara-agent.workspace = true
 rara-domain.workspace = true
-rara-infra.workspace = true
 rara-event-bus.workspace = true
-rara-trading-engine.workspace = true
 rara-feedback.workspace = true
+rara-infra.workspace = true
 rara-research.workspace = true
 rara-sentinel.workspace = true
+rara-trading-engine.workspace = true
 reqwest.workspace = true
-rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sled.workspace = true
-smol_str = "0.3"
 snafu.workspace = true
-tempfile.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2"
+jiff.workspace = true
 predicates = "3"
+rust_decimal.workspace = true
 rust_decimal_macros = "1"
+tempfile.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

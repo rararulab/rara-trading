@@ -1,13 +1,15 @@
-pub mod agent;
+// Re-export workspace crates
+pub use rara_agent as agent;
+pub use rara_domain as domain;
+pub use rara_event_bus as event_bus;
+pub use rara_feedback as feedback;
+pub use rara_infra as infra;
+pub use rara_research as research;
+pub use rara_sentinel as sentinel;
+pub use rara_trading_engine as trading;
+
 pub mod app_config;
 pub mod cli;
-pub mod domain;
 pub mod error;
-pub mod event_bus;
-pub mod feedback;
 pub mod http;
-pub mod infra;
 pub mod paths;
-pub mod research;
-pub mod sentinel;
-pub mod trading;
