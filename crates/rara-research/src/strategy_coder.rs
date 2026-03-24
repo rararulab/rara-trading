@@ -2,8 +2,8 @@
 
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::research::Hypothesis;
-use crate::infra::llm::LlmClient;
+use rara_domain::research::Hypothesis;
+use rara_infra::llm::LlmClient;
 
 /// Errors from strategy code generation.
 #[derive(Debug, Snafu)]
@@ -13,7 +13,7 @@ pub enum StrategyCoderError {
     #[snafu(display("LLM error: {source}"))]
     Llm {
         /// The underlying LLM error.
-        source: crate::infra::llm::LlmError,
+        source: rara_infra::llm::LlmError,
     },
 }
 
@@ -54,8 +54,8 @@ impl<L: LlmClient> StrategyCoder<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use crate::agent::executor::CliExecutor;
+    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use rara_agent::executor::CliExecutor;
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {

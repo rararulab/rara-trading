@@ -1,19 +1,19 @@
-//! Research loop orchestration — the full propose → code → backtest → evaluate cycle.
+//! Research loop orchestration — the full propose -> code -> backtest -> evaluate cycle.
 
 use std::sync::Arc;
 
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::event::Event;
-use crate::domain::research::{Experiment, Hypothesis, HypothesisFeedback};
-use crate::event_bus::bus::EventBus;
-use crate::infra::llm::LlmClient;
+use rara_domain::event::Event;
+use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
+use rara_event_bus::bus::EventBus;
+use rara_infra::llm::LlmClient;
 
-use super::backtester::Backtester;
-use super::hypothesis_gen::HypothesisGenerator;
-use super::strategy_coder::StrategyCoder;
-use super::trace::Trace;
+use crate::backtester::Backtester;
+use crate::hypothesis_gen::HypothesisGenerator;
+use crate::strategy_coder::StrategyCoder;
+use crate::trace::Trace;
 
 /// Errors from research loop execution.
 #[derive(Debug, Snafu)]
@@ -23,31 +23,31 @@ pub enum ResearchLoopError {
     #[snafu(display("hypothesis generation failed: {source}"))]
     HypothesisGen {
         /// The underlying error.
-        source: super::hypothesis_gen::HypothesisGenError,
+        source: crate::hypothesis_gen::HypothesisGenError,
     },
     /// Strategy code generation failed.
     #[snafu(display("strategy coding failed: {source}"))]
     StrategyCoding {
         /// The underlying error.
-        source: super::strategy_coder::StrategyCoderError,
+        source: crate::strategy_coder::StrategyCoderError,
     },
     /// Backtesting failed.
     #[snafu(display("backtesting failed: {source}"))]
     Backtest {
         /// The underlying error.
-        source: super::backtester::BacktestError,
+        source: crate::backtester::BacktestError,
     },
     /// Trace storage failed.
     #[snafu(display("trace error: {source}"))]
     Trace {
         /// The underlying trace error.
-        source: super::trace::TraceError,
+        source: crate::trace::TraceError,
     },
     /// Event publishing failed.
     #[snafu(display("event bus error: {source}"))]
     EventBus {
         /// The underlying store error.
-        source: crate::event_bus::store::StoreError,
+        source: rara_event_bus::store::StoreError,
     },
 }
 
@@ -67,7 +67,7 @@ pub struct IterationResult {
 }
 
 /// Orchestrates the full RD-Agent style research loop:
-/// propose → code → backtest → evaluate → record.
+/// propose -> code -> backtest -> evaluate -> record.
 pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     hypothesis_gen: HypothesisGenerator<L>,
     strategy_coder: StrategyCoder<L>,
@@ -95,8 +95,8 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
     /// Run one full research iteration.
     ///
-    /// Steps: generate hypothesis → generate code → backtest → evaluate →
-    /// record feedback → publish events.
+    /// Steps: generate hypothesis -> generate code -> backtest -> evaluate ->
+    /// record feedback -> publish events.
     pub async fn run_iteration(&self, context: &str) -> Result<IterationResult> {
         // 1. Generate hypothesis
         let hypothesis = self

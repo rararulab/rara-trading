@@ -5,7 +5,7 @@ use std::path::Path;
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
-use crate::domain::research::{Experiment, Hypothesis, HypothesisFeedback};
+use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 
 /// Errors that can occur in trace storage.
 #[derive(Debug, Snafu)]

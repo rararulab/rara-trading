@@ -30,9 +30,10 @@ use bon::Builder;
 use rust_decimal::Decimal;
 use smol_str::SmolStr;
 
-use crate::domain::research::BacktestResult;
-use crate::research::backtester::{BacktestError, Backtester};
-use crate::research::market_data::load_market_data_for_contract;
+use rara_domain::research::BacktestResult;
+
+use crate::backtester::{BacktestError, Backtester};
+use crate::market_data::load_market_data_for_contract;
 
 /// Real backtester powered by the barter-rs trading engine.
 ///

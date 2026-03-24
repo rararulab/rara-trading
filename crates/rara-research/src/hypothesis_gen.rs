@@ -2,10 +2,10 @@
 
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::research::Hypothesis;
-use crate::infra::llm::LlmClient;
+use rara_domain::research::Hypothesis;
+use rara_infra::llm::LlmClient;
 
-use super::trace::Trace;
+use crate::trace::Trace;
 
 /// Errors from hypothesis generation.
 #[derive(Debug, Snafu)]
@@ -15,13 +15,13 @@ pub enum HypothesisGenError {
     #[snafu(display("LLM error: {source}"))]
     Llm {
         /// The underlying LLM error.
-        source: crate::infra::llm::LlmError,
+        source: rara_infra::llm::LlmError,
     },
     /// Trace lookup failed.
     #[snafu(display("trace error: {source}"))]
     Trace {
         /// The underlying trace error.
-        source: super::trace::TraceError,
+        source: crate::trace::TraceError,
     },
     /// LLM response could not be parsed into a hypothesis.
     #[snafu(display("failed to parse LLM response: {message}"))]
@@ -112,9 +112,9 @@ impl<L: LlmClient> HypothesisGenerator<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use crate::agent::executor::CliExecutor;
-    use crate::domain::research::Experiment;
+    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use rara_agent::executor::CliExecutor;
+    use rara_domain::research::Experiment;
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {
@@ -145,7 +145,7 @@ mod tests {
             .build();
         trace.save_experiment(&exp).unwrap();
 
-        let fb = crate::domain::research::HypothesisFeedback::builder()
+        let fb = rara_domain::research::HypothesisFeedback::builder()
             .experiment_id(exp.id())
             .decision(true)
             .reason("good")

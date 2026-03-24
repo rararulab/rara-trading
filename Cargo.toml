@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel"]
+members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research"]
 resolver = "3"
 
 [workspace.package]
@@ -32,6 +32,7 @@ rara-event-bus = { path = "crates/rara-event-bus" }
 rara-trading-engine = { path = "crates/rara-trading-engine" }
 rara-feedback = { path = "crates/rara-feedback" }
 rara-sentinel = { path = "crates/rara-sentinel" }
+rara-research = { path = "crates/rara-research" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -76,6 +77,7 @@ rara-infra.workspace = true
 rara-event-bus.workspace = true
 rara-trading-engine.workspace = true
 rara-feedback.workspace = true
+rara-research.workspace = true
 rara-sentinel.workspace = true
 reqwest.workspace = true
 rust_decimal.workspace = true

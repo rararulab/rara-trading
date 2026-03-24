@@ -2803,6 +2803,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-research"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "barter",
+ "barter-data",
+ "barter-execution",
+ "barter-instrument",
+ "bon",
+ "chrono",
+ "jiff",
+ "rara-agent",
+ "rara-domain",
+ "rara-event-bus",
+ "rara-infra",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sled",
+ "smol_str",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "rara-sentinel"
 version = "0.1.0"
 dependencies = [
@@ -2850,6 +2878,7 @@ dependencies = [
  "rara-event-bus",
  "rara-feedback",
  "rara-infra",
+ "rara-research",
  "rara-sentinel",
  "rara-trading-engine",
  "reqwest 0.13.2",

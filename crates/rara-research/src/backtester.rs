@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use snafu::Snafu;
 
-use crate::domain::research::BacktestResult;
+use rara_domain::research::BacktestResult;
 
 /// Errors from backtesting operations.
 #[derive(Debug, Snafu)]
