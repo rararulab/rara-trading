@@ -26,8 +26,8 @@ use rara_trading::trading::guard_pipeline::GuardPipeline;
 
 fn printf_executor(response: &str) -> CliExecutor {
     CliExecutor::new(CliBackend {
-        command: "printf".to_string(),
-        args: vec![format!("{response}\n")],
+        command: "sh".to_string(),
+        args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
         prompt_mode: PromptMode::Stdin,
         prompt_flag: None,
         output_format: OutputFormat::Text,
