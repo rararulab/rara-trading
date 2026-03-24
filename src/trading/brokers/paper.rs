@@ -1,5 +1,5 @@
-//! Mock broker for testing — immediately fills all orders at a configurable
-//! price.
+//! Paper trading broker — immediately fills all orders at a configurable
+//! price for use in paper trading mode.
 
 use async_trait::async_trait;
 use rust_decimal::Decimal;
@@ -11,8 +11,8 @@ use crate::trading::broker::{
     AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
 };
 
-/// A simulated broker that fills every order immediately at a fixed price.
-pub struct MockBroker {
+/// A paper trading broker that fills every order immediately at a fixed price.
+pub struct PaperBroker {
     /// Price at which all orders are filled.
     fill_price: Decimal,
     /// Internal position state.
@@ -21,8 +21,8 @@ pub struct MockBroker {
     executions: Mutex<Vec<ExecutionReport>>,
 }
 
-impl MockBroker {
-    /// Create a new mock broker that fills at the given price.
+impl PaperBroker {
+    /// Create a new paper trading broker that fills at the given price.
     pub fn new(fill_price: Decimal) -> Self {
         Self {
             fill_price,
@@ -33,7 +33,7 @@ impl MockBroker {
 }
 
 #[async_trait]
-impl Broker for MockBroker {
+impl Broker for PaperBroker {
     async fn push(&self, actions: &[StagedAction]) -> Result<Vec<OrderResult>, BrokerError> {
         let mut positions = self.positions.lock().await;
         let mut executions = self.executions.lock().await;

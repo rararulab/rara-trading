@@ -152,7 +152,7 @@ mod tests {
 
     use crate::domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
     use crate::trading::broker::OrderStatus;
-    use crate::trading::brokers::mock::MockBroker;
+    use crate::trading::brokers::paper::PaperBroker;
     use crate::trading::guards::symbol_whitelist::SymbolWhitelist;
 
     use super::*;
@@ -178,7 +178,7 @@ mod tests {
         let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
         let mut rx = event_bus.subscribe();
 
-        let broker = MockBroker::new(Decimal::new(50_000, 0));
+        let broker = PaperBroker::new(Decimal::new(50_000, 0));
         let pipeline = GuardPipeline::new(vec![]);
 
         let engine = TradingEngine::new(Box::new(broker), pipeline, event_bus);
@@ -202,7 +202,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
 
-        let broker = MockBroker::new(Decimal::new(50_000, 0));
+        let broker = PaperBroker::new(Decimal::new(50_000, 0));
         // Only allow ETH-USD, so BTC-USD will be rejected
         let pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![
             "ETH-USD".to_string(),
