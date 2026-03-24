@@ -13,8 +13,8 @@ use ccxt_rust::prelude::{
     OrderSide as CcxtOrderSide, OrderStatus as CcxtOrderStatus, OrderType as CcxtOrderType, Price,
 };
 
-use crate::domain::trading::{ActionType, OrderType, Side, StagedAction};
-use crate::trading::broker::{
+use rara_domain::trading::{ActionType, OrderType, Side, StagedAction};
+use crate::broker::{
     AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
 };
 

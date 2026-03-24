@@ -2809,6 +2809,7 @@ dependencies = [
  "rara-domain",
  "rara-event-bus",
  "rara-infra",
+ "rara-trading-engine",
  "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
@@ -2822,6 +2823,28 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rara-trading-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bon",
+ "ccxt-rust",
+ "jiff",
+ "rara-domain",
+ "rara-event-bus",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 

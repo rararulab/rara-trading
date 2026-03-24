@@ -1,8 +1,8 @@
 //! Sequential guard pipeline that short-circuits on the first rejection.
 
-use crate::domain::trading::TradingCommit;
-use crate::trading::broker::AccountInfo;
-use crate::trading::guards::{Guard, GuardResult};
+use rara_domain::trading::TradingCommit;
+use crate::broker::AccountInfo;
+use crate::guards::{Guard, GuardResult};
 
 /// Runs a sequence of guards, stopping at the first rejection.
 pub struct GuardPipeline {
@@ -34,9 +34,9 @@ impl GuardPipeline {
 mod tests {
     use rust_decimal::Decimal;
 
-    use crate::domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
-    use crate::trading::broker::AccountInfo;
-    use crate::trading::guards::symbol_whitelist::SymbolWhitelist;
+    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
+    use crate::broker::AccountInfo;
+    use crate::guards::symbol_whitelist::SymbolWhitelist;
 
     use super::*;
 

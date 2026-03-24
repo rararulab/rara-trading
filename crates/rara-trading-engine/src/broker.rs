@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
-use crate::domain::trading::{Side, StagedAction};
+use rara_domain::trading::{Side, StagedAction};
 
 /// Result of submitting an order to a broker.
 #[derive(Debug, Clone, Serialize, Deserialize)]

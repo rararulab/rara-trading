@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::domain::trading::{Side, StagedAction};
-use crate::trading::broker::{
+use rara_domain::trading::{Side, StagedAction};
+use crate::broker::{
     AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
 };
 

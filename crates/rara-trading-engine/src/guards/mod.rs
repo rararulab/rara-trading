@@ -7,8 +7,8 @@ pub mod symbol_whitelist;
 
 use async_trait::async_trait;
 
-use crate::domain::trading::TradingCommit;
-use crate::trading::broker::AccountInfo;
+use rara_domain::trading::TradingCommit;
+use crate::broker::AccountInfo;
 
 /// Outcome of a guard check.
 #[derive(Debug, Clone)]

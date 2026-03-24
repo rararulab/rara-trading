@@ -4,8 +4,8 @@
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
-use crate::domain::trading::TradingCommit;
-use crate::trading::broker::AccountInfo;
+use rara_domain::trading::TradingCommit;
+use crate::broker::AccountInfo;
 
 use super::{Guard, GuardResult};
 

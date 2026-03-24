@@ -6,13 +6,13 @@ use std::sync::Arc;
 use serde_json::json;
 use snafu::Snafu;
 
-use crate::domain::event::Event;
-use crate::domain::trading::TradingCommit;
-use crate::event_bus::bus::EventBus;
-use crate::trading::binding::StrategyBinding;
-use crate::trading::broker::{Broker, OrderResult, OrderStatus};
-use crate::trading::guard_pipeline::GuardPipeline;
-use crate::trading::guards::GuardResult;
+use rara_domain::event::Event;
+use rara_domain::trading::TradingCommit;
+use rara_event_bus::bus::EventBus;
+use crate::binding::StrategyBinding;
+use crate::broker::{Broker, OrderResult, OrderStatus};
+use crate::guard_pipeline::GuardPipeline;
+use crate::guards::GuardResult;
 
 /// Errors that can occur during trading engine operations.
 #[derive(Debug, Snafu)]
@@ -28,7 +28,7 @@ pub enum EngineError {
     #[snafu(display("broker error: {source}"))]
     Broker {
         /// Underlying broker error.
-        source: crate::trading::broker::BrokerError,
+        source: crate::broker::BrokerError,
     },
     /// Failed to publish an event.
     #[snafu(display("event publish error: {message}"))]
@@ -150,10 +150,10 @@ impl TradingEngine {
 mod tests {
     use rust_decimal::Decimal;
 
-    use crate::domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
-    use crate::trading::broker::OrderStatus;
-    use crate::trading::brokers::paper::PaperBroker;
-    use crate::trading::guards::symbol_whitelist::SymbolWhitelist;
+    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
+    use crate::broker::OrderStatus;
+    use crate::brokers::paper::PaperBroker;
+    use crate::guards::symbol_whitelist::SymbolWhitelist;
 
     use super::*;
 
