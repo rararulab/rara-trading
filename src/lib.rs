@@ -4,6 +4,7 @@ pub mod cli;
 pub mod domain;
 pub mod error;
 pub mod event_bus;
+pub mod feedback;
 pub mod http;
 pub mod infra;
 pub mod paths;

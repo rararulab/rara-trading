@@ -57,6 +57,21 @@ impl Event {
         &self.correlation_id
     }
 
+    /// Returns the optional strategy identifier.
+    pub fn strategy_id(&self) -> Option<&str> {
+        self.strategy_id.as_deref()
+    }
+
+    /// Returns the optional strategy version.
+    pub const fn strategy_version(&self) -> Option<u32> {
+        self.strategy_version
+    }
+
+    /// Returns the event payload.
+    pub const fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+
     /// Returns the topic — the first segment of the dotted event type.
     pub fn topic(&self) -> &str {
         self.event_type
