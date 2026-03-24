@@ -7,4 +7,5 @@ pub mod hypothesis_gen;
 pub mod market_data;
 pub mod research_loop;
 pub mod strategy_coder;
+pub mod runtime;
 pub mod trace;

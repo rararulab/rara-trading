@@ -27,6 +27,9 @@ barter-execution = "0.7"
 barter-instrument = "0.3"
 chrono.workspace = true
 smol_str = "0.3"
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+rara-strategy-api.workspace = true
 
 [dev-dependencies]
 rara-agent.workspace = true
