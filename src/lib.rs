@@ -8,4 +8,5 @@ pub mod http;
 pub mod infra;
 pub mod paths;
 pub mod research;
+pub mod sentinel;
 pub mod trading;
