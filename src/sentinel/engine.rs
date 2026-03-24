@@ -106,7 +106,7 @@ mod tests {
     use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
     use crate::agent::executor::CliExecutor;
     use crate::sentinel::source::RawSignal;
-    use crate::sentinel::sources::mock::MockDataSource;
+    use crate::sentinel::sources::webhook::WebhookDataSource;
 
     use super::*;
 
@@ -127,13 +127,14 @@ mod tests {
         let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
 
         let raw = RawSignal {
-            source_name: "mock-news".to_owned(),
+            source_name: "webhook-news".to_owned(),
             content: "Exchange hacked, funds drained".to_owned(),
             metadata: json!({}),
             timestamp: jiff::Timestamp::now(),
         };
 
-        let source = MockDataSource::new("mock-news", vec![raw]);
+        let source = WebhookDataSource::new("webhook-news");
+        source.push(raw).await;
 
         let executor = echo_executor(
             "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP\nSUMMARY: Exchange hack detected",
@@ -158,13 +159,14 @@ mod tests {
         let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
 
         let raw = RawSignal {
-            source_name: "mock-news".to_owned(),
+            source_name: "webhook-news".to_owned(),
             content: "Routine market update".to_owned(),
             metadata: json!({}),
             timestamp: jiff::Timestamp::now(),
         };
 
-        let source = MockDataSource::new("mock-news", vec![raw]);
+        let source = WebhookDataSource::new("webhook-news");
+        source.push(raw).await;
 
         let executor = echo_executor(
             "SEVERITY: None\nTYPE: SentimentShift\nCONTRACTS: \nSUMMARY: No actionable signal",
