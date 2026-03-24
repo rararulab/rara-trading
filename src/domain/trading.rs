@@ -133,6 +133,28 @@ pub struct ArbLeg {
     broker: String,
 }
 
+impl ArbLeg {
+    /// Returns the contract identifier.
+    pub fn contract_id(&self) -> &str {
+        &self.contract_id
+    }
+
+    /// Returns the trade side.
+    pub const fn side(&self) -> Side {
+        self.side
+    }
+
+    /// Returns the order quantity.
+    pub const fn quantity(&self) -> Decimal {
+        self.quantity
+    }
+
+    /// Returns the broker name.
+    pub fn broker(&self) -> &str {
+        &self.broker
+    }
+}
+
 /// A detected arbitrage opportunity across legs.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ArbOpportunity {
@@ -142,4 +164,31 @@ pub struct ArbOpportunity {
     expected_spread: Decimal,
     max_slippage: Decimal,
     expiry: jiff::Timestamp,
+}
+
+impl ArbOpportunity {
+    /// Returns the strategy identifier.
+    pub fn strategy_id(&self) -> &str {
+        &self.strategy_id
+    }
+
+    /// Returns the arbitrage legs.
+    pub fn legs(&self) -> &[ArbLeg] {
+        &self.legs
+    }
+
+    /// Returns the expected spread.
+    pub const fn expected_spread(&self) -> Decimal {
+        self.expected_spread
+    }
+
+    /// Returns the maximum allowed slippage.
+    pub const fn max_slippage(&self) -> Decimal {
+        self.max_slippage
+    }
+
+    /// Returns the expiry timestamp.
+    pub const fn expiry(&self) -> jiff::Timestamp {
+        self.expiry
+    }
 }

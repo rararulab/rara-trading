@@ -34,6 +34,11 @@ pub struct StrategyMetrics {
 }
 
 impl StrategyMetrics {
+    /// Returns the profit and loss.
+    pub const fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+
     /// Returns the Sharpe ratio.
     pub const fn sharpe_ratio(&self) -> f64 {
         self.sharpe_ratio
@@ -42,6 +47,16 @@ impl StrategyMetrics {
     /// Returns the maximum drawdown.
     pub const fn max_drawdown(&self) -> Decimal {
         self.max_drawdown
+    }
+
+    /// Returns the win rate as a fraction.
+    pub const fn win_rate(&self) -> f64 {
+        self.win_rate
+    }
+
+    /// Returns the total number of trades.
+    pub const fn trade_count(&self) -> u32 {
+        self.trade_count
     }
 }
 
