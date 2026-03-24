@@ -9,6 +9,7 @@ repository = "https://github.com/rararulab/rara-trading"
 [dependencies]
 async-trait = "0.1"
 bon = "3"
+ccxt-rust = { version = "0.1", features = ["rest"] }
 clap = { version = "4", features = ["derive"] }
 config = "0.15"
 dirs = "6"
