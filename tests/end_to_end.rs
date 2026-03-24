@@ -28,7 +28,7 @@ fn printf_executor(response: &str) -> CliExecutor {
     CliExecutor::new(CliBackend {
         command: "sh".to_string(),
         args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-        prompt_mode: PromptMode::Stdin,
+        prompt_mode: PromptMode::Arg,
         prompt_flag: None,
         output_format: OutputFormat::Text,
         env_vars: vec![],
