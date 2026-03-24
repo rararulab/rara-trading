@@ -1,0 +1,85 @@
+name: Lint
+
+on:
+  workflow_call:
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  rust-format:
+    name: Rust Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Substitute template placeholders
+        run: |
+          find . -type f \( -name '*.rs' -o -name '*.toml' \) \
+            -exec sed -i 's/{{project-name}}/ci-test-app/g; s/{{crate_name}}/ci_test_app/g' {} +
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Format after substitution
+        run: cargo +nightly fmt --all
+
+      - name: Check formatting
+        run: cargo +nightly fmt --all -- --check
+
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Substitute template placeholders
+        run: |
+          find . -type f \( -name '*.rs' -o -name '*.toml' \) \
+            -exec sed -i 's/{{project-name}}/ci-test-app/g; s/{{crate_name}}/ci_test_app/g' {} +
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked 2>/dev/null || true
+
+      - name: Check advisories, licenses, bans
+        run: cargo deny check
+
+  lint-success:
+    name: Lint Success
+    runs-on: ubuntu-latest
+    needs: [rust-format, cargo-deny]
+    if: always()
+    steps:
+      - name: Check all lint jobs status
+        env:
+          RUST_FORMAT_RESULT: ${{ needs.rust-format.result }}
+          CARGO_DENY_RESULT: ${{ needs.cargo-deny.result }}
+        run: |
+          if [[ "$RUST_FORMAT_RESULT" != "success" || \
+                "$CARGO_DENY_RESULT" != "success" ]]; then
+            echo "One or more lint jobs failed"
+            exit 1
+          fi
+          echo "All lint jobs passed successfully"

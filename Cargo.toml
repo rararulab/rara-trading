@@ -1,0 +1,40 @@
+[package]
+name = "{{project-name}}"
+version = "0.1.0"
+edition = "2024"
+description = "TODO: describe your CLI"
+license = "MIT"
+repository = "https://github.com/rararulab/{{project-name}}"
+
+[dependencies]
+bon = "3"
+clap = { version = "4", features = ["derive"] }
+config = "0.15"
+dirs = "6"
+nix = { version = "0.30", features = ["signal"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+snafu = "0.9"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+redundant_pub_crate = "allow"
