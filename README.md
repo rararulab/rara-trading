@@ -4,20 +4,111 @@ A self-iterating closed-loop trading agent system built in Rust. The system auto
 
 ## Architecture
 
+### Closed Loop
+
+```mermaid
+graph LR
+    subgraph Research["Research Engine"]
+        H[Hypothesis Generator<br/><i>CLI Agent</i>]
+        C[Strategy Coder<br/><i>CLI Agent</i>]
+        B[Backtester<br/><i>barter-rs</i>]
+        T[Trace DAG<br/><i>sled</i>]
+    end
+
+    subgraph Trading["Trading Engine"]
+        G[Guard Pipeline<br/><i>risk controls</i>]
+        X[CcxtBroker<br/><i>Binance/OKX/Bybit</i>]
+        P[PaperBroker<br/><i>simulation</i>]
+    end
+
+    subgraph Sentinel["Sentinel Engine"]
+        R[RSS / Webhook<br/><i>data sources</i>]
+        A[Signal Analyzer<br/><i>CLI Agent</i>]
+    end
+
+    subgraph Feedback["Feedback Bridge"]
+        M[Metrics Aggregator]
+        E[Strategy Evaluator]
+    end
+
+    EB((Event Bus<br/><i>sled</i>))
+
+    H -->|generate| C
+    C -->|code| B
+    B -->|results| T
+    T -->|best experiment| H
+
+    Research -->|strategy.candidate| EB
+    EB -->|commit| G
+    G -->|approved| X & P
+    X & P -->|order.filled| EB
+
+    Sentinel -->|signal.detected| EB
+    A -->|block trading| G
+
+    EB -->|trading events| M
+    M --> E
+    E -->|promote / demote| EB
+    EB -->|retrain| Research
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Event Bus (sled)                      │
-│              Push + Pull hybrid messaging               │
-└──────┬──────────┬──────────┬──────────┬─────────────────┘
-       │          │          │          │
-  ┌────▼───┐ ┌───▼────┐ ┌───▼───┐ ┌───▼──────┐
-  │Research│ │Trading │ │Sentinel│ │ Feedback │
-  │ Engine │ │ Engine │ │ Engine │ │  Bridge  │
-  └────┬───┘ └───┬────┘ └───┬───┘ └───┬──────┘
-       │         │          │          │
-       ▼         ▼          ▼          ▼
-   CLI Agent  CcxtBroker  RSS/Webhook  Metrics
-   Executor   PaperBroker DataSources  Evaluator
+
+### Strategy Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Candidate: research accepts
+    Candidate --> Backtesting: backtest triggered
+    Backtesting --> PaperTrading: sharpe > 1.0<br/>drawdown < 15%
+    Backtesting --> Retired: poor metrics
+    PaperTrading --> Live: sustained performance
+    PaperTrading --> Retired: degradation detected
+    Live --> PaperTrading: drawdown spike
+    Live --> Retired: feedback demote
+    Retired --> [*]
+```
+
+### Research Loop Detail
+
+```mermaid
+flowchart TB
+    ctx[Market Context] --> gen[Hypothesis Generator]
+    gen --> hyp[New Hypothesis]
+    hyp --> code[Strategy Coder]
+    code --> strat[Strategy Code]
+    strat --> bt[Barter Backtester]
+    bt --> eval{Sharpe > 1.0?<br/>Drawdown < 15%?}
+    eval -->|Yes| accept[Save to Trace DAG<br/>Publish candidate event]
+    eval -->|No| reject[Save feedback<br/>Record failure reason]
+    accept --> ctx
+    reject --> ctx
+    trace[(Trace DAG<br/>sled)] -.->|best experiment<br/>ancestor chain| gen
+    accept -.-> trace
+    reject -.-> trace
+```
+
+### Trading Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant S as Strategy
+    participant E as Trading Engine
+    participant G as Guard Pipeline
+    participant B as Broker
+    participant EB as Event Bus
+
+    S->>E: TradingCommit (staged actions)
+    E->>EB: order.submitted event
+    E->>G: validate actions
+    alt Guards pass
+        G->>E: approved
+        E->>B: push orders
+        B->>E: OrderResult (filled/rejected)
+        E->>EB: order.filled event
+    else Guard blocked
+        G->>E: rejected (reason)
+        E->>EB: risk.triggered event
+    end
+    E->>B: sync_orders + positions
 ```
 
 ### Components
