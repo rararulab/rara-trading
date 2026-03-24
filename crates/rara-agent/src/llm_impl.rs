@@ -1,28 +1,10 @@
-//! LLM client trait and CLI-based implementation.
+//! `LlmClient` implementation for `CliExecutor`.
 
 use async_trait::async_trait;
-use snafu::Snafu;
 
-use crate::agent::executor::CliExecutor;
+use rara_infra::llm::{LlmClient, LlmError};
 
-/// Errors from LLM client operations.
-#[derive(Debug, Snafu)]
-#[snafu(visibility(pub))]
-pub enum LlmError {
-    /// The LLM request failed.
-    #[snafu(display("LLM request failed: {message}"))]
-    RequestFailed {
-        /// Description of the failure.
-        message: String,
-    },
-}
-
-/// Trait for interacting with a large language model.
-#[async_trait]
-pub trait LlmClient: Send + Sync {
-    /// Send a prompt to the LLM and return the completion text.
-    async fn complete(&self, prompt: &str) -> Result<String, LlmError>;
-}
+use crate::executor::CliExecutor;
 
 #[async_trait]
 impl LlmClient for CliExecutor {

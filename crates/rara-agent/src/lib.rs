@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod config;
 pub mod executor;
+pub mod llm_impl;
 
 pub use backend::{CliBackend, CommandSpec, OutputFormat, PromptMode};
 pub use config::{AgentConfig, ConfigPromptMode};

@@ -6,7 +6,9 @@ license.workspace = true
 description = "LLM backend abstraction and CLI executor"
 
 [dependencies]
+async-trait.workspace = true
 bon.workspace = true
+rara-infra.workspace = true
 serde.workspace = true
 snafu.workspace = true
 tokio.workspace = true

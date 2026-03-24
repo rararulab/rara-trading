@@ -2741,8 +2741,10 @@ dependencies = [
 name = "rara-agent"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bon",
  "nix",
+ "rara-infra",
  "serde",
  "snafu",
  "tempfile",
@@ -2775,6 +2777,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-infra"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "snafu",
+]
+
+[[package]]
 name = "rara-trading"
 version = "0.1.0"
 dependencies = [
@@ -2798,6 +2808,7 @@ dependencies = [
  "rara-agent",
  "rara-domain",
  "rara-event-bus",
+ "rara-infra",
  "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
