@@ -223,9 +223,21 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::*;
+    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::agent::executor::CliExecutor;
     use crate::domain::research::BacktestResult;
-    use crate::infra::llm::MockLlmClient;
     use crate::research::backtester::MockBacktester;
+
+    fn echo_executor(response: &str) -> CliExecutor {
+        CliExecutor::new(CliBackend {
+            command: "printf".to_string(),
+            args: vec![format!("{response}\n")],
+            prompt_mode: PromptMode::Stdin,
+            prompt_flag: None,
+            output_format: OutputFormat::Text,
+            env_vars: vec![],
+        })
+    }
 
     #[tokio::test]
     async fn run_iteration_accepts_good_result() {
@@ -235,10 +247,10 @@ mod tests {
         let trace = Trace::open(trace_dir.path()).unwrap();
         let event_bus = Arc::new(EventBus::open(bus_dir.path()).unwrap());
 
-        let mock_llm = MockLlmClient::new(vec![
-            "momentum crossover\nSMA signals trend".to_owned(),
-            "fn strategy() { buy_on_cross() }".to_owned(),
-        ]);
+        // Both hypothesis generator and strategy coder receive the same output.
+        // The hypothesis generator parses line 1 as text and line 2 as reasoning.
+        // The strategy coder treats the full output as code (acceptable for testing).
+        let executor = echo_executor("momentum crossover\nSMA signals trend");
 
         let good_result = BacktestResult::builder()
             .pnl(Decimal::new(5000, 0))
@@ -250,7 +262,7 @@ mod tests {
 
         let mock_bt = MockBacktester::new(vec![good_result]);
 
-        let loop_ = ResearchLoop::new(mock_llm, mock_bt, trace, event_bus.clone());
+        let loop_ = ResearchLoop::new(executor, mock_bt, trace, event_bus.clone());
 
         let result = loop_.run_iteration("BTC trending").await.unwrap();
 
@@ -275,10 +287,7 @@ mod tests {
         let trace = Trace::open(trace_dir.path()).unwrap();
         let event_bus = Arc::new(EventBus::open(bus_dir.path()).unwrap());
 
-        let mock_llm = MockLlmClient::new(vec![
-            "mean reversion\nPrice reverts to mean".to_owned(),
-            "fn strategy() { sell_on_spike() }".to_owned(),
-        ]);
+        let executor = echo_executor("mean reversion\nPrice reverts to mean");
 
         let bad_result = BacktestResult::builder()
             .pnl(Decimal::new(-2000, 0))
@@ -290,7 +299,7 @@ mod tests {
 
         let mock_bt = MockBacktester::new(vec![bad_result]);
 
-        let loop_ = ResearchLoop::new(mock_llm, mock_bt, trace, event_bus.clone());
+        let loop_ = ResearchLoop::new(executor, mock_bt, trace, event_bus.clone());
 
         let result = loop_.run_iteration("ETH volatile").await.unwrap();
 

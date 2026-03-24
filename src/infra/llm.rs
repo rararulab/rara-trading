@@ -1,7 +1,9 @@
-//! LLM client trait and mock implementation.
+//! LLM client trait and CLI-based implementation.
 
 use async_trait::async_trait;
 use snafu::Snafu;
+
+use crate::agent::executor::CliExecutor;
 
 /// Errors from LLM client operations.
 #[derive(Debug, Snafu)]
@@ -22,29 +24,24 @@ pub trait LlmClient: Send + Sync {
     async fn complete(&self, prompt: &str) -> Result<String, LlmError>;
 }
 
-/// A mock LLM client that returns pre-configured responses for testing.
-#[derive(Clone)]
-pub struct MockLlmClient {
-    responses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-}
-
-impl MockLlmClient {
-    /// Create a new mock client with a queue of responses.
-    pub fn new(responses: Vec<String>) -> Self {
-        Self {
-            responses: std::sync::Arc::new(std::sync::Mutex::new(responses)),
-        }
-    }
-}
-
 #[async_trait]
-impl LlmClient for MockLlmClient {
-    async fn complete(&self, _prompt: &str) -> Result<String, LlmError> {
-        let mut queue = self.responses.lock().expect("mock lock poisoned");
-        if queue.is_empty() {
-            Ok("mock response".to_owned())
+impl LlmClient for CliExecutor {
+    async fn complete(&self, prompt: &str) -> Result<String, LlmError> {
+        let result = self.execute_capture(prompt).await.map_err(|e| {
+            LlmError::RequestFailed {
+                message: e.to_string(),
+            }
+        })?;
+        if result.success {
+            Ok(result.output.trim().to_owned())
         } else {
-            Ok(queue.remove(0))
+            Err(LlmError::RequestFailed {
+                message: format!(
+                    "CLI exited with code {:?}: {}",
+                    result.exit_code,
+                    result.stderr.trim()
+                ),
+            })
         }
     }
 }
