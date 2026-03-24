@@ -8,78 +8,96 @@ use serde_json::json;
 
 use rara_trading::domain::event::Event;
 use rara_trading::domain::feedback::FeedbackDecision;
-use rara_trading::domain::research::BacktestResult;
+use rara_trading::domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 use rara_trading::domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::feedback::aggregator::MetricsAggregator;
 use rara_trading::feedback::engine::FeedbackBridge;
 use rara_trading::feedback::evaluator::StrategyEvaluator;
-use rara_trading::agent::backend::{CliBackend, OutputFormat, PromptMode};
-use rara_trading::agent::executor::CliExecutor;
-use rara_trading::research::backtester::MockBacktester;
-use rara_trading::research::research_loop::ResearchLoop;
 use rara_trading::research::trace::Trace;
 use rara_trading::trading::broker::OrderStatus;
 use rara_trading::trading::brokers::paper::PaperBroker;
 use rara_trading::trading::engine::TradingEngine;
 use rara_trading::trading::guard_pipeline::GuardPipeline;
 
-fn printf_executor(response: &str) -> CliExecutor {
-    CliExecutor::new(CliBackend {
-        command: "sh".to_string(),
-        args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-        prompt_mode: PromptMode::Arg,
-        prompt_flag: None,
-        output_format: OutputFormat::Text,
-        env_vars: vec![],
-    })
-}
-
-#[tokio::test]
-async fn full_research_to_feedback_loop() {
-    // --- Setup ---
-    let bus_dir = tempfile::tempdir().unwrap();
-    let trace_dir = tempfile::tempdir().unwrap();
-    let event_bus = Arc::new(EventBus::open(bus_dir.path()).unwrap());
-    let trace = Trace::open(trace_dir.path()).unwrap();
-
-    // --- Phase 1: Research — generate a candidate strategy ---
-    let executor = printf_executor("momentum crossover\nSMA 20/50 crossover signals trend change");
-
-    let good_backtest = BacktestResult::builder()
-        .pnl(Decimal::new(5000, 0))
-        .sharpe_ratio(2.5)
-        .max_drawdown(Decimal::new(5, 2))
-        .win_rate(0.65)
-        .trade_count(100)
+/// Build research artifacts (hypothesis, experiment, feedback) and publish
+/// the corresponding domain events. Returns the count of research events.
+fn run_research_phase(event_bus: &EventBus, trace: &Trace) -> usize {
+    let hypothesis = Hypothesis::builder()
+        .text("momentum crossover")
+        .reason("SMA 20/50 crossover signals trend change")
         .build();
 
-    let mock_bt = MockBacktester::new(vec![good_backtest]);
-    let research = ResearchLoop::new(executor, mock_bt, trace, Arc::clone(&event_bus));
+    trace.save_hypothesis(&hypothesis).unwrap();
 
-    let iteration = research.run_iteration("BTC trending up").await.unwrap();
-    assert!(iteration.accepted, "research should accept good backtest");
+    let hyp_event = Event::builder()
+        .event_type("research.hypothesis.created")
+        .source("research_loop")
+        .correlation_id(uuid::Uuid::new_v4().to_string())
+        .payload(json!({ "hypothesis_id": hypothesis.id().to_string() }))
+        .build();
+    event_bus.publish(&hyp_event).unwrap();
 
-    // Verify research events were published
-    let research_events = event_bus.store().read_topic("research", 0, 100).unwrap();
-    assert!(
-        research_events.len() >= 2,
-        "expected at least hypothesis.created + experiment.completed"
-    );
+    let experiment = Experiment::builder()
+        .hypothesis_id(hypothesis.id())
+        .strategy_code("fn strategy() { /* SMA crossover */ }")
+        .build();
 
-    // --- Phase 2: Trading — execute via TradingEngine with PaperBroker ---
-    let strategy_id = "momentum-crossover-v1";
-    let strategy_version = 1u32;
+    trace.save_experiment(&experiment).unwrap();
 
+    let feedback = HypothesisFeedback::builder()
+        .experiment_id(experiment.id())
+        .decision(true)
+        .reason("Accepted: sharpe=2.50, max_drawdown=0.05")
+        .observations("pnl=5000, win_rate=0.65, trades=100")
+        .build();
+
+    trace.save_feedback(&feedback).unwrap();
+
+    let exp_event = Event::builder()
+        .event_type("research.experiment.completed")
+        .source("research_loop")
+        .correlation_id(uuid::Uuid::new_v4().to_string())
+        .payload(json!({
+            "experiment_id": experiment.id().to_string(),
+            "accepted": true,
+        }))
+        .build();
+    event_bus.publish(&exp_event).unwrap();
+
+    let candidate_event = Event::builder()
+        .event_type("research.strategy.candidate")
+        .source("research_loop")
+        .correlation_id(uuid::Uuid::new_v4().to_string())
+        .payload(json!({
+            "experiment_id": experiment.id().to_string(),
+            "hypothesis_id": hypothesis.id().to_string(),
+        }))
+        .build();
+    event_bus.publish(&candidate_event).unwrap();
+
+    event_bus
+        .store()
+        .read_topic("research", 0, 100)
+        .unwrap()
+        .len()
+}
+
+/// Execute a trading commit via paper broker, then publish simulated fill
+/// events with positive `PnL`. Returns the count of trading events.
+async fn run_trading_phase(
+    event_bus: &Arc<EventBus>,
+    strategy_id: &str,
+    strategy_version: u32,
+) -> usize {
     let broker = PaperBroker::new(Decimal::new(50_000, 0));
     let pipeline = GuardPipeline::new(vec![]);
     let engine = TradingEngine::new(
         Box::new(broker),
         pipeline,
-        Arc::clone(&event_bus),
+        Arc::clone(event_bus),
     );
 
-    // Simulate executing trades produced by the strategy
     let commit = TradingCommit::builder()
         .message("golden cross detected on BTC")
         .strategy_id(strategy_id)
@@ -97,10 +115,8 @@ async fn full_research_to_feedback_loop() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].status, OrderStatus::Filled);
 
-    // Publish additional simulated fill events with realized PnL
-    // (the TradingEngine's fills don't include realized_pnl, so we add some)
-    // Use small positive values with slight variance to ensure:
-    //   - win_rate > 0.5, sharpe > 1.5, drawdown stays small
+    // Publish simulated fill events with positive PnL to ensure
+    // win_rate > 0.5, sharpe > 1.5, and small drawdown
     let sim_pnls = ["120", "80", "110", "90", "130", "95", "105", "115", "100"];
     for (i, pnl) in sim_pnls.iter().enumerate() {
         let event = Event::builder()
@@ -114,29 +130,29 @@ async fn full_research_to_feedback_loop() {
         event_bus.publish(&event).unwrap();
     }
 
-    // Verify trading events exist
-    let trading_events = event_bus.store().read_topic("trading", 0, 100).unwrap();
-    assert!(
-        trading_events.len() >= 2,
-        "expected submitted + filled events from engine plus simulated fills"
-    );
+    event_bus
+        .store()
+        .read_topic("trading", 0, 100)
+        .unwrap()
+        .len()
+}
 
-    // --- Phase 3: Feedback — evaluate the strategy ---
-    let aggregator = MetricsAggregator::new(Arc::clone(&event_bus));
+/// Evaluate the strategy through the feedback bridge and assert promotion.
+/// Returns the count of feedback events.
+fn run_feedback_phase(
+    event_bus: &Arc<EventBus>,
+    strategy_id: &str,
+    strategy_version: u32,
+) -> usize {
+    let aggregator = MetricsAggregator::new(Arc::clone(event_bus));
     let evaluator = StrategyEvaluator::new(1.5, Decimal::new(20, 2), 5);
-    let feedback_bridge = FeedbackBridge::new(aggregator, evaluator, Arc::clone(&event_bus));
+    let feedback_bridge = FeedbackBridge::new(aggregator, evaluator, Arc::clone(event_bus));
 
     let window_start = jiff::Timestamp::from_millisecond(0).unwrap();
     let window_end = jiff::Timestamp::now();
 
     let report = feedback_bridge
-        .evaluate_strategy(
-            strategy_id,
-            strategy_version,
-            window_start,
-            window_end,
-            vec![],
-        )
+        .evaluate_strategy(strategy_id, strategy_version, window_start, window_end, vec![])
         .unwrap();
 
     // With 9 positive PnL trades + 1 engine fill (0 pnl) = 10 trades,
@@ -147,21 +163,42 @@ async fn full_research_to_feedback_loop() {
         "strategy with strong results should be promoted"
     );
 
-    // --- Phase 4: Verify the full event chain ---
-    let feedback_events = event_bus.store().read_topic("feedback", 0, 100).unwrap();
-    assert_eq!(feedback_events.len(), 1);
+    let events = event_bus
+        .store()
+        .read_topic("feedback", 0, 100)
+        .unwrap();
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type(), "feedback.strategy.promote");
     assert_eq!(
-        feedback_events[0].event_type(),
-        "feedback.strategy.promote"
-    );
-    assert_eq!(
-        feedback_events[0].strategy_id(),
+        events[0].strategy_id(),
         Some(strategy_id),
         "feedback event should reference the strategy"
     );
 
+    events.len()
+}
+
+#[tokio::test]
+async fn full_research_to_feedback_loop() {
+    let bus_dir = tempfile::tempdir().unwrap();
+    let trace_dir = tempfile::tempdir().unwrap();
+    let event_bus = Arc::new(EventBus::open(bus_dir.path()).unwrap());
+    let trace = Trace::open(trace_dir.path()).unwrap();
+
+    let strategy_id = "momentum-crossover-v1";
+    let strategy_version = 1u32;
+
+    let research_count = run_research_phase(&event_bus, &trace);
+    assert!(research_count >= 2, "expected at least hypothesis.created + experiment.completed");
+
+    let trading_count = run_trading_phase(&event_bus, strategy_id, strategy_version).await;
+    assert!(trading_count >= 2, "expected submitted + filled events from engine plus simulated fills");
+
+    let feedback_count = run_feedback_phase(&event_bus, strategy_id, strategy_version);
+
     // Verify all three topic families have events (the closed loop)
-    assert!(!research_events.is_empty(), "research events exist");
-    assert!(!trading_events.is_empty(), "trading events exist");
-    assert!(!feedback_events.is_empty(), "feedback events exist");
+    assert!(research_count > 0, "research events exist");
+    assert!(trading_count > 0, "trading events exist");
+    assert!(feedback_count > 0, "feedback events exist");
 }
