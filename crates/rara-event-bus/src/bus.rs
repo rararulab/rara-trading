@@ -5,9 +5,9 @@ use std::path::Path;
 
 use tokio::sync::broadcast;
 
-use crate::domain::event::Event;
+use rara_domain::event::Event;
 
-use super::store::{EventStore, Result};
+use crate::store::{EventStore, Result};
 
 /// A hybrid push+pull event bus.
 ///

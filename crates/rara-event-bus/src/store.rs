@@ -4,7 +4,7 @@ use std::path::Path;
 
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::event::Event;
+use rara_domain::event::Event;
 
 /// Errors that can occur in the event store.
 #[derive(Debug, Snafu)]

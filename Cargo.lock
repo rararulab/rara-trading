@@ -2750,6 +2750,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-event-bus"
+version = "0.1.0"
+dependencies = [
+ "rara-domain",
+ "serde_json",
+ "sled",
+ "snafu",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rara-trading"
 version = "0.1.0"
 dependencies = [
@@ -2771,6 +2783,7 @@ dependencies = [
  "nix",
  "predicates",
  "rara-domain",
+ "rara-event-bus",
  "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
