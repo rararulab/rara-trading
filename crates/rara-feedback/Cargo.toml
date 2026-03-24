@@ -1,0 +1,25 @@
+[package]
+name = "rara-feedback"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Feedback bridge: strategy evaluation and lifecycle decisions"
+
+[dependencies]
+rara-domain.workspace = true
+rara-event-bus.workspace = true
+bon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+rust_decimal.workspace = true
+uuid.workspace = true
+jiff.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rust_decimal_macros = "1"
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "rara-sentinel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Market surveillance and black swan detection"
+
+[dependencies]
+rara-domain.workspace = true
+rara-event-bus.workspace = true
+rara-infra.workspace = true
+async-trait.workspace = true
+bon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+uuid.workspace = true
+jiff.workspace = true
+tracing.workspace = true
+feed-rs = "2"
+reqwest.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rara-agent.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
