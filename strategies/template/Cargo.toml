@@ -1,0 +1,19 @@
+[package]
+name = "generated-strategy"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rara-strategy-api = { path = "../../crates/rara-strategy-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
