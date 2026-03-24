@@ -3,7 +3,7 @@
 
 use rust_decimal::Decimal;
 
-use crate::domain::feedback::{FeedbackDecision, StrategyMetrics};
+use rara_domain::feedback::{FeedbackDecision, StrategyMetrics};
 
 /// Evaluates a strategy's performance metrics and sentinel context to produce
 /// a [`FeedbackDecision`] controlling the strategy's lifecycle.

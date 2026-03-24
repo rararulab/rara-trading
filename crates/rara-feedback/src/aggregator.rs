@@ -6,9 +6,9 @@ use std::sync::Arc;
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::feedback::StrategyMetrics;
-use crate::event_bus::bus::EventBus;
-use crate::event_bus::store::StoreError;
+use rara_domain::feedback::StrategyMetrics;
+use rara_event_bus::bus::EventBus;
+use rara_event_bus::store::StoreError;
 
 /// Errors from metrics aggregation.
 #[derive(Debug, Snafu)]
