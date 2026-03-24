@@ -1,1 +1,3 @@
 generated/
+template/target/
+template/Cargo.lock
