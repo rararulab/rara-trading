@@ -1,11 +1,11 @@
-# CLAUDE.md — {{project-name}} Development Guide
+# CLAUDE.md — rara-trading Development Guide
 
 ## Communication
 - 用中文与用户交流
 
 ## Project Identity
 
-{{project-name}} is a CLI tool built in Rust. TODO: describe your project here.
+rara-trading is a CLI tool built in Rust. TODO: describe your project here.
 
 ## Development Workflow
 

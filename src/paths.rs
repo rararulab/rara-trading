@@ -12,7 +12,7 @@ static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Root data directory, resolved in order:
 /// 1. `APP_DATA_DIR` env var (must be non-empty and an absolute path)
-/// 2. `~/.{{project-name}}`
+/// 2. `~/.rara-trading`
 ///
 /// # Panics
 /// Panics if `APP_DATA_DIR` is set but empty or not an absolute path,
@@ -30,7 +30,7 @@ pub fn data_dir() -> &'static Path {
 
         dirs::home_dir()
             .expect("home directory must be resolvable — set APP_DATA_DIR as a fallback")
-            .join(".{{project-name}}")
+            .join(".rara-trading")
     })
 }
 

@@ -5,7 +5,7 @@ use predicates::prelude::predicate;
 use tempfile::TempDir;
 
 fn cmd() -> Command {
-    Command::cargo_bin("{{project-name}}").expect("binary should exist")
+    Command::cargo_bin("rara-trading").expect("binary should exist")
 }
 
 #[test]

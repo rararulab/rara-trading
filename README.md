@@ -1,4 +1,4 @@
-# {{project-name}}
+# rara-trading
 
 Opinionated Rust CLI template with batteries included.
 
@@ -9,7 +9,7 @@ Opinionated Rust CLI template with batteries included.
 - **Async runtime**: [tokio](https://docs.rs/tokio) with full features
 - **Config system**: TOML-based with lazy `OnceLock` initialization
 - **HTTP client**: Shared [reqwest](https://docs.rs/reqwest) clients (general + download)
-- **Path management**: Centralized `~/.{{project-name}}` data directory
+- **Path management**: Centralized `~/.rara-trading` data directory
 - **Logging**: [tracing](https://docs.rs/tracing) with env-filter
 - **Builder pattern**: [bon](https://docs.rs/bon) for struct construction
 
@@ -26,7 +26,7 @@ Opinionated Rust CLI template with batteries included.
 ## Quick Start
 
 1. Use this template to create a new repo
-2. Find and replace `{{project-name}}` with your project name
+2. Find and replace `rara-trading` with your project name
 3. Update `CLAUDE.md` with your project description
 4. Run `just setup-hooks` to install pre-commit hooks
 5. Start building!
@@ -50,11 +50,11 @@ Invoke local AI agent CLIs without implementing LLM API integration. The agent m
 
 ```bash
 # Use default backend (claude)
-{{project-name}} agent "explain this codebase"
+rara-trading agent "explain this codebase"
 
 # Override backend
-{{project-name}} agent --backend codex "refactor main.rs"
-{{project-name}} agent --backend gemini "summarize README"
+rara-trading agent --backend codex "refactor main.rs"
+rara-trading agent --backend gemini "summarize README"
 ```
 
 ### Supported Backends
@@ -74,7 +74,7 @@ Invoke local AI agent CLIs without implementing LLM API integration. The agent m
 
 ### Configuration
 
-Config file at `~/.{{project-name}}/config.toml`:
+Config file at `~/.rara-trading/config.toml`:
 
 ```toml
 [agent]
@@ -88,8 +88,8 @@ backend = "claude"          # Backend name or "custom"
 Override via CLI:
 
 ```bash
-{{project-name}} config set agent.backend gemini
-{{project-name}} config set agent.idle_timeout_secs 60
+rara-trading config set agent.backend gemini
+rara-trading config set agent.idle_timeout_secs 60
 ```
 
 ## Claude Code Integration

@@ -1,9 +1,9 @@
 use clap::Parser;
 use snafu::ResultExt;
 
-use {{crate_name}}::app_config;
-use {{crate_name}}::cli::{Cli, Command, ConfigAction};
-use {{crate_name}}::error::{self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, IoSnafu};
+use rara_trading::app_config;
+use rara_trading::cli::{Cli, Command, ConfigAction};
+use rara_trading::error::{self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, IoSnafu};
 
 #[tokio::main]
 async fn main() {
@@ -70,7 +70,7 @@ async fn run() -> error::Result<()> {
             );
         }
         Command::Agent { prompt, backend } => {
-            use {{crate_name}}::agent::{CliBackend, CliExecutor};
+            use rara_trading::agent::{CliBackend, CliExecutor};
 
             let cfg = app_config::load();
             let mut agent_cfg = cfg.agent.clone();

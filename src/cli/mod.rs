@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 
 /// Your CLI application — update this doc comment.
 #[derive(Parser)]
-#[command(name = "{{project-name}}", version)]
+#[command(name = "rara-trading", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
