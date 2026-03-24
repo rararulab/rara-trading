@@ -1,0 +1,220 @@
+//! Trading engine orchestrating guard checks, broker execution, and event
+//! publishing.
+
+use std::sync::Arc;
+
+use serde_json::json;
+use snafu::Snafu;
+
+use crate::domain::event::Event;
+use crate::domain::trading::TradingCommit;
+use crate::event_bus::bus::EventBus;
+use crate::trading::binding::StrategyBinding;
+use crate::trading::broker::{Broker, OrderResult, OrderStatus};
+use crate::trading::guard_pipeline::GuardPipeline;
+use crate::trading::guards::GuardResult;
+
+/// Errors that can occur during trading engine operations.
+#[derive(Debug, Snafu)]
+#[snafu(visibility(pub))]
+pub enum EngineError {
+    /// A guard rejected the trading commit.
+    #[snafu(display("guard rejected: {reason}"))]
+    GuardRejected {
+        /// Reason the guard rejected the commit.
+        reason: String,
+    },
+    /// The broker returned an error.
+    #[snafu(display("broker error: {source}"))]
+    Broker {
+        /// Underlying broker error.
+        source: crate::trading::broker::BrokerError,
+    },
+    /// Failed to publish an event.
+    #[snafu(display("event publish error: {message}"))]
+    EventPublish {
+        /// Description of the failure.
+        message: String,
+    },
+}
+
+/// Result type for trading engine operations.
+pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Orchestrates guard checks, broker execution, and event publishing for
+/// trading commits.
+pub struct TradingEngine {
+    /// Broker for order execution.
+    broker: Box<dyn Broker>,
+    /// Pre-trade risk guard pipeline.
+    guard_pipeline: GuardPipeline,
+    /// Active strategy bindings.
+    bindings: Vec<StrategyBinding>,
+    /// Event bus for publishing trading events.
+    event_bus: Arc<EventBus>,
+}
+
+impl TradingEngine {
+    /// Create a new trading engine.
+    pub fn new(
+        broker: Box<dyn Broker>,
+        guard_pipeline: GuardPipeline,
+        event_bus: Arc<EventBus>,
+    ) -> Self {
+        Self {
+            broker,
+            guard_pipeline,
+            bindings: Vec::new(),
+            event_bus,
+        }
+    }
+
+    /// Register a strategy binding.
+    pub fn add_binding(&mut self, binding: StrategyBinding) {
+        self.bindings.push(binding);
+    }
+
+    /// Execute a trading commit: run guards, push to broker, publish events.
+    pub async fn execute_commit(&self, commit: TradingCommit) -> Result<Vec<OrderResult>> {
+        // Run guard pipeline
+        let account = self
+            .broker
+            .account_info()
+            .await
+            .map_err(|e| EngineError::Broker { source: e })?;
+
+        if let GuardResult::Reject { reason } = self.guard_pipeline.run(&commit, &account).await {
+            return Err(EngineError::GuardRejected { reason });
+        }
+
+        // Publish submitted events
+        for action in commit.actions() {
+            let event = Event::builder()
+                .event_type("trading.order.submitted")
+                .source("trading-engine")
+                .correlation_id(commit.hash())
+                .strategy_id(commit.strategy_id().to_string())
+                .payload(json!({
+                    "contract_id": action.contract_id(),
+                    "side": action.side(),
+                    "quantity": action.quantity().to_string(),
+                }))
+                .build();
+
+            self.event_bus
+                .publish(&event)
+                .map_err(|e| EngineError::EventPublish {
+                    message: e.to_string(),
+                })?;
+        }
+
+        // Execute via broker
+        let results = self
+            .broker
+            .push(commit.actions())
+            .await
+            .map_err(|e| EngineError::Broker { source: e })?;
+
+        // Publish outcome events
+        for result in &results {
+            let event_type = match result.status {
+                OrderStatus::Filled => "trading.order.filled",
+                OrderStatus::Rejected => "trading.order.rejected",
+                _ => "trading.order.updated",
+            };
+
+            let event = Event::builder()
+                .event_type(event_type)
+                .source("trading-engine")
+                .correlation_id(commit.hash())
+                .strategy_id(commit.strategy_id().to_string())
+                .payload(json!({
+                    "order_id": result.order_id,
+                    "contract_id": result.contract_id,
+                    "status": result.status,
+                }))
+                .build();
+
+            self.event_bus
+                .publish(&event)
+                .map_err(|e| EngineError::EventPublish {
+                    message: e.to_string(),
+                })?;
+        }
+
+        Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal::Decimal;
+
+    use crate::domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
+    use crate::trading::broker::OrderStatus;
+    use crate::trading::brokers::mock::MockBroker;
+    use crate::trading::guards::symbol_whitelist::SymbolWhitelist;
+
+    use super::*;
+
+    fn test_commit(contract_id: &str) -> TradingCommit {
+        TradingCommit::builder()
+            .message("test")
+            .strategy_id("strat-1")
+            .strategy_version(1)
+            .actions(vec![StagedAction::builder()
+                .action_type(ActionType::PlaceOrder)
+                .contract_id(contract_id)
+                .side(Side::Buy)
+                .quantity(Decimal::ONE)
+                .order_type(OrderType::Market)
+                .build()])
+            .build()
+    }
+
+    #[tokio::test]
+    async fn execute_commit_fills_and_publishes_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
+        let mut rx = event_bus.subscribe();
+
+        let broker = MockBroker::new(Decimal::new(50_000, 0));
+        let pipeline = GuardPipeline::new(vec![]);
+
+        let engine = TradingEngine::new(Box::new(broker), pipeline, event_bus);
+
+        let results = engine
+            .execute_commit(test_commit("BTC-USD"))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, OrderStatus::Filled);
+
+        // Should have received submitted + filled events
+        let seq1 = rx.recv().await.unwrap();
+        let seq2 = rx.recv().await.unwrap();
+        assert!(seq2 > seq1);
+    }
+
+    #[tokio::test]
+    async fn execute_commit_rejects_on_guard_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
+
+        let broker = MockBroker::new(Decimal::new(50_000, 0));
+        // Only allow ETH-USD, so BTC-USD will be rejected
+        let pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![
+            "ETH-USD".to_string(),
+        ]))]);
+
+        let engine = TradingEngine::new(Box::new(broker), pipeline, event_bus);
+
+        let err = engine
+            .execute_commit(test_commit("BTC-USD"))
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("guard rejected"));
+    }
+}
