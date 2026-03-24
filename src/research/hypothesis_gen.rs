@@ -112,8 +112,20 @@ impl<L: LlmClient> HypothesisGenerator<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::agent::executor::CliExecutor;
     use crate::domain::research::Experiment;
-    use crate::infra::llm::MockLlmClient;
+
+    fn echo_executor(response: &str) -> CliExecutor {
+        CliExecutor::new(CliBackend {
+            command: "printf".to_string(),
+            args: vec![format!("{response}\n")],
+            prompt_mode: PromptMode::Stdin,
+            prompt_flag: None,
+            output_format: OutputFormat::Text,
+            env_vars: vec![],
+        })
+    }
 
     #[tokio::test]
     async fn generate_links_parent_to_best_experiment() {
@@ -141,8 +153,8 @@ mod tests {
             .build();
         trace.save_feedback(&fb).unwrap();
 
-        let mock = MockLlmClient::new(vec!["momentum crossover\nSMA cross signals trend reversal".to_owned()]);
-        let generator = HypothesisGenerator::new(mock);
+        let executor = echo_executor("momentum crossover\nSMA cross signals trend reversal");
+        let generator = HypothesisGenerator::new(executor);
 
         let h = generator.generate(&trace, "BTC market").await.unwrap();
         assert_eq!(h.text(), "momentum crossover");

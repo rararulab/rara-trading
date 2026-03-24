@@ -34,7 +34,7 @@ pub struct ExecutionResult {
 }
 
 /// Executor for running prompts through CLI backends.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CliExecutor {
     backend: CliBackend,
 }

@@ -103,11 +103,23 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::infra::llm::MockLlmClient;
+    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::agent::executor::CliExecutor;
     use crate::sentinel::source::RawSignal;
     use crate::sentinel::sources::mock::MockDataSource;
 
     use super::*;
+
+    fn echo_executor(response: &str) -> CliExecutor {
+        CliExecutor::new(CliBackend {
+            command: "printf".to_string(),
+            args: vec![format!("{response}\n")],
+            prompt_mode: PromptMode::Stdin,
+            prompt_flag: None,
+            output_format: OutputFormat::Text,
+            env_vars: vec![],
+        })
+    }
 
     #[tokio::test]
     async fn poll_and_analyze_publishes_critical_signals() {
@@ -123,15 +135,11 @@ mod tests {
 
         let source = MockDataSource::new("mock-news", vec![raw]);
 
-        let llm = MockLlmClient::new(vec![
-            "SEVERITY: Critical\n\
-             TYPE: BlackSwan\n\
-             CONTRACTS: BTC-PERP\n\
-             SUMMARY: Exchange hack detected"
-                .to_owned(),
-        ]);
+        let executor = echo_executor(
+            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP\nSUMMARY: Exchange hack detected",
+        );
 
-        let analyzer = SignalAnalyzer::new(llm);
+        let analyzer = SignalAnalyzer::new(executor);
         let engine = SentinelEngine::new(vec![Box::new(source)], analyzer, event_bus.clone());
 
         let signals = engine.poll_and_analyze().await.unwrap();
@@ -158,15 +166,11 @@ mod tests {
 
         let source = MockDataSource::new("mock-news", vec![raw]);
 
-        let llm = MockLlmClient::new(vec![
-            "SEVERITY: None\n\
-             TYPE: SentimentShift\n\
-             CONTRACTS: \n\
-             SUMMARY: No actionable signal"
-                .to_owned(),
-        ]);
+        let executor = echo_executor(
+            "SEVERITY: None\nTYPE: SentimentShift\nCONTRACTS: \nSUMMARY: No actionable signal",
+        );
 
-        let analyzer = SignalAnalyzer::new(llm);
+        let analyzer = SignalAnalyzer::new(executor);
         let engine = SentinelEngine::new(vec![Box::new(source)], analyzer, event_bus.clone());
 
         let signals = engine.poll_and_analyze().await.unwrap();

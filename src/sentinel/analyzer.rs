@@ -145,9 +145,21 @@ fn parse_signal_type(s: &str) -> Result<SignalType, AnalyzerError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::llm::MockLlmClient;
+    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::agent::executor::CliExecutor;
 
     use super::*;
+
+    fn echo_executor(response: &str) -> CliExecutor {
+        CliExecutor::new(CliBackend {
+            command: "printf".to_string(),
+            args: vec![format!("{response}\n")],
+            prompt_mode: PromptMode::Stdin,
+            prompt_flag: None,
+            output_format: OutputFormat::Text,
+            env_vars: vec![],
+        })
+    }
 
     fn make_raw_signal() -> RawSignal {
         RawSignal {
@@ -160,14 +172,10 @@ mod tests {
 
     #[tokio::test]
     async fn parses_critical_signal_correctly() {
-        let llm = MockLlmClient::new(vec![
-            "SEVERITY: Critical\n\
-             TYPE: BlackSwan\n\
-             CONTRACTS: BTC-PERP,ETH-PERP\n\
-             SUMMARY: Major exchange hack detected"
-                .to_owned(),
-        ]);
-        let analyzer = SignalAnalyzer::new(llm);
+        let executor = echo_executor(
+            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP,ETH-PERP\nSUMMARY: Major exchange hack detected",
+        );
+        let analyzer = SignalAnalyzer::new(executor);
         let raw = make_raw_signal();
 
         let result = analyzer.analyze(&raw).await.expect("analysis should succeed");
@@ -180,14 +188,10 @@ mod tests {
 
     #[tokio::test]
     async fn none_severity_returns_none() {
-        let llm = MockLlmClient::new(vec![
-            "SEVERITY: None\n\
-             TYPE: SentimentShift\n\
-             CONTRACTS: \n\
-             SUMMARY: No actionable signal"
-                .to_owned(),
-        ]);
-        let analyzer = SignalAnalyzer::new(llm);
+        let executor = echo_executor(
+            "SEVERITY: None\nTYPE: SentimentShift\nCONTRACTS: \nSUMMARY: No actionable signal",
+        );
+        let analyzer = SignalAnalyzer::new(executor);
         let raw = make_raw_signal();
 
         let result = analyzer.analyze(&raw).await.expect("analysis should succeed");

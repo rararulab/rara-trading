@@ -14,7 +14,8 @@ use rara_trading::event_bus::bus::EventBus;
 use rara_trading::feedback::aggregator::MetricsAggregator;
 use rara_trading::feedback::engine::FeedbackBridge;
 use rara_trading::feedback::evaluator::StrategyEvaluator;
-use rara_trading::infra::llm::MockLlmClient;
+use rara_trading::agent::backend::{CliBackend, OutputFormat, PromptMode};
+use rara_trading::agent::executor::CliExecutor;
 use rara_trading::research::backtester::MockBacktester;
 use rara_trading::research::research_loop::ResearchLoop;
 use rara_trading::research::trace::Trace;
@@ -22,6 +23,17 @@ use rara_trading::trading::broker::OrderStatus;
 use rara_trading::trading::brokers::mock::MockBroker;
 use rara_trading::trading::engine::TradingEngine;
 use rara_trading::trading::guard_pipeline::GuardPipeline;
+
+fn printf_executor(response: &str) -> CliExecutor {
+    CliExecutor::new(CliBackend {
+        command: "printf".to_string(),
+        args: vec![format!("{response}\n")],
+        prompt_mode: PromptMode::Stdin,
+        prompt_flag: None,
+        output_format: OutputFormat::Text,
+        env_vars: vec![],
+    })
+}
 
 #[tokio::test]
 async fn full_research_to_feedback_loop() {
@@ -32,10 +44,7 @@ async fn full_research_to_feedback_loop() {
     let trace = Trace::open(trace_dir.path()).unwrap();
 
     // --- Phase 1: Research — generate a candidate strategy ---
-    let mock_llm = MockLlmClient::new(vec![
-        "momentum crossover\nSMA 20/50 crossover signals trend change".to_owned(),
-        "fn strategy() { buy_on_golden_cross() }".to_owned(),
-    ]);
+    let executor = printf_executor("momentum crossover\nSMA 20/50 crossover signals trend change");
 
     let good_backtest = BacktestResult::builder()
         .pnl(Decimal::new(5000, 0))
@@ -46,7 +55,7 @@ async fn full_research_to_feedback_loop() {
         .build();
 
     let mock_bt = MockBacktester::new(vec![good_backtest]);
-    let research = ResearchLoop::new(mock_llm, mock_bt, trace, Arc::clone(&event_bus));
+    let research = ResearchLoop::new(executor, mock_bt, trace, Arc::clone(&event_bus));
 
     let iteration = research.run_iteration("BTC trending up").await.unwrap();
     assert!(iteration.accepted, "research should accept good backtest");

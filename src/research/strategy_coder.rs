@@ -54,12 +54,24 @@ impl<L: LlmClient> StrategyCoder<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::llm::MockLlmClient;
+    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::agent::executor::CliExecutor;
+
+    fn echo_executor(response: &str) -> CliExecutor {
+        CliExecutor::new(CliBackend {
+            command: "printf".to_string(),
+            args: vec![format!("{response}\n")],
+            prompt_mode: PromptMode::Stdin,
+            prompt_flag: None,
+            output_format: OutputFormat::Text,
+            env_vars: vec![],
+        })
+    }
 
     #[tokio::test]
     async fn generate_code_returns_llm_response() {
-        let mock = MockLlmClient::new(vec!["fn strategy() { buy() }".to_owned()]);
-        let coder = StrategyCoder::new(mock);
+        let executor = echo_executor("fn strategy() { buy() }");
+        let coder = StrategyCoder::new(executor);
 
         let h = Hypothesis::builder()
             .text("momentum works")
