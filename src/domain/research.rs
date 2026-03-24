@@ -80,9 +80,24 @@ impl Experiment {
         self.id
     }
 
+    /// Returns the hypothesis this experiment tests.
+    pub const fn hypothesis_id(&self) -> Uuid {
+        self.hypothesis_id
+    }
+
     /// Returns the current experiment status.
     pub const fn status(&self) -> ExperimentStatus {
         self.status
+    }
+
+    /// Returns the strategy source code.
+    pub fn strategy_code(&self) -> &str {
+        &self.strategy_code
+    }
+
+    /// Returns the backtest result, if available.
+    pub const fn backtest_result(&self) -> Option<&BacktestResult> {
+        self.backtest_result.as_ref()
     }
 }
 
@@ -156,5 +171,15 @@ impl HypothesisFeedback {
     /// Returns the reasoning behind the decision.
     pub fn reason(&self) -> &str {
         &self.reason
+    }
+
+    /// Returns the observations recorded during evaluation.
+    pub fn observations(&self) -> &str {
+        &self.observations
+    }
+
+    /// Returns an optional hint for generating the next hypothesis.
+    pub fn new_hypothesis_hint(&self) -> Option<&str> {
+        self.new_hypothesis_hint.as_deref()
     }
 }
