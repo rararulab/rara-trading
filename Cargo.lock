@@ -2777,11 +2777,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-feedback"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "jiff",
+ "rara-domain",
+ "rara-event-bus",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "rara-infra"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "snafu",
+]
+
+[[package]]
+name = "rara-sentinel"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bon",
+ "feed-rs",
+ "jiff",
+ "rara-agent",
+ "rara-domain",
+ "rara-event-bus",
+ "rara-infra",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2808,7 +2848,9 @@ dependencies = [
  "rara-agent",
  "rara-domain",
  "rara-event-bus",
+ "rara-feedback",
  "rara-infra",
+ "rara-sentinel",
  "rara-trading-engine",
  "reqwest 0.13.2",
  "rust_decimal",

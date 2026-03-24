@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use crate::sentinel::source::{DataSource, RawSignal, SourceError};
+use crate::source::{DataSource, RawSignal, SourceError};
 
 /// Data source that receives signals pushed via a channel.
 /// Useful for webhook endpoints or API-push integrations.

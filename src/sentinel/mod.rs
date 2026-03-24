@@ -1,6 +1,3 @@
-//! Sentinel module — market surveillance and black swan detection.
+//! Sentinel module — re-exports from `rara-sentinel` crate.
 
-pub mod analyzer;
-pub mod engine;
-pub mod source;
-pub mod sources;
+pub use rara_sentinel::*;

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bon::Builder;
 
-use crate::sentinel::source::{DataSource, RawSignal, SourceError};
+use crate::source::{DataSource, RawSignal, SourceError};
 
 /// Data source that polls an RSS or Atom feed for news signals.
 #[derive(Builder)]

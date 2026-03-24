@@ -3,9 +3,9 @@
 
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
-use crate::infra::llm::LlmClient;
-use crate::sentinel::source::RawSignal;
+use rara_domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
+use rara_infra::llm::LlmClient;
+use crate::source::RawSignal;
 
 /// Errors that can occur during signal analysis.
 #[derive(Debug, Snafu)]
@@ -15,7 +15,7 @@ pub enum AnalyzerError {
     #[snafu(display("LLM error: {source}"))]
     Llm {
         /// The underlying LLM error.
-        source: crate::infra::llm::LlmError,
+        source: rara_infra::llm::LlmError,
     },
     /// The LLM response could not be parsed.
     #[snafu(display("parse error: {message}"))]
@@ -145,8 +145,8 @@ fn parse_signal_type(s: &str) -> Result<SignalType, AnalyzerError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use crate::agent::executor::CliExecutor;
+    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use rara_agent::executor::CliExecutor;
 
     use super::*;
 

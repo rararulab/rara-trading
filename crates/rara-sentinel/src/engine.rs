@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use snafu::{ResultExt, Snafu};
 
-use crate::domain::event::Event;
-use crate::domain::sentinel::SentinelSignal;
-use crate::event_bus::bus::EventBus;
-use crate::infra::llm::LlmClient;
-use crate::sentinel::analyzer::{AnalyzerError, SignalAnalyzer};
-use crate::sentinel::source::{DataSource, SourceError};
+use rara_domain::event::Event;
+use rara_domain::sentinel::SentinelSignal;
+use rara_event_bus::bus::EventBus;
+use rara_infra::llm::LlmClient;
+use crate::analyzer::{AnalyzerError, SignalAnalyzer};
+use crate::source::{DataSource, SourceError};
 
 /// Errors that can occur in the sentinel engine.
 #[derive(Debug, Snafu)]
@@ -34,7 +34,7 @@ pub enum SentinelError {
     #[snafu(display("event bus error: {source}"))]
     EventBus {
         /// The underlying store error.
-        source: crate::event_bus::store::StoreError,
+        source: rara_event_bus::store::StoreError,
     },
 }
 
@@ -103,10 +103,10 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use crate::agent::executor::CliExecutor;
-    use crate::sentinel::source::RawSignal;
-    use crate::sentinel::sources::webhook::WebhookDataSource;
+    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use rara_agent::executor::CliExecutor;
+    use crate::source::RawSignal;
+    use crate::sources::webhook::WebhookDataSource;
 
     use super::*;
 
