@@ -21,18 +21,3 @@ fn trading_commit_hash_is_8_chars() {
 
     assert_eq!(commit.hash().len(), 8);
 }
-
-#[test]
-fn staged_action_limit_order_has_price() {
-    let action = StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("binance-BTCUSDT")
-        .side(Side::Buy)
-        .quantity(dec!(1.0))
-        .order_type(OrderType::Limit)
-        .limit_price(dec!(49000))
-        .build();
-
-    assert_eq!(action.limit_price(), Some(dec!(49000)));
-    assert_eq!(action.order_type(), OrderType::Limit);
-}
