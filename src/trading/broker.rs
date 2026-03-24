@@ -96,6 +96,30 @@ pub enum BrokerError {
         /// Reason for rejection.
         message: String,
     },
+    /// Authentication failed.
+    #[snafu(display("authentication error: {message}"))]
+    Authentication {
+        /// Description of the authentication failure.
+        message: String,
+    },
+    /// Rate limit exceeded.
+    #[snafu(display("rate limit exceeded: {message}"))]
+    RateLimit {
+        /// Description of the rate limit error.
+        message: String,
+    },
+    /// Exchange returned an unexpected response.
+    #[snafu(display("exchange error: {message}"))]
+    Exchange {
+        /// Description of the exchange error.
+        message: String,
+    },
+    /// Unsupported operation for the current action type.
+    #[snafu(display("unsupported action: {message}"))]
+    UnsupportedAction {
+        /// Description of the unsupported action.
+        message: String,
+    },
 }
 
 /// Abstraction over a broker that can execute orders and report positions.
