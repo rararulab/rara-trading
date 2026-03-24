@@ -9,7 +9,7 @@ use std::io::Write;
 use snafu::Snafu;
 use tempfile::NamedTempFile;
 
-use super::config::AgentConfig;
+use crate::config::AgentConfig;
 
 /// Module-level result type.
 pub type Result<T> = std::result::Result<T, BackendError>;
@@ -485,8 +485,8 @@ impl CliBackend {
             .clone()
             .ok_or(BackendError::CustomBackendRequiresCommand)?;
         let prompt_mode = match config.prompt_mode {
-            super::config::ConfigPromptMode::Stdin => PromptMode::Stdin,
-            super::config::ConfigPromptMode::Arg => PromptMode::Arg,
+            crate::config::ConfigPromptMode::Stdin => PromptMode::Stdin,
+            crate::config::ConfigPromptMode::Arg => PromptMode::Arg,
         };
 
         Ok(Self {

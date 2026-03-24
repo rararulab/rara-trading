@@ -1,13 +1,12 @@
 //! Agent backend for invoking local AI agent CLIs.
 //!
-//! This module provides a CLI-agnostic execution layer that can invoke
-//! various agent CLIs (Claude, Kiro, Gemini, Codex, etc.) with prompts
-//! and collect their output. Ported from ralph-orchestrator.
+//! Re-exports from the `rara-agent` crate.
 
-pub mod backend;
-pub mod config;
-pub mod executor;
+pub use rara_agent::backend;
+pub use rara_agent::config;
+pub use rara_agent::executor;
 
-pub use backend::{CliBackend, CommandSpec, OutputFormat, PromptMode};
-pub use config::{AgentConfig, ConfigPromptMode};
-pub use executor::{CliExecutor, ExecutionResult};
+pub use rara_agent::{
+    AgentConfig, CliBackend, CliExecutor, CommandSpec, ConfigPromptMode, ExecutionResult,
+    OutputFormat, PromptMode,
+};

@@ -2738,6 +2738,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rara-agent"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "nix",
+ "serde",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rara-domain"
 version = "0.1.0"
 dependencies = [
@@ -2782,6 +2795,7 @@ dependencies = [
  "jiff",
  "nix",
  "predicates",
+ "rara-agent",
  "rara-domain",
  "rara-event-bus",
  "reqwest 0.13.2",

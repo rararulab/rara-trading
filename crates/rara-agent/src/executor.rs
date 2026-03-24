@@ -16,7 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, warn};
 
-use super::backend::{CliBackend, CommandSpec};
+use crate::backend::{CliBackend, CommandSpec};
 
 /// Result of a CLI execution.
 #[derive(Debug)]
@@ -294,7 +294,7 @@ fn join_error_to_io(error: tokio::task::JoinError) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use super::{CliExecutor, Duration};
-    use crate::agent::backend::{CliBackend, OutputFormat, PromptMode};
+    use crate::backend::{CliBackend, OutputFormat, PromptMode};
 
     #[tokio::test]
     async fn test_execute_echo() {
