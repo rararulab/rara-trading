@@ -20,15 +20,15 @@ use rara_trading::research::backtester::MockBacktester;
 use rara_trading::research::research_loop::ResearchLoop;
 use rara_trading::research::trace::Trace;
 use rara_trading::trading::broker::OrderStatus;
-use rara_trading::trading::brokers::mock::MockBroker;
+use rara_trading::trading::brokers::paper::PaperBroker;
 use rara_trading::trading::engine::TradingEngine;
 use rara_trading::trading::guard_pipeline::GuardPipeline;
 
 fn printf_executor(response: &str) -> CliExecutor {
     CliExecutor::new(CliBackend {
-        command: "printf".to_string(),
-        args: vec![format!("{response}\n")],
-        prompt_mode: PromptMode::Stdin,
+        command: "sh".to_string(),
+        args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
+        prompt_mode: PromptMode::Arg,
         prompt_flag: None,
         output_format: OutputFormat::Text,
         env_vars: vec![],
@@ -67,11 +67,11 @@ async fn full_research_to_feedback_loop() {
         "expected at least hypothesis.created + experiment.completed"
     );
 
-    // --- Phase 2: Trading — execute via TradingEngine with MockBroker ---
+    // --- Phase 2: Trading — execute via TradingEngine with PaperBroker ---
     let strategy_id = "momentum-crossover-v1";
     let strategy_version = 1u32;
 
-    let broker = MockBroker::new(Decimal::new(50_000, 0));
+    let broker = PaperBroker::new(Decimal::new(50_000, 0));
     let pipeline = GuardPipeline::new(vec![]);
     let engine = TradingEngine::new(
         Box::new(broker),

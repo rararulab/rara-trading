@@ -3,7 +3,12 @@ all-features = true
 
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # Transitive dependencies from barter-rs / ccxt-rust
+    "RUSTSEC-2025-0057", # fxhash unmaintained
+    "RUSTSEC-2024-0384", # instant unmaintained
+    "RUSTSEC-2024-0436", # paste unmaintained
+]
 
 [licenses]
 version = 2
