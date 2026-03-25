@@ -2,11 +2,23 @@
 
 use std::sync::Arc;
 
+use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
 use rara_domain::event::Event;
 use rara_domain::feedback::{FeedbackDecision, StrategyReport};
+
+/// Event payload published when a feedback decision is made.
+#[derive(Debug, Serialize)]
+struct FeedbackEventPayload<'a> {
+    /// The lifecycle decision.
+    decision: &'a FeedbackDecision,
+    /// Strategy identifier.
+    strategy_id: &'a str,
+    /// Strategy version number.
+    strategy_version: u32,
+}
 use rara_event_bus::bus::EventBus;
 use rara_event_bus::store::StoreError;
 
@@ -111,11 +123,14 @@ impl FeedbackBridge {
             .correlation_id(uuid::Uuid::new_v4().to_string())
             .strategy_id(strategy_id.to_owned())
             .strategy_version(strategy_version)
-            .payload(serde_json::json!({
-                "decision": decision,
-                "strategy_id": strategy_id,
-                "strategy_version": strategy_version,
-            }))
+            .payload(
+                serde_json::to_value(FeedbackEventPayload {
+                    decision: &decision,
+                    strategy_id,
+                    strategy_version,
+                })
+                .expect("FeedbackEventPayload must serialize"),
+            )
             .build();
 
         self.event_bus.publish(&event).context(EventBusSnafu)?;

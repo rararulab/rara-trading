@@ -3,11 +3,33 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
+use serde::Serialize;
 use snafu::Snafu;
 
 use rara_domain::event::Event;
-use rara_domain::trading::TradingCommit;
+use rara_domain::trading::{Side, TradingCommit};
+
+/// Event payload for an order submission.
+#[derive(Debug, Serialize)]
+struct OrderSubmittedPayload<'a> {
+    /// Contract identifier.
+    contract_id: &'a str,
+    /// Order side (buy/sell).
+    side: &'a Side,
+    /// Quantity as decimal string.
+    quantity: String,
+}
+
+/// Event payload for an order outcome.
+#[derive(Debug, Serialize)]
+struct OrderOutcomePayload<'a> {
+    /// Broker-assigned order identifier.
+    order_id: &'a str,
+    /// Contract identifier.
+    contract_id: &'a str,
+    /// Order status.
+    status: &'a OrderStatus,
+}
 use rara_event_bus::bus::EventBus;
 use crate::binding::StrategyBinding;
 use crate::broker::{Broker, OrderResult, OrderStatus};
@@ -94,11 +116,14 @@ impl TradingEngine {
                 .source("trading-engine")
                 .correlation_id(&commit.hash)
                 .strategy_id(commit.strategy_id.clone())
-                .payload(json!({
-                    "contract_id": action.contract_id,
-                    "side": action.side,
-                    "quantity": action.quantity.to_string(),
-                }))
+                .payload(
+                    serde_json::to_value(OrderSubmittedPayload {
+                        contract_id: &action.contract_id,
+                        side: &action.side,
+                        quantity: action.quantity.to_string(),
+                    })
+                    .expect("OrderSubmittedPayload must serialize"),
+                )
                 .build();
 
             self.event_bus
@@ -128,11 +153,14 @@ impl TradingEngine {
                 .source("trading-engine")
                 .correlation_id(&commit.hash)
                 .strategy_id(commit.strategy_id.clone())
-                .payload(json!({
-                    "order_id": result.order_id,
-                    "contract_id": result.contract_id,
-                    "status": result.status,
-                }))
+                .payload(
+                    serde_json::to_value(OrderOutcomePayload {
+                        order_id: &result.order_id,
+                        contract_id: &result.contract_id,
+                        status: &result.status,
+                    })
+                    .expect("OrderOutcomePayload must serialize"),
+                )
                 .build();
 
             self.event_bus

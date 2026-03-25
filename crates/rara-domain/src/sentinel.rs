@@ -18,6 +18,8 @@ pub enum SignalType {
     SentimentShift,
     /// Anomalous on-chain activity.
     OnChainAnomaly,
+    /// Political figure social media signal with market correlation.
+    PoliticalSignal,
 }
 
 /// Where the signal was detected.
@@ -31,6 +33,8 @@ pub enum SignalSource {
     OnChain,
     /// Price/volume action.
     PriceAction,
+    /// Trump Code signal analysis system.
+    TrumpCode,
 }
 
 /// Severity level of a sentinel signal.

@@ -13,6 +13,30 @@ use rara_domain::event::Event;
 use rara_event_bus::bus::EventBus;
 use rara_event_bus::store::StoreError;
 
+/// Event payload for a confirmed strategy.
+#[derive(Debug, Serialize)]
+struct ConfirmedPayload {
+    /// Experiment identifier.
+    experiment_id: String,
+    /// Paper trading Sharpe ratio.
+    sharpe_ratio: f64,
+    /// Paper trading maximum drawdown (decimal string).
+    max_drawdown: String,
+}
+
+/// Event payload for a retrain request.
+#[derive(Debug, Serialize)]
+struct RetrainRequestedPayload {
+    /// Experiment identifier.
+    experiment_id: String,
+    /// Reason(s) for requesting retraining.
+    reason: String,
+    /// Paper trading Sharpe ratio.
+    sharpe_ratio: f64,
+    /// Paper trading maximum drawdown (decimal string).
+    max_drawdown: String,
+}
+
 /// Errors from retrain evaluation.
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -153,11 +177,14 @@ impl RetrainChecker {
                 .event_type("feedback.strategy.confirmed")
                 .source("feedback-bridge")
                 .correlation_id(experiment_id.to_string())
-                .payload(serde_json::json!({
-                    "experiment_id": experiment_id.to_string(),
-                    "sharpe_ratio": paper_metrics.sharpe_ratio(),
-                    "max_drawdown": paper_metrics.max_drawdown().to_string(),
-                }))
+                .payload(
+                    serde_json::to_value(ConfirmedPayload {
+                        experiment_id: experiment_id.to_string(),
+                        sharpe_ratio: paper_metrics.sharpe_ratio(),
+                        max_drawdown: paper_metrics.max_drawdown().to_string(),
+                    })
+                    .expect("ConfirmedPayload must serialize"),
+                )
                 .build();
 
             self.event_bus.publish(&event).context(EventBusSnafu)?;
@@ -170,12 +197,15 @@ impl RetrainChecker {
                 .event_type("feedback.research.retrain.requested")
                 .source("feedback-bridge")
                 .correlation_id(experiment_id.to_string())
-                .payload(serde_json::json!({
-                    "experiment_id": experiment_id.to_string(),
-                    "reason": combined_reason,
-                    "sharpe_ratio": paper_metrics.sharpe_ratio(),
-                    "max_drawdown": paper_metrics.max_drawdown().to_string(),
-                }))
+                .payload(
+                    serde_json::to_value(RetrainRequestedPayload {
+                        experiment_id: experiment_id.to_string(),
+                        reason: combined_reason.clone(),
+                        sharpe_ratio: paper_metrics.sharpe_ratio(),
+                        max_drawdown: paper_metrics.max_drawdown().to_string(),
+                    })
+                    .expect("RetrainRequestedPayload must serialize"),
+                )
                 .build();
 
             self.event_bus.publish(&event).context(EventBusSnafu)?;

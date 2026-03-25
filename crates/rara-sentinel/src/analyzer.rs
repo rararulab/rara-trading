@@ -3,9 +3,22 @@
 
 use std::str::FromStr;
 
+use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
+
+/// Raw data captured during signal analysis, attached to the resulting
+/// [`SentinelSignal`].
+#[derive(Debug, Serialize)]
+struct AnalyzerRawData<'a> {
+    /// Name of the originating data source.
+    source_name: &'a str,
+    /// Original textual content that was analyzed.
+    content: &'a str,
+    /// Full LLM response text.
+    llm_response: &'a str,
+}
 use rara_infra::llm::LlmClient;
 use crate::source::RawSignal;
 
@@ -59,7 +72,7 @@ fn build_prompt(raw: &RawSignal) -> String {
          Metadata: {}\n\n\
          Respond in exactly this format:\n\
          SEVERITY: Critical|Warning|Info|None\n\
-         TYPE: BlackSwan|RegulatoryAction|AbnormalVolatility|SentimentShift|OnChainAnomaly\n\
+         TYPE: BlackSwan|RegulatoryAction|AbnormalVolatility|SentimentShift|OnChainAnomaly|PoliticalSignal\n\
          CONTRACTS: contract1,contract2\n\
          SUMMARY: one line summary",
         raw.source_name, raw.timestamp, raw.content, raw.metadata
@@ -114,17 +127,31 @@ fn parse_response(
     let signal = SentinelSignal::builder()
         .signal_type(signal_type)
         .severity(severity)
-        .source(SignalSource::NewsRss)
+        .source(infer_source(&raw.source_name))
         .affected_contracts(affected_contracts)
         .summary(summary_str)
-        .raw_data(serde_json::json!({
-            "source_name": raw.source_name,
-            "content": raw.content,
-            "llm_response": response,
-        }))
+        .raw_data(
+            serde_json::to_value(AnalyzerRawData {
+                source_name: &raw.source_name,
+                content: &raw.content,
+                llm_response: response,
+            })
+            .expect("AnalyzerRawData must serialize"),
+        )
         .build();
 
     Ok(Some(signal))
+}
+
+/// Infer the signal source from the data source name.
+fn infer_source(source_name: &str) -> SignalSource {
+    match source_name {
+        "trump-code" => SignalSource::TrumpCode,
+        name if name.contains("rss") => SignalSource::NewsRss,
+        name if name.contains("social") => SignalSource::SocialMedia,
+        name if name.contains("chain") => SignalSource::OnChain,
+        _ => SignalSource::NewsRss,
+    }
 }
 
 #[cfg(test)]
