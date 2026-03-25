@@ -52,6 +52,7 @@ pub enum Command {
 #[derive(Subcommand, Debug)]
 pub enum DataAction {
     /// Fetch historical candles from an exchange into `TimescaleDB`.
+    /// Days already fully stored are skipped automatically.
     Fetch {
         /// Data source: "binance" or "yahoo".
         #[arg(long)]
@@ -66,6 +67,9 @@ pub enum DataAction {
         #[arg(long)]
         end: String,
     },
+
+    /// Show data coverage for all stored instruments (JSON output).
+    Info,
 }
 
 /// Research loop subcommands.

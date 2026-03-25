@@ -91,6 +91,13 @@ struct DataFetchResponse<'a> {
 }
 
 #[derive(Serialize)]
+struct DataInfoResponse {
+    ok: bool,
+    action: &'static str,
+    instruments: Vec<rara_market_data::store::candle::CandleCoverage>,
+}
+
+#[derive(Serialize)]
 struct ExperimentListItem {
     index: u64,
     experiment_id: String,
@@ -386,6 +393,7 @@ async fn run_data(action: DataAction) -> error::Result<()> {
             start,
             end,
         } => run_data_fetch(&source, &symbol, &start, &end).await,
+        DataAction::Info => run_data_info().await,
     }
 }
 
@@ -443,6 +451,28 @@ async fn run_data_fetch(
             candles: count,
         })
         .expect("DataFetchResponse must serialize")
+    );
+    Ok(())
+}
+
+/// Show data coverage for all stored instruments.
+async fn run_data_info() -> error::Result<()> {
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let coverage = store.get_coverage().await.context(MarketStoreSnafu)?;
+
+    println!(
+        "{}",
+        serde_json::to_string(&DataInfoResponse {
+            ok: true,
+            action: "data.info",
+            instruments: coverage,
+        })
+        .expect("DataInfoResponse must serialize")
     );
     Ok(())
 }

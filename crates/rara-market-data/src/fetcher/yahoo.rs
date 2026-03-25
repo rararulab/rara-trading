@@ -133,6 +133,21 @@ impl HistoryFetcher for YahooFetcher {
             "1d"
         };
 
+        // Skip if range already has expected candle count
+        let existing = store
+            .query_candles(instrument_id, interval, start, end)
+            .await
+            .context(StoreSnafu)?;
+        let expected = if interval == "1d" {
+            range_days
+        } else {
+            range_days * 1440
+        };
+        if i64::try_from(existing.len()).unwrap_or(i64::MAX) >= expected {
+            info!(existing = existing.len(), expected, "yahoo: range complete, skipping");
+            return Ok(0);
+        }
+
         let mut candles = self.fetch_range(period1, period2, interval).await?;
 
         for c in &mut candles {

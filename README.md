@@ -132,7 +132,62 @@ flowchart LR
 
 ## Tech Stack
 
-Rust 2024, tokio, sled, barter-rs, ccxt-rust, snafu, jiff, rust_decimal
+Rust 2024, tokio, TimescaleDB, barter-rs, ccxt-rust, snafu, jiff, rust_decimal
+
+## Getting Started
+
+### 1. Start Database
+
+```bash
+docker compose up -d timescaledb
+```
+
+This starts a TimescaleDB instance on `localhost:5432` (user: `rara`, password: `rara`, db: `rara_trading`). Migrations run automatically on first CLI use.
+
+### 2. Fetch Market Data
+
+```bash
+# Fetch BTC/USDT 1m candles from Binance
+rara-trading data fetch --source binance --symbol BTCUSDT --start 2026-01-01 --end 2026-03-25
+
+# Fetch SPY daily candles from Yahoo Finance
+rara-trading data fetch --source yahoo --symbol SPY --start 2025-01-01 --end 2025-12-31
+```
+
+Already-fetched days are skipped automatically — safe to re-run for incremental updates.
+
+### 3. Check Data Coverage
+
+```bash
+rara-trading data info
+```
+
+Returns JSON with all stored instruments, their date ranges, and candle counts.
+
+### 4. Query with DuckDB (optional)
+
+```bash
+duckdb -c "
+LOAD postgres;
+ATTACH 'dbname=rara_trading user=rara password=rara host=localhost port=5432' AS ts (TYPE POSTGRES);
+SELECT * FROM ts.public.candles LIMIT 10;
+"
+```
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `data fetch --source <binance\|yahoo> --symbol SYM --start DATE --end DATE` | Fetch historical candles (idempotent) |
+| `data info` | Show data coverage per instrument (JSON) |
+| `research run [--iterations N] [--contract C]` | Run N research loop iterations |
+| `research list [--limit N]` | List experiment history |
+| `research show --experiment-id ID` | Show experiment details |
+| `research promoted` | List promoted strategies |
+| `config set\|get\|list` | Manage configuration |
+| `agent <prompt> [--backend B]` | Run a prompt through the LLM backend |
+
+All commands output structured JSON to stdout (human-readable logs go to stderr), making them suitable for agent/LLM consumption.
 
 ## Development
 

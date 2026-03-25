@@ -1,10 +1,26 @@
 //! Candle CRUD operations against `TimescaleDB`.
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use serde::Serialize;
 use snafu::ResultExt;
 use tracing::debug;
 
 use super::{DatabaseSnafu, MarketStore, Result};
+
+/// Coverage summary for one instrument+interval pair.
+#[derive(Debug, Clone, Serialize)]
+pub struct CandleCoverage {
+    /// Instrument identifier.
+    pub instrument_id: String,
+    /// Candle interval.
+    pub interval: String,
+    /// Total candle count.
+    pub count: i64,
+    /// Earliest candle timestamp.
+    pub min_ts: Option<DateTime<Utc>>,
+    /// Latest candle timestamp.
+    pub max_ts: Option<DateTime<Utc>>,
+}
 
 /// A single OHLCV candle row, used for both insert and query.
 #[derive(Debug, Clone)]
@@ -104,6 +120,69 @@ impl MarketStore {
 
         Ok(rows.into_iter().map(CandleRow::from).collect())
     }
+
+    /// Get coverage summary for all instrument+interval pairs in the store.
+    pub async fn get_coverage(&self) -> Result<Vec<CandleCoverage>> {
+        let rows = sqlx::query_as::<_, CoverageRow>(
+            "SELECT instrument_id, interval, count(*) as count, min(ts) as min_ts, max(ts) as max_ts
+             FROM candles
+             GROUP BY instrument_id, interval
+             ORDER BY instrument_id, interval",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context(DatabaseSnafu)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| CandleCoverage {
+                instrument_id: r.instrument_id,
+                interval: r.interval,
+                count: r.count.unwrap_or(0),
+                min_ts: r.min_ts,
+                max_ts: r.max_ts,
+            })
+            .collect())
+    }
+
+    /// Count candles for a specific instrument+interval on a single day.
+    pub async fn count_candles_for_day(
+        &self,
+        instrument_id: &str,
+        interval: &str,
+        day: NaiveDate,
+    ) -> Result<i64> {
+        let day_start = day.and_time(NaiveTime::MIN).and_utc();
+        let day_end = day
+            .succ_opt()
+            .unwrap_or(day)
+            .and_time(NaiveTime::MIN)
+            .and_utc();
+
+        let row = sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM candles
+             WHERE instrument_id = $1 AND interval = $2 AND ts >= $3 AND ts < $4",
+        )
+        .bind(instrument_id)
+        .bind(interval)
+        .bind(day_start)
+        .bind(day_end)
+        .fetch_one(&self.pool)
+        .await
+        .context(DatabaseSnafu)?;
+
+        Ok(row)
+    }
+}
+
+/// Internal query result for coverage aggregation.
+#[derive(sqlx::FromRow)]
+struct CoverageRow {
+    instrument_id: String,
+    interval: String,
+    count: Option<i64>,
+    min_ts: Option<DateTime<Utc>>,
+    max_ts: Option<DateTime<Utc>>,
 }
 
 /// Internal query result type that implements `sqlx::FromRow`.
