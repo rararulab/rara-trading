@@ -40,6 +40,12 @@ pub enum Command {
         #[command(subcommand)]
         action: ResearchAction,
     },
+
+    /// Fetch and manage market data.
+    Data {
+        #[command(subcommand)]
+        action: DataAction,
+    },
 }
 
 /// Research loop subcommands.
@@ -83,6 +89,26 @@ pub enum ResearchAction {
         /// Directory where promoted strategies are stored.
         #[arg(long)]
         promoted_dir: Option<String>,
+    },
+}
+
+/// Data management subcommands.
+#[derive(Subcommand)]
+pub enum DataAction {
+    /// Fetch historical candle data from an exchange.
+    Fetch {
+        /// Data source: "binance" or "yahoo".
+        #[arg(long)]
+        source: String,
+        /// Symbol to fetch, e.g. "BTCUSDT" for Binance or "SPY" for Yahoo.
+        #[arg(long)]
+        symbol: String,
+        /// Start date (YYYY-MM-DD).
+        #[arg(long)]
+        start: String,
+        /// End date (YYYY-MM-DD), defaults to today.
+        #[arg(long)]
+        end: Option<String>,
     },
 }
 

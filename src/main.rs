@@ -8,7 +8,7 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, ResearchAction};
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, EventBusSnafu, IoSnafu,
     PromoterSnafu, PromptRendererSnafu, TraceSnafu,
@@ -272,6 +272,9 @@ async fn run() -> error::Result<()> {
         }
         Command::Research { action } => {
             run_research(action).await?;
+        }
+        Command::Data { action } => {
+            run_data(action).await?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -625,6 +628,88 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
         })
         .expect("ResearchPromotedResponse must serialize")
     );
+    Ok(())
+}
+
+/// Execute the data subcommand.
+async fn run_data(action: DataAction) -> error::Result<()> {
+    match action {
+        DataAction::Fetch {
+            source,
+            symbol,
+            start,
+            end,
+        } => run_data_fetch(&source, &symbol, &start, end.as_deref()).await,
+    }
+}
+
+/// Fetch historical data from an exchange and store in `.rara` format.
+async fn run_data_fetch(
+    source: &str,
+    symbol: &str,
+    start_str: &str,
+    end_str: Option<&str>,
+) -> error::Result<()> {
+    use chrono::NaiveDate;
+    use rara_market_data::fetcher::{binance::BinanceFetcher, yahoo::YahooFetcher, HistoryFetcher};
+
+    let start = NaiveDate::parse_from_str(start_str, "%Y-%m-%d").map_err(|e| {
+        error::AppError::Config {
+            message: format!("invalid start date: {e}"),
+        }
+    })?;
+
+    let end = match end_str {
+        Some(s) => NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| {
+            error::AppError::Config {
+                message: format!("invalid end date: {e}"),
+            }
+        })?,
+        None => chrono::Utc::now().naive_utc().date(),
+    };
+
+    let data_dir = paths::data_dir().join("market_data");
+
+    let (fetcher, instrument_id): (Box<dyn HistoryFetcher>, String) = match source {
+        "binance" => {
+            let id = format!("binance-{symbol}");
+            (Box::new(BinanceFetcher::new(symbol)), id)
+        }
+        "yahoo" => {
+            let id = format!("yahoo-{symbol}");
+            (Box::new(YahooFetcher::new(symbol)), id)
+        }
+        _ => {
+            return Err(error::AppError::Config {
+                message: format!("unknown source: {source}. Use 'binance' or 'yahoo'"),
+            });
+        }
+    };
+
+    eprintln!("Fetching {symbol} from {source} ({start} to {end})...");
+
+    let total = fetcher
+        .fetch_and_store(&data_dir, &instrument_id, start, end)
+        .await
+        .map_err(|e| error::AppError::Config {
+            message: format!("fetch failed: {e}"),
+        })?;
+
+    eprintln!("Done! {total} candles written.");
+    println!(
+        "{}",
+        serde_json::json!({
+            "ok": true,
+            "action": "data.fetch",
+            "source": source,
+            "symbol": symbol,
+            "instrument_id": instrument_id,
+            "start": start_str,
+            "end": end.to_string(),
+            "candles_written": total,
+        })
+    );
+
     Ok(())
 }
 
