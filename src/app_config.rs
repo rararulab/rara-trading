@@ -12,26 +12,8 @@ static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    /// Example configuration section.
-    pub example: ExampleConfig,
     /// Agent backend configuration.
     pub agent: AgentConfig,
-}
-
-/// Example configuration section — replace with your own.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ExampleConfig {
-    /// An example setting.
-    pub setting: String,
-}
-
-impl Default for ExampleConfig {
-    fn default() -> Self {
-        Self {
-            setting: "default-value".to_string(),
-        }
-    }
 }
 
 /// Load config from TOML file, falling back to defaults.

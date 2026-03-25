@@ -15,7 +15,6 @@ jiff = { version = "0.2", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde-str"] }
 snafu = "0.9"
 strum = { version = "0.27", features = ["derive"] }
-derive_more = { version = "2", features = ["display", "from"] }
 wasmtime = "41"
 wasmtime-wasi = "41"
 async-trait = "0.1"

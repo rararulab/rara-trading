@@ -3289,7 +3289,6 @@ name = "rara-domain"
 version = "0.1.0"
 dependencies = [
  "bon",
- "derive_more",
  "jiff",
  "rust_decimal",
  "serde",

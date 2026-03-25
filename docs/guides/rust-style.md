@@ -30,10 +30,6 @@ Wrong:
 All enums that may need string conversion MUST derive `strum::Display` and `strum::EnumString`.
 Do NOT write manual `match` blocks for string ↔ enum conversion.
 
-## Crate Utilities — Use `derive_more`
-
-Use `derive_more` for common trait implementations (`Display`, `From`) instead of manual `impl` blocks.
-
 ## Async
 
 - Use `tokio` runtime

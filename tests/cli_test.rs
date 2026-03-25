@@ -45,7 +45,7 @@ fn config_set_then_get() {
     // Set a value
     cmd()
         .env("APP_DATA_DIR", dir)
-        .args(["config", "set", "example.setting", "hello42"])
+        .args(["config", "set", "agent.backend", "gemini"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""ok":true"#));
@@ -53,10 +53,10 @@ fn config_set_then_get() {
     // Get the value back
     cmd()
         .env("APP_DATA_DIR", dir)
-        .args(["config", "get", "example.setting"])
+        .args(["config", "get", "agent.backend"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""value":"hello42"#));
+        .stdout(predicate::str::contains(r#""value":"gemini"#));
 }
 
 #[test]

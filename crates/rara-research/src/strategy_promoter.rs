@@ -188,7 +188,7 @@ impl StrategyPromoter {
 
         // 6. Save strategy source code alongside the binary
         let source_path = self.promoted_dir.join(format!("{experiment_id}.rs"));
-        std::fs::write(&source_path, experiment.strategy_code).context(IoSnafu)?;
+        std::fs::write(&source_path, &experiment.strategy_code).context(IoSnafu)?;
 
         // 7. Build and save metadata
         let promoted = PromotedStrategy::builder()

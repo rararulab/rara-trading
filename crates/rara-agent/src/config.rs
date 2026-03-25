@@ -25,6 +25,7 @@ pub enum ConfigPromptMode {
 pub struct AgentConfig {
     /// Backend to use: "claude", "kiro", "gemini", "codex", "amp",
     /// "copilot", "opencode", "pi", "roo", or "custom".
+    #[builder(default = "claude".to_string())]
     pub backend: String,
 
     /// Command override. Required for "custom" backend.
@@ -33,9 +34,11 @@ pub struct AgentConfig {
     pub command: Option<String>,
 
     /// Additional arguments to pass to the CLI command.
+    #[builder(default)]
     pub args: Vec<String>,
 
     /// How to pass prompts: "arg" or "stdin".
+    #[builder(default)]
     pub prompt_mode: ConfigPromptMode,
 
     /// Custom prompt flag for arg mode (e.g., "-p").
@@ -45,18 +48,12 @@ pub struct AgentConfig {
 
     /// Idle timeout in seconds. Process is terminated after this many
     /// seconds of inactivity (no output). Set to 0 to disable.
+    #[builder(default = 30)]
     pub idle_timeout_secs: u32,
 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        Self {
-            backend: "claude".to_string(),
-            command: None,
-            args: Vec::new(),
-            prompt_mode: ConfigPromptMode::Arg,
-            prompt_flag: None,
-            idle_timeout_secs: 30,
-        }
+        Self::builder().build()
     }
 }
