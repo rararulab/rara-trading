@@ -49,6 +49,26 @@ impl<L: LlmClient> StrategyCoder<L> {
 
         self.llm.complete(&prompt).await.context(LlmSnafu)
     }
+
+    /// Ask the LLM to fix compilation errors in previously generated code.
+    pub async fn fix_errors(
+        &self,
+        code: &str,
+        errors: &[String],
+        hypothesis: &Hypothesis,
+    ) -> Result<String> {
+        let prompt = format!(
+            "Fix the following Rust strategy code compilation errors.\n\n\
+             Hypothesis: {}\n\n\
+             Current code:\n```rust\n{code}\n```\n\n\
+             Compilation errors:\n{}\n\n\
+             Return only the corrected Rust code.",
+            hypothesis.text(),
+            errors.join("\n")
+        );
+
+        self.llm.complete(&prompt).await.context(LlmSnafu)
+    }
 }
 
 #[cfg(test)]
