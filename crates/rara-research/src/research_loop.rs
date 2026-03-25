@@ -196,27 +196,29 @@ impl ResearchLoop {
             .load_handle(strategy.id)
             .context(StrategyManagerSnafu)?;
 
-        // 8. Create and save experiment
-        let experiment = Experiment::builder()
+        // 8. Create experiment and run backtests
+        let mut experiment = Experiment::builder()
             .hypothesis_id(hypothesis.id)
             .strategy_code(&code)
             .build();
-
-        self.trace
-            .save_experiment(&experiment)
-            .context(TraceSnafu)?;
 
         // 9. Run backtests across all configured timeframes, pick best result
         let backtest_result = self
             .run_multi_timeframe_backtest(strategy.id)
             .await?;
 
-        // 10. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
+        // 10. Persist experiment with backtest result attached
+        experiment.backtest_result = Some(backtest_result.clone());
+        self.trace
+            .save_experiment(&experiment)
+            .context(TraceSnafu)?;
+
+        // 11. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
         let accepted = backtest_result.sharpe_ratio > 1.0
             && backtest_result.max_drawdown < max_drawdown_threshold;
 
-        // 11. Generate feedback via FeedbackGenerator
+        // 12. Generate feedback via FeedbackGenerator
         let sota_result = self
             .trace
             .get_sota()
@@ -235,12 +237,12 @@ impl ResearchLoop {
             .await
             .context(FeedbackGenSnafu)?;
 
-        // 12. Record in Trace DAG
+        // 13. Record in Trace DAG
         self.trace
             .record(&experiment, &feedback, &DagSelection::Latest)
             .context(TraceSnafu)?;
 
-        // 13. Publish experiment completed event
+        // 14. Publish experiment completed event
         self.publish_event(
             EventType::ResearchExperimentCompleted,
             &ExperimentCompletedPayload {
@@ -249,7 +251,7 @@ impl ResearchLoop {
             },
         )?;
 
-        // 14. If accepted, update status and publish candidate event
+        // 15. If accepted, update status and publish candidate event
         if accepted {
             self.strategy_manager
                 .update_status(strategy.id, ResearchStrategyStatus::Accepted)
