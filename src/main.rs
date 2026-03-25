@@ -230,6 +230,7 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
             let strategy_coder = StrategyCoder::new(llm);
 
             // 5. Build ResearchLoop
+            let strategies_base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies");
             let research_loop = ResearchLoop::builder()
                 .hypothesis_gen(hypothesis_gen)
                 .strategy_coder(strategy_coder)
@@ -240,6 +241,8 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
                 .prompt_renderer(prompt_renderer_for_loop)
                 .trace(trace)
                 .event_bus(event_bus)
+                .generated_dir(strategies_base.join("generated"))
+                .promoted_dir(strategies_base.join("promoted"))
                 .build();
 
             // 6. Run iterations
