@@ -90,6 +90,9 @@ jobs:
       - name: Format after substitution
         run: cargo fmt --all
 
+      - name: Install wasm target
+        run: rustup target add wasm32-wasip1
+
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
