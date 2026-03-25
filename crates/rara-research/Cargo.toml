@@ -22,6 +22,7 @@ toml.workspace = true
 tracing.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+num_cpus = "1"
 barter = "0.12"
 barter-data = "0.11"
 barter-execution = "0.7"
