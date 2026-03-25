@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(feedback.observations, "Strong win rate and lower drawdown");
         assert_eq!(
             feedback.new_hypothesis,
-            Some("Try adding volume confirmation filter")
+            Some("Try adding volume confirmation filter".to_owned())
         );
     }
 
