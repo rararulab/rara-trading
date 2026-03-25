@@ -3,6 +3,7 @@
 //! Uses the public chart API (no authentication required).
 //! Automatically selects 1m interval for recent data (<=7 days)
 //! or 1d interval for older history.
+//! Resumes from the latest stored candle via `MAX(ts)` query.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Days, NaiveDate, NaiveTime, Utc};
@@ -116,8 +117,8 @@ impl HistoryFetcher for YahooFetcher {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<usize> {
-        let period1 = start.and_time(NaiveTime::MIN).and_utc().timestamp();
-        let period2 = end
+        let range_start = start.and_time(NaiveTime::MIN).and_utc().timestamp();
+        let range_end = end
             .checked_add_days(Days::new(1))
             .expect("date overflow")
             .and_time(NaiveTime::MIN)
@@ -133,22 +134,21 @@ impl HistoryFetcher for YahooFetcher {
             "1d"
         };
 
-        // Skip if range already has expected candle count
-        let existing = store
-            .query_candles(instrument_id, interval, start, end)
+        // Resume from last stored candle + 1 interval
+        let interval_secs: i64 = if interval == "1m" { 60 } else { 86_400 };
+        let resume_ts = store
+            .max_ts(instrument_id, interval)
             .await
-            .context(StoreSnafu)?;
-        let expected = if interval == "1d" {
-            range_days
-        } else {
-            range_days * 1440
-        };
-        if i64::try_from(existing.len()).unwrap_or(i64::MAX) >= expected {
-            info!(existing = existing.len(), expected, "yahoo: range complete, skipping");
+            .context(StoreSnafu)?
+            .map_or(i64::MIN, |ts| ts.timestamp() + interval_secs);
+
+        let period1 = range_start.max(resume_ts);
+        if period1 >= range_end {
+            info!("yahoo: already up to date, nothing to fetch");
             return Ok(0);
         }
 
-        let mut candles = self.fetch_range(period1, period2, interval).await?;
+        let mut candles = self.fetch_range(period1, range_end, interval).await?;
 
         for c in &mut candles {
             c.instrument_id = instrument_id.to_string();

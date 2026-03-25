@@ -145,28 +145,21 @@ impl MarketStore {
             .collect())
     }
 
-    /// Count candles for a specific instrument+interval on a single day.
-    pub async fn count_candles_for_day(
+    /// Get the latest stored candle timestamp for an instrument+interval.
+    ///
+    /// Returns `None` if no data exists. Used by fetchers to resume
+    /// from where the last fetch left off.
+    pub async fn max_ts(
         &self,
         instrument_id: &str,
         interval: &str,
-        day: NaiveDate,
-    ) -> Result<i64> {
-        let day_start = day.and_time(NaiveTime::MIN).and_utc();
-        let day_end = day
-            .succ_opt()
-            .unwrap_or(day)
-            .and_time(NaiveTime::MIN)
-            .and_utc();
-
-        let row = sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM candles
-             WHERE instrument_id = $1 AND interval = $2 AND ts >= $3 AND ts < $4",
+    ) -> Result<Option<DateTime<Utc>>> {
+        let row = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+            "SELECT max(ts) FROM candles
+             WHERE instrument_id = $1 AND interval = $2",
         )
         .bind(instrument_id)
         .bind(interval)
-        .bind(day_start)
-        .bind(day_end)
         .fetch_one(&self.pool)
         .await
         .context(DatabaseSnafu)?;
