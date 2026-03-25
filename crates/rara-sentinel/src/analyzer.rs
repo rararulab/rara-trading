@@ -59,7 +59,7 @@ fn build_prompt(raw: &RawSignal) -> String {
          Metadata: {}\n\n\
          Respond in exactly this format:\n\
          SEVERITY: Critical|Warning|Info|None\n\
-         TYPE: BlackSwan|RegulatoryAction|AbnormalVolatility|SentimentShift|OnChainAnomaly\n\
+         TYPE: BlackSwan|RegulatoryAction|AbnormalVolatility|SentimentShift|OnChainAnomaly|PoliticalSignal\n\
          CONTRACTS: contract1,contract2\n\
          SUMMARY: one line summary",
         raw.source_name, raw.timestamp, raw.content, raw.metadata
@@ -114,7 +114,7 @@ fn parse_response(
     let signal = SentinelSignal::builder()
         .signal_type(signal_type)
         .severity(severity)
-        .source(SignalSource::NewsRss)
+        .source(infer_source(&raw.source_name))
         .affected_contracts(affected_contracts)
         .summary(summary_str)
         .raw_data(serde_json::json!({
@@ -125,6 +125,17 @@ fn parse_response(
         .build();
 
     Ok(Some(signal))
+}
+
+/// Infer the signal source from the data source name.
+fn infer_source(source_name: &str) -> SignalSource {
+    match source_name {
+        "trump-code" => SignalSource::TrumpCode,
+        name if name.contains("rss") => SignalSource::NewsRss,
+        name if name.contains("social") => SignalSource::SocialMedia,
+        name if name.contains("chain") => SignalSource::OnChain,
+        _ => SignalSource::NewsRss,
+    }
 }
 
 #[cfg(test)]
