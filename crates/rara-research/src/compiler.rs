@@ -95,6 +95,8 @@ impl StrategyCompiler {
         let output = tokio::process::Command::new("cargo")
             .args(["build", "--release", "--target", &self.wasm_target])
             .current_dir(tmp.path())
+            // Force plain output so parse_cargo_errors can match "error" prefix
+            .env("CARGO_TERM_COLOR", "never")
             .output()
             .await
             .context(CargoCommandSnafu)?;
