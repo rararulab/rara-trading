@@ -14,6 +14,12 @@ pub struct Hypothesis {
     text: String,
     #[builder(into)]
     reason: String,
+    /// What was observed in prior experiment results.
+    #[builder(default, into)]
+    observation: String,
+    /// Domain knowledge applied when forming this hypothesis.
+    #[builder(default, into)]
+    knowledge: String,
     parent: Option<Uuid>,
     #[builder(default = jiff::Timestamp::now())]
     created_at: jiff::Timestamp,
@@ -33,6 +39,16 @@ impl Hypothesis {
     /// Returns the reasoning behind this hypothesis.
     pub fn reason(&self) -> &str {
         &self.reason
+    }
+
+    /// Returns the observation from prior results.
+    pub fn observation(&self) -> &str {
+        &self.observation
+    }
+
+    /// Returns the domain knowledge applied.
+    pub fn knowledge(&self) -> &str {
+        &self.knowledge
     }
 
     /// Returns the parent hypothesis ID if this is a refinement.
@@ -152,7 +168,14 @@ pub struct HypothesisFeedback {
     reason: String,
     #[builder(into)]
     observations: String,
-    new_hypothesis_hint: Option<String>,
+    /// Whether the hypothesis was validated, refuted, or inconclusive.
+    #[builder(default, into)]
+    hypothesis_evaluation: String,
+    /// LLM suggestion for the next research round.
+    new_hypothesis: Option<String>,
+    /// Summary of code changes from the previous experiment.
+    #[builder(default, into)]
+    code_change_summary: String,
     #[builder(default = jiff::Timestamp::now())]
     created_at: jiff::Timestamp,
 }
@@ -178,8 +201,18 @@ impl HypothesisFeedback {
         &self.observations
     }
 
-    /// Returns an optional hint for generating the next hypothesis.
-    pub fn new_hypothesis_hint(&self) -> Option<&str> {
-        self.new_hypothesis_hint.as_deref()
+    /// Returns the hypothesis evaluation result.
+    pub fn hypothesis_evaluation(&self) -> &str {
+        &self.hypothesis_evaluation
+    }
+
+    /// Returns an optional suggestion for the next hypothesis.
+    pub fn new_hypothesis(&self) -> Option<&str> {
+        self.new_hypothesis.as_deref()
+    }
+
+    /// Returns a summary of code changes from the previous experiment.
+    pub fn code_change_summary(&self) -> &str {
+        &self.code_change_summary
     }
 }
