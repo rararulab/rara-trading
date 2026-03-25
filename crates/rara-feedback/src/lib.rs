@@ -4,3 +4,4 @@
 pub mod aggregator;
 pub mod engine;
 pub mod evaluator;
+pub mod retrain;

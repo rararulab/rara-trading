@@ -10,4 +10,5 @@ pub mod prompt_renderer;
 pub mod research_loop;
 pub mod strategy_coder;
 pub mod runtime;
+pub mod strategy_promoter;
 pub mod trace;

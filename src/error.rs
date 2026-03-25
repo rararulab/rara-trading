@@ -24,6 +24,26 @@ pub enum AppError {
     AgentBackend {
         source: crate::agent::backend::BackendError,
     },
+
+    #[snafu(display("research loop error: {source}"))]
+    Research {
+        source: crate::research::research_loop::ResearchLoopError,
+    },
+
+    #[snafu(display("trace storage error: {source}"))]
+    Trace {
+        source: crate::research::trace::TraceError,
+    },
+
+    #[snafu(display("event bus error: {source}"))]
+    EventBus {
+        source: crate::event_bus::store::StoreError,
+    },
+
+    #[snafu(display("prompt renderer error: {source}"))]
+    PromptRenderer {
+        source: crate::research::prompt_renderer::PromptError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

@@ -34,6 +34,29 @@ pub enum Command {
         #[arg(long)]
         backend: Option<String>,
     },
+
+    /// Run the research loop to iterate on trading strategies.
+    Research {
+        #[command(subcommand)]
+        action: ResearchAction,
+    },
+}
+
+/// Research loop subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ResearchAction {
+    /// Run N iterations of the research loop.
+    Run {
+        /// Number of iterations to run.
+        #[arg(long, default_value = "5")]
+        iterations: u32,
+        /// Contract to backtest against.
+        #[arg(long, default_value = "BTC-USDT")]
+        contract: String,
+        /// Path to trace storage directory.
+        #[arg(long)]
+        trace_dir: Option<String>,
+    },
 }
 
 /// Config management subcommands.
