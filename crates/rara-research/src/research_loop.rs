@@ -7,9 +7,21 @@ use bon::Builder;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
+use uuid::Uuid;
 
 use rara_domain::event::{Event, EventType};
+use rara_domain::research::{
+    Experiment, Hypothesis, HypothesisFeedback, ResearchStrategy, ResearchStrategyStatus,
+};
 use rara_domain::timeframe::Timeframe;
+use rara_event_bus::bus::EventBus;
+
+use crate::backtester::Backtester;
+use crate::feedback_gen::FeedbackGenerator;
+use crate::hypothesis_gen::HypothesisGenerator;
+use crate::prompt_renderer::PromptRenderer;
+use crate::strategy_manager::{StrategyManager, StrategyManagerError};
+use crate::trace::{DagSelection, Trace};
 
 /// Event payload for hypothesis creation.
 #[derive(Debug, Serialize)]
@@ -35,18 +47,6 @@ struct StrategyCandidatePayload {
     /// UUID of the originating hypothesis.
     hypothesis_id: String,
 }
-use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
-use rara_event_bus::bus::EventBus;
-use crate::backtester::Backtester;
-use crate::compiler::StrategyCompiler;
-use crate::feedback_gen::FeedbackGenerator;
-use crate::hypothesis_gen::HypothesisGenerator;
-use crate::prompt_renderer::PromptRenderer;
-use crate::strategy_executor::StrategyExecutor;
-use crate::wasm_executor::WasmExecutor;
-use crate::strategy_coder::StrategyCoder;
-use crate::strategy_promoter::PromotedStrategy;
-use crate::trace::{DagSelection, Trace};
 
 /// Errors from research loop execution.
 #[derive(Debug, Snafu)]
@@ -58,29 +58,11 @@ pub enum ResearchLoopError {
         /// The underlying error.
         source: crate::hypothesis_gen::HypothesisGenError,
     },
-    /// Strategy code generation failed.
-    #[snafu(display("strategy coding failed: {source}"))]
-    StrategyCoding {
+    /// Strategy manager operation failed.
+    #[snafu(display("strategy manager error: {source}"))]
+    StrategyManager {
         /// The underlying error.
-        source: crate::strategy_coder::StrategyCoderError,
-    },
-    /// Strategy compilation failed.
-    #[snafu(display("compilation failed: {source}"))]
-    Compile {
-        /// The underlying compiler error.
-        source: crate::compiler::CompilerError,
-    },
-    /// All compile retries exhausted.
-    #[snafu(display("compilation failed after retries: {}", errors.join("; ")))]
-    CompileFailed {
-        /// The last set of compilation errors.
-        errors: Vec<String>,
-    },
-    /// WASM runtime error.
-    #[snafu(display("runtime error: {source}"))]
-    Runtime {
-        /// The underlying runtime error.
-        source: crate::strategy_executor::ExecutorError,
+        source: StrategyManagerError,
     },
     /// Feedback generation failed.
     #[snafu(display("feedback generation failed: {source}"))]
@@ -106,12 +88,6 @@ pub enum ResearchLoopError {
         /// The underlying store error.
         source: rara_event_bus::store::StoreError,
     },
-    /// Strategy promotion failed.
-    #[snafu(display("promotion failed: {source}"))]
-    Promote {
-        /// The underlying promoter error.
-        source: crate::strategy_promoter::PromoterError,
-    },
     /// Filesystem I/O failed.
     #[snafu(display("I/O error: {source}"))]
     Io {
@@ -133,28 +109,23 @@ pub struct IterationResult {
     pub feedback: HypothesisFeedback,
     /// Whether the experiment was accepted.
     pub accepted: bool,
-    /// Promoted strategy metadata, present when the experiment was accepted
-    /// and auto-promotion is enabled.
-    pub promoted: Option<PromotedStrategy>,
+    /// The compiled research strategy.
+    pub strategy: ResearchStrategy,
 }
 
 /// Orchestrates the full RD-Agent style research loop:
 /// propose -> code -> compile -> backtest -> evaluate -> record.
 #[derive(Builder)]
-pub struct ResearchLoop<B: Backtester> {
+pub struct ResearchLoop {
     /// Generates new hypotheses from trace history.
     hypothesis_gen: HypothesisGenerator,
-    /// Generates and fixes strategy source code.
-    strategy_coder: StrategyCoder,
-    /// Compiles strategy code to WASM.
-    compiler: StrategyCompiler,
-    /// Loads and validates compiled WASM modules.
-    runtime: WasmExecutor,
-    /// Runs backtests against strategy code.
-    backtester: B,
+    /// Manages the full strategy lifecycle (code gen, compile, load).
+    strategy_manager: Arc<dyn StrategyManager>,
+    /// Runs backtests against loaded strategy handles.
+    backtester: Arc<dyn Backtester>,
     /// LLM-driven feedback evaluator.
     feedback_gen: FeedbackGenerator,
-    /// Prompt template renderer (shared with `FeedbackGenerator` for other uses).
+    /// Prompt template renderer.
     #[allow(dead_code)]
     prompt_renderer: PromptRenderer,
     /// DAG trace storage.
@@ -164,9 +135,6 @@ pub struct ResearchLoop<B: Backtester> {
     /// Maximum attempts to fix compile errors before giving up.
     #[builder(default = 3)]
     max_compile_retries: u32,
-    /// Directory for promoted strategies. When set, accepted strategies are
-    /// automatically saved here for paper trading pickup.
-    promoted_dir: Option<PathBuf>,
     /// Directory for saving generated strategy source code each iteration.
     /// When set, each iteration's `.rs` source is persisted here for debugging
     /// and reproducibility.
@@ -176,10 +144,10 @@ pub struct ResearchLoop<B: Backtester> {
     timeframes: Vec<Timeframe>,
 }
 
-impl<B: Backtester> ResearchLoop<B> {
+impl ResearchLoop {
     /// Run one full research iteration.
     ///
-    /// Steps: generate hypothesis -> generate code -> compile to WASM ->
+    /// Steps: generate hypothesis -> generate code -> compile ->
     /// load into runtime -> backtest -> generate feedback -> record in DAG ->
     /// publish events.
     pub async fn run_iteration(&self, context: &str) -> Result<IterationResult> {
@@ -205,10 +173,10 @@ impl<B: Backtester> ResearchLoop<B> {
 
         // 4. Generate strategy code
         let mut code = self
-            .strategy_coder
+            .strategy_manager
             .generate_code(&hypothesis, context)
             .await
-            .context(StrategyCodingSnafu)?;
+            .context(StrategyManagerSnafu)?;
 
         // 5. Save generated source to generated_dir for debugging/reproducibility
         if let Some(ref dir) = self.generated_dir {
@@ -217,14 +185,16 @@ impl<B: Backtester> ResearchLoop<B> {
             std::fs::write(&path, &code).context(IoSnafu)?;
         }
 
-        // 6. Compile to WASM with retries
-        let strategy_artifact = self.compile_with_retries(&mut code, &hypothesis).await?;
+        // 6. Compile with retries, producing a persisted ResearchStrategy
+        let strategy = self
+            .compile_with_retries(&mut code, &hypothesis)
+            .await?;
 
-        // 7. Load into executor to validate the module
-        let _loaded = self.runtime.load(&strategy_artifact).context(RuntimeSnafu)?;
-
-        // Keep strategy_artifact for potential promotion after acceptance
-        let strategy_artifact_for_promotion = strategy_artifact;
+        // 7. Validate the module loads successfully
+        let _loaded = self
+            .strategy_manager
+            .load_handle(strategy.id)
+            .context(StrategyManagerSnafu)?;
 
         // 8. Create and save experiment
         let experiment = Experiment::builder()
@@ -238,7 +208,7 @@ impl<B: Backtester> ResearchLoop<B> {
 
         // 9. Run backtests across all configured timeframes, pick best result
         let backtest_result = self
-            .run_multi_timeframe_backtest(&strategy_artifact_for_promotion)
+            .run_multi_timeframe_backtest(strategy.id)
             .await?;
 
         // 10. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
@@ -279,8 +249,17 @@ impl<B: Backtester> ResearchLoop<B> {
             },
         )?;
 
-        // 14. If accepted, publish candidate event and auto-promote
-        let promoted = if accepted {
+        // 14. If accepted, update status and publish candidate event
+        if accepted {
+            self.strategy_manager
+                .store()
+                .update_status(strategy.id, ResearchStrategyStatus::Accepted)
+                .map_err(|e| ResearchLoopError::StrategyManager {
+                    source: StrategyManagerError::Store {
+                        message: e.to_string(),
+                    },
+                })?;
+
             self.publish_event(
                 EventType::ResearchStrategyCandidate,
                 &StrategyCandidatePayload {
@@ -288,23 +267,14 @@ impl<B: Backtester> ResearchLoop<B> {
                     hypothesis_id: hypothesis.id.to_string(),
                 },
             )?;
-
-            self.try_promote(
-                experiment.id,
-                hypothesis.id,
-                &strategy_artifact_for_promotion,
-                &code,
-            )?
-        } else {
-            None
-        };
+        }
 
         Ok(IterationResult {
             hypothesis,
             experiment,
             feedback,
             accepted,
-            promoted,
+            strategy,
         })
     }
 
@@ -313,30 +283,36 @@ impl<B: Backtester> ResearchLoop<B> {
         &self,
         code: &mut String,
         hypothesis: &Hypothesis,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<ResearchStrategy> {
         let mut last_errors = vec![];
 
         for attempt in 0..=self.max_compile_retries {
-            let result = self.compiler.compile(code).await.context(CompileSnafu)?;
-
-            if result.success {
-                return Ok(result.wasm_bytes.expect("success implies wasm_bytes"));
+            match self
+                .strategy_manager
+                .compile(hypothesis.id, code)
+                .await
+            {
+                Ok(strategy) => return Ok(strategy),
+                Err(StrategyManagerError::CompileFailed { errors }) => {
+                    last_errors = errors;
+                }
+                Err(e) => return Err(ResearchLoopError::StrategyManager { source: e }),
             }
-
-            last_errors = result.errors;
 
             // If we have retries left, ask the LLM to fix the errors
             if attempt < self.max_compile_retries {
                 *code = self
-                    .strategy_coder
+                    .strategy_manager
                     .fix_errors(code, &last_errors, hypothesis)
                     .await
-                    .context(StrategyCodingSnafu)?;
+                    .context(StrategyManagerSnafu)?;
             }
         }
 
-        Err(ResearchLoopError::CompileFailed {
-            errors: last_errors,
+        Err(ResearchLoopError::StrategyManager {
+            source: StrategyManagerError::CompileFailed {
+                errors: last_errors,
+            },
         })
     }
 
@@ -348,13 +324,13 @@ impl<B: Backtester> ResearchLoop<B> {
     /// error is propagated.
     async fn run_multi_timeframe_backtest(
         &self,
-        strategy_artifact: &[u8],
+        strategy_id: Uuid,
     ) -> Result<rara_domain::research::BacktestResult> {
         let mut best: Option<rara_domain::research::BacktestResult> = None;
         let mut last_error: Option<ResearchLoopError> = None;
 
         for &timeframe in &self.timeframes {
-            let result = self.run_backtest_single(strategy_artifact, timeframe).await;
+            let result = self.run_backtest_single(strategy_id, timeframe).await;
 
             match result {
                 Ok(bt) => {
@@ -385,58 +361,17 @@ impl<B: Backtester> ResearchLoop<B> {
     /// Run a single backtest for one timeframe.
     async fn run_backtest_single(
         &self,
-        strategy_artifact: &[u8],
+        strategy_id: Uuid,
         timeframe: Timeframe,
     ) -> Result<rara_domain::research::BacktestResult> {
-        let handle = self.runtime.load(strategy_artifact).context(RuntimeSnafu)?;
+        let handle = self
+            .strategy_manager
+            .load_handle(strategy_id)
+            .context(StrategyManagerSnafu)?;
         self.backtester
             .run(handle, "default", timeframe)
             .await
             .context(BacktestSnafu)
-    }
-
-    /// Auto-promote an accepted strategy if a promoted directory is configured.
-    fn try_promote(
-        &self,
-        experiment_id: uuid::Uuid,
-        hypothesis_id: uuid::Uuid,
-        strategy_artifact: &[u8],
-        source_code: &str,
-    ) -> Result<Option<PromotedStrategy>> {
-        let Some(ref promoted_dir) = self.promoted_dir else {
-            return Ok(None);
-        };
-
-        let promoter = crate::strategy_promoter::StrategyPromoter::builder()
-            .trace(
-                crate::trace::Trace::open(
-                    &promoted_dir
-                        .parent()
-                        .unwrap_or(promoted_dir)
-                        .join("trace_promote"),
-                )
-                .context(TraceSnafu)?,
-            )
-            .runtime(WasmExecutor::builder().build())
-            .compiler(
-                StrategyCompiler::builder()
-                    .template_dir(PathBuf::new())
-                    .build(),
-            )
-            .promoted_dir(promoted_dir.clone())
-            .build();
-
-        let promoted_strategy = promoter
-            .promote_from_wasm(experiment_id, hypothesis_id, strategy_artifact, Some(source_code))
-            .context(PromoteSnafu)?;
-
-        tracing::info!(
-            %experiment_id,
-            wasm_path = %promoted_strategy.wasm_path().display(),
-            "strategy promoted for paper trading"
-        );
-
-        Ok(Some(promoted_strategy))
     }
 
     /// Helper to publish a domain event with a typed payload.
