@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use clap::Parser;
 use rust_decimal_macros::dec;
 use serde::Serialize;
@@ -10,8 +11,8 @@ use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
 use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
 use rara_trading::error::{
-    self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, EventBusSnafu, IoSnafu,
-    PromoterSnafu, PromptRendererSnafu, TraceSnafu,
+    self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
+    IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::paths;
@@ -78,6 +79,15 @@ struct ResearchRunResponse {
     ok: bool,
     action: &'static str,
     iterations: u32,
+}
+
+#[derive(Serialize)]
+struct DataFetchResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    source: &'a str,
+    symbol: &'a str,
+    candles: usize,
 }
 
 #[derive(Serialize)]
@@ -367,6 +377,76 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
     ]
 }
 
+/// Execute the data subcommand.
+async fn run_data(action: DataAction) -> error::Result<()> {
+    match action {
+        DataAction::Fetch {
+            source,
+            symbol,
+            start,
+            end,
+        } => run_data_fetch(&source, &symbol, &start, &end).await,
+    }
+}
+
+/// Fetch historical market data from an exchange into `TimescaleDB`.
+async fn run_data_fetch(
+    source: &str,
+    symbol: &str,
+    start: &str,
+    end: &str,
+) -> error::Result<()> {
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d").map_err(|_| {
+        error::AppError::Config {
+            message: format!("invalid start date: {start}"),
+        }
+    })?;
+    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| {
+        error::AppError::Config {
+            message: format!("invalid end date: {end}"),
+        }
+    })?;
+
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let fetcher: Box<dyn rara_market_data::fetcher::HistoryFetcher> = match source {
+        "binance" => Box::new(rara_market_data::fetcher::binance::BinanceFetcher::new(
+            symbol,
+        )),
+        "yahoo" => Box::new(rara_market_data::fetcher::yahoo::YahooFetcher::new(symbol)),
+        _ => {
+            return ConfigSnafu {
+                message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
+            }
+            .fail();
+        }
+    };
+
+    let instrument_id = symbol;
+    let count = fetcher
+        .fetch_and_store(&store, instrument_id, start_date, end_date)
+        .await
+        .context(DataFetchSnafu)?;
+
+    eprintln!("fetched {count} candles for {instrument_id} from {source}");
+    println!(
+        "{}",
+        serde_json::to_string(&DataFetchResponse {
+            ok: true,
+            action: "data.fetch",
+            source,
+            symbol,
+            candles: count,
+        })
+        .expect("DataFetchResponse must serialize")
+    );
+    Ok(())
+}
+
 /// Execute the research subcommand.
 async fn run_research(action: ResearchAction) -> error::Result<()> {
     match action {
@@ -405,10 +485,17 @@ async fn run_research_loop(
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
     let prompt_renderer_for_loop =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+
     let backtester = BarterBacktester::builder()
-        .data_dir(paths::data_dir().join("market_data"))
+        .store(store)
         .initial_capital(dec!(10000))
         .fees_percent(dec!(0.1))
+        .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
+        .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
         .build();
 
     let cfg = app_config::load();
@@ -628,88 +715,6 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
         })
         .expect("ResearchPromotedResponse must serialize")
     );
-    Ok(())
-}
-
-/// Execute the data subcommand.
-async fn run_data(action: DataAction) -> error::Result<()> {
-    match action {
-        DataAction::Fetch {
-            source,
-            symbol,
-            start,
-            end,
-        } => run_data_fetch(&source, &symbol, &start, end.as_deref()).await,
-    }
-}
-
-/// Fetch historical data from an exchange and store in `.rara` format.
-async fn run_data_fetch(
-    source: &str,
-    symbol: &str,
-    start_str: &str,
-    end_str: Option<&str>,
-) -> error::Result<()> {
-    use chrono::NaiveDate;
-    use rara_market_data::fetcher::{binance::BinanceFetcher, yahoo::YahooFetcher, HistoryFetcher};
-
-    let start = NaiveDate::parse_from_str(start_str, "%Y-%m-%d").map_err(|e| {
-        error::AppError::Config {
-            message: format!("invalid start date: {e}"),
-        }
-    })?;
-
-    let end = match end_str {
-        Some(s) => NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| {
-            error::AppError::Config {
-                message: format!("invalid end date: {e}"),
-            }
-        })?,
-        None => chrono::Utc::now().naive_utc().date(),
-    };
-
-    let data_dir = paths::data_dir().join("market_data");
-
-    let (fetcher, instrument_id): (Box<dyn HistoryFetcher>, String) = match source {
-        "binance" => {
-            let id = format!("binance-{symbol}");
-            (Box::new(BinanceFetcher::new(symbol)), id)
-        }
-        "yahoo" => {
-            let id = format!("yahoo-{symbol}");
-            (Box::new(YahooFetcher::new(symbol)), id)
-        }
-        _ => {
-            return Err(error::AppError::Config {
-                message: format!("unknown source: {source}. Use 'binance' or 'yahoo'"),
-            });
-        }
-    };
-
-    eprintln!("Fetching {symbol} from {source} ({start} to {end})...");
-
-    let total = fetcher
-        .fetch_and_store(&data_dir, &instrument_id, start, end)
-        .await
-        .map_err(|e| error::AppError::Config {
-            message: format!("fetch failed: {e}"),
-        })?;
-
-    eprintln!("Done! {total} candles written.");
-    println!(
-        "{}",
-        serde_json::json!({
-            "ok": true,
-            "action": "data.fetch",
-            "source": source,
-            "symbol": symbol,
-            "instrument_id": instrument_id,
-            "start": start_str,
-            "end": end.to_string(),
-            "candles_written": total,
-        })
-    );
-
     Ok(())
 }
 

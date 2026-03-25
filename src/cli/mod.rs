@@ -41,10 +41,30 @@ pub enum Command {
         action: ResearchAction,
     },
 
-    /// Fetch and manage market data.
+    /// Fetch and store historical market data.
     Data {
         #[command(subcommand)]
         action: DataAction,
+    },
+}
+
+/// Data management subcommands.
+#[derive(Subcommand, Debug)]
+pub enum DataAction {
+    /// Fetch historical candles from an exchange into `TimescaleDB`.
+    Fetch {
+        /// Data source: "binance" or "yahoo".
+        #[arg(long)]
+        source: String,
+        /// Instrument symbol, e.g. "BTCUSDT" (Binance) or "SPY" (Yahoo).
+        #[arg(long)]
+        symbol: String,
+        /// Start date (YYYY-MM-DD).
+        #[arg(long)]
+        start: String,
+        /// End date (YYYY-MM-DD).
+        #[arg(long)]
+        end: String,
     },
 }
 
@@ -89,26 +109,6 @@ pub enum ResearchAction {
         /// Directory where promoted strategies are stored.
         #[arg(long)]
         promoted_dir: Option<String>,
-    },
-}
-
-/// Data management subcommands.
-#[derive(Subcommand)]
-pub enum DataAction {
-    /// Fetch historical candle data from an exchange.
-    Fetch {
-        /// Data source: "binance" or "yahoo".
-        #[arg(long)]
-        source: String,
-        /// Symbol to fetch, e.g. "BTCUSDT" for Binance or "SPY" for Yahoo.
-        #[arg(long)]
-        symbol: String,
-        /// Start date (YYYY-MM-DD).
-        #[arg(long)]
-        start: String,
-        /// End date (YYYY-MM-DD), defaults to today.
-        #[arg(long)]
-        end: Option<String>,
     },
 }
 
