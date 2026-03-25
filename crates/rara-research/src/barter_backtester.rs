@@ -40,13 +40,10 @@ use rara_market_data::store::MarketStore;
 use crate::backtester::{BacktestError, Backtester};
 use crate::candle_instrument_data::CandleInstrumentData;
 use crate::strategy_executor::StrategyExecutor;
-use crate::wasm_strategy::{WasmAlgoStrategy, WasmEngineState};
-
-/// Engine state type using our candle-aware instrument data.
-type BtEngineState = WasmEngineState;
+use crate::barter_strategy::{BacktestEngineState, BarterStrategy};
 
 /// Risk manager type parameterized over our engine state.
-type BtRisk = DefaultRiskManager<BtEngineState>;
+type BtRisk = DefaultRiskManager<BacktestEngineState>;
 
 /// Real backtester powered by the barter-rs trading engine.
 ///
@@ -177,7 +174,7 @@ impl BarterBacktester {
                 message: format!("failed to load WASM strategy: {e}"),
             }
         })?;
-        let strategy = WasmAlgoStrategy::new(handle, timeframe);
+        let strategy = BarterStrategy::new(handle, timeframe);
 
         let instrument = build_instrument(contract_id);
         let instruments = IndexedInstruments::new(vec![instrument]);
@@ -204,7 +201,7 @@ impl BarterBacktester {
             self.fees_percent,
         ));
 
-        let engine_state: BtEngineState = EngineState::builder(
+        let engine_state: BacktestEngineState = EngineState::builder(
             &instruments,
             DefaultGlobalData,
             |_| CandleInstrumentData::default(),

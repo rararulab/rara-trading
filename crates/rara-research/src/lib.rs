@@ -14,4 +14,4 @@ pub mod strategy_executor;
 pub mod strategy_promoter;
 pub mod trace;
 pub mod wasm_executor;
-pub mod wasm_strategy;
+pub mod barter_strategy;
