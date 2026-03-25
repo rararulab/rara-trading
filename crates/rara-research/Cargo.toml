@@ -9,6 +9,7 @@ description = "Research loop: hypothesis generation, backtesting, strategy itera
 rara-domain.workspace = true
 rara-event-bus.workspace = true
 rara-infra.workspace = true
+rara-market-data.workspace = true
 async-trait.workspace = true
 bon.workspace = true
 serde.workspace = true

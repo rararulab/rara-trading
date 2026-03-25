@@ -3415,6 +3415,7 @@ dependencies = [
  "rara-domain",
  "rara-event-bus",
  "rara-infra",
+ "rara-market-data",
  "rara-strategy-api",
  "rust_decimal",
  "rust_decimal_macros",
