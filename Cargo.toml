@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research"]
+members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research", "crates/rara-strategy-api"]
 resolver = "3"
 
 [workspace.package]
@@ -14,6 +14,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde-str"] }
 snafu = "0.9"
+wasmtime = "41"
+wasmtime-wasi = "41"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 tracing = "0.1"
@@ -33,6 +35,7 @@ rara-trading-engine = { path = "crates/rara-trading-engine" }
 rara-feedback = { path = "crates/rara-feedback" }
 rara-sentinel = { path = "crates/rara-sentinel" }
 rara-research = { path = "crates/rara-research" }
+rara-strategy-api = { path = "crates/rara-strategy-api" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
