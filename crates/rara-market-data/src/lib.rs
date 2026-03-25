@@ -6,4 +6,5 @@
 
 pub mod cache;
 pub mod file;
+pub mod ingester;
 pub mod record;

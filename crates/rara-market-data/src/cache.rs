@@ -318,6 +318,7 @@ mod tests {
 
         let records: Vec<CandleRecord> = (0..n)
             .map(|i| CandleRecord {
+                #[allow(clippy::cast_possible_wrap)]
                 ts_event: (i as i64) * 60_000_000_000,
                 open: 42_000_000_000_000,
                 high: 43_000_000_000_000,
