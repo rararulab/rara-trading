@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research", "crates/rara-strategy-api"]
+members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research", "crates/rara-strategy-api", "crates/rara-market-data"]
 resolver = "3"
 
 [workspace.package]
@@ -37,6 +37,7 @@ rara-feedback = { path = "crates/rara-feedback" }
 rara-sentinel = { path = "crates/rara-sentinel" }
 rara-research = { path = "crates/rara-research" }
 rara-strategy-api = { path = "crates/rara-strategy-api" }
+rara-market-data = { path = "crates/rara-market-data" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
