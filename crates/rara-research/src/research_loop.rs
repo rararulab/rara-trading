@@ -37,8 +37,6 @@ struct StrategyCandidatePayload {
 }
 use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 use rara_event_bus::bus::EventBus;
-use rara_infra::llm::LlmClient;
-
 use crate::backtester::Backtester;
 use crate::compiler::StrategyCompiler;
 use crate::feedback_gen::FeedbackGenerator;
@@ -143,11 +141,11 @@ pub struct IterationResult {
 /// Orchestrates the full RD-Agent style research loop:
 /// propose -> code -> compile -> backtest -> evaluate -> record.
 #[derive(Builder)]
-pub struct ResearchLoop<L: LlmClient, B: Backtester> {
+pub struct ResearchLoop<B: Backtester> {
     /// Generates new hypotheses from trace history.
-    hypothesis_gen: HypothesisGenerator<L>,
+    hypothesis_gen: HypothesisGenerator,
     /// Generates and fixes strategy source code.
-    strategy_coder: StrategyCoder<L>,
+    strategy_coder: StrategyCoder,
     /// Compiles strategy code to WASM.
     compiler: StrategyCompiler,
     /// Loads and validates compiled WASM modules.
@@ -155,7 +153,7 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// Runs backtests against strategy code.
     backtester: B,
     /// LLM-driven feedback evaluator.
-    feedback_gen: FeedbackGenerator<L>,
+    feedback_gen: FeedbackGenerator,
     /// Prompt template renderer (shared with `FeedbackGenerator` for other uses).
     #[allow(dead_code)]
     prompt_renderer: PromptRenderer,
@@ -178,7 +176,7 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     timeframes: Vec<Timeframe>,
 }
 
-impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
+impl<B: Backtester> ResearchLoop<B> {
     /// Run one full research iteration.
     ///
     /// Steps: generate hypothesis -> generate code -> compile to WASM ->

@@ -5,6 +5,7 @@
 //! [`HypothesisFeedback`].
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
@@ -53,14 +54,14 @@ struct RawFeedback {
 }
 
 /// Generates structured feedback for experiments by prompting an LLM.
-pub struct FeedbackGenerator<L: LlmClient> {
-    llm: L,
+pub struct FeedbackGenerator {
+    llm: Arc<dyn LlmClient>,
     prompt_renderer: PromptRenderer,
 }
 
-impl<L: LlmClient> FeedbackGenerator<L> {
+impl FeedbackGenerator {
     /// Create a new feedback generator with the given LLM client and prompt renderer.
-    pub const fn new(llm: L, prompt_renderer: PromptRenderer) -> Self {
+    pub fn new(llm: Arc<dyn LlmClient>, prompt_renderer: PromptRenderer) -> Self {
         Self {
             llm,
             prompt_renderer,
@@ -254,7 +255,7 @@ mod tests {
         let llm = MockLlm {
             response: VALID_JSON.to_owned(),
         };
-        let generator = FeedbackGenerator::new(llm, make_renderer());
+        let generator = FeedbackGenerator::new(Arc::new(llm), make_renderer());
         let experiment_id = Uuid::new_v4();
 
         let feedback = generator
@@ -282,7 +283,7 @@ mod tests {
     async fn generate_parses_json_in_code_fences() {
         let fenced = format!("Here is my analysis:\n```json\n{VALID_JSON}\n```\n");
         let llm = MockLlm { response: fenced };
-        let generator = FeedbackGenerator::new(llm, make_renderer());
+        let generator = FeedbackGenerator::new(Arc::new(llm), make_renderer());
 
         let feedback = generator
             .generate(
@@ -303,7 +304,7 @@ mod tests {
         let llm = MockLlm {
             response: "not valid json at all".to_owned(),
         };
-        let generator = FeedbackGenerator::new(llm, make_renderer());
+        let generator = FeedbackGenerator::new(Arc::new(llm), make_renderer());
 
         let err = generator
             .generate(
@@ -321,7 +322,7 @@ mod tests {
 
     #[tokio::test]
     async fn generate_propagates_llm_error() {
-        let generator = FeedbackGenerator::new(FailingLlm, make_renderer());
+        let generator = FeedbackGenerator::new(Arc::new(FailingLlm), make_renderer());
 
         let err = generator
             .generate(
@@ -367,7 +368,7 @@ mod tests {
 
     #[test]
     fn generate_uses_no_sota_text_when_none() {
-        let vars = FeedbackGenerator::<MockLlm>::build_vars(
+        let vars = FeedbackGenerator::build_vars(
             &sample_hypothesis(),
             &sample_backtest_result(),
             "fn strategy() {}",

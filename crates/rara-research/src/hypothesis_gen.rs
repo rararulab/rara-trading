@@ -1,5 +1,7 @@
 //! Hypothesis generation using LLM prompts informed by trace history.
 
+use std::sync::Arc;
+
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::research::Hypothesis;
@@ -35,13 +37,13 @@ pub enum HypothesisGenError {
 pub type Result<T> = std::result::Result<T, HypothesisGenError>;
 
 /// Generates new hypotheses by prompting an LLM with trace context.
-pub struct HypothesisGenerator<L: LlmClient> {
-    llm: L,
+pub struct HypothesisGenerator {
+    llm: Arc<dyn LlmClient>,
 }
 
-impl<L: LlmClient> HypothesisGenerator<L> {
+impl HypothesisGenerator {
     /// Create a new generator backed by the given LLM client.
-    pub const fn new(llm: L) -> Self {
+    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
         Self { llm }
     }
 
@@ -154,7 +156,7 @@ mod tests {
         trace.save_feedback(&fb).unwrap();
 
         let executor = echo_executor("momentum crossover\nSMA cross signals trend reversal");
-        let generator = HypothesisGenerator::new(executor);
+        let generator = HypothesisGenerator::new(Arc::new(executor));
 
         let h = generator.generate(&trace, "BTC market").await.unwrap();
         assert_eq!(h.text, "momentum crossover");
