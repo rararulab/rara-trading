@@ -116,6 +116,6 @@ async fn full_pipeline_write_cache_backtest() {
 
     // Verify result values
     let first = results[0].as_ref().expect("first result");
-    assert_eq!(first.pnl(), Decimal::new(500, 0));
-    assert_eq!(first.trade_count(), 100);
+    assert_eq!(first.pnl, Decimal::new(500, 0));
+    assert_eq!(first.trade_count, 100);
 }
