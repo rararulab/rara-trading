@@ -82,6 +82,19 @@ impl HistoryFetcher for BinanceFetcher {
         let mut current = start;
 
         while current <= end {
+            // Skip days already fully stored (1440 = 24h * 60m)
+            let existing = store
+                .count_candles_for_day(instrument_id, "1m", current)
+                .await
+                .context(StoreSnafu)?;
+            if existing >= 1440 {
+                info!(date = %current, existing, "binance: day complete, skipping");
+                current = current
+                    .checked_add_days(Days::new(1))
+                    .expect("date overflow");
+                continue;
+            }
+
             let day_start_ms = current
                 .and_time(NaiveTime::MIN)
                 .and_utc()
