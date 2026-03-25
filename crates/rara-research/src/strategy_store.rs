@@ -43,7 +43,7 @@ pub struct StrategyStore {
 }
 
 impl StrategyStore {
-    /// Open or create a strategy store.
+    /// Open or create a strategy store with a shared sled database.
     ///
     /// Uses the given sled database (shared with other stores) and a dedicated
     /// filesystem directory for binary artifacts.
@@ -54,6 +54,15 @@ impl StrategyStore {
             strategies,
             artifact_dir: artifact_dir.to_owned(),
         })
+    }
+
+    /// Open or create a strategy store at a filesystem path.
+    ///
+    /// Opens its own sled database at `db_path` and stores artifacts in
+    /// `artifact_dir`. Convenient when a shared database is not needed.
+    pub fn open_path(db_path: &Path, artifact_dir: &Path) -> Result<Self> {
+        let db = sled::open(db_path).context(SledSnafu)?;
+        Self::open(&db, artifact_dir)
     }
 
     /// Save a research strategy record.

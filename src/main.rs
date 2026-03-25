@@ -187,7 +187,6 @@ struct ResearchPromotedResponse {
 
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
-use rara_trading::research::strategy_executor::StrategyExecutor;
 use rara_trading::research::wasm_executor::WasmExecutor;
 use rara_trading::research::feedback_gen::FeedbackGenerator;
 use rara_trading::research::hypothesis_gen::HypothesisGenerator;
@@ -195,7 +194,9 @@ use rara_trading::research::prompt_renderer::PromptRenderer;
 use rara_trading::research::research_loop::ResearchLoop;
 use rara_trading::research::strategy_coder::StrategyCoder;
 use rara_trading::research::strategy_promoter::PromotedStrategy;
+use rara_trading::research::strategy_store::StrategyStore;
 use rara_trading::research::trace::Trace;
+use rara_trading::research::wasm_strategy_manager::WasmStrategyManager;
 
 #[tokio::main]
 async fn main() {
@@ -511,46 +512,54 @@ async fn run_research_loop(
     let compiler = StrategyCompiler::builder()
         .template_dir(template_dir)
         .build();
-    let runtime = WasmExecutor::builder().build();
     let prompt_renderer =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
     let prompt_renderer_for_loop =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
-    let executor: Arc<dyn StrategyExecutor> = Arc::new(WasmExecutor::builder().build());
     let cfg = app_config::load();
-    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+    let market_store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
         .await
         .context(MarketStoreSnafu)?;
 
-    let backtester = BarterBacktester::builder()
-        .store(store)
-        .initial_capital(dec!(10000))
-        .fees_percent(dec!(0.1))
-        .executor(executor)
-        .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
-        .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
-        .build();
+    let backtester: Arc<dyn rara_trading::research::backtester::Backtester> =
+        Arc::new(BarterBacktester::builder()
+            .store(market_store)
+            .initial_capital(dec!(10000))
+            .fees_percent(dec!(0.1))
+            .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
+            .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
+            .build());
 
     let cli_backend =
         CliBackend::from_agent_config(&cfg.agent).context(error::AgentBackendSnafu)?;
-    let llm = CliExecutor::new(cli_backend);
+    let llm: Arc<dyn rara_trading::infra::llm::LlmClient> =
+        Arc::new(CliExecutor::new(cli_backend));
 
-    let feedback_gen = FeedbackGenerator::new(llm.clone(), prompt_renderer);
-    let hypothesis_gen = HypothesisGenerator::new(llm.clone());
-    let strategy_coder = StrategyCoder::new(llm);
+    let strategy_db_path = trace_path.join("strategy_db");
+    let artifact_dir = paths::data_dir().join("artifacts");
+    let strategy_store = StrategyStore::open_path(&strategy_db_path, &artifact_dir)
+        .expect("failed to open strategy store");
+
+    let strategy_manager: Arc<dyn rara_trading::research::strategy_manager::StrategyManager> =
+        Arc::new(WasmStrategyManager::builder()
+            .store(strategy_store)
+            .coder(StrategyCoder::new(Arc::clone(&llm)))
+            .compiler(compiler)
+            .executor(WasmExecutor::builder().build())
+            .build());
+
+    let feedback_gen = FeedbackGenerator::new(Arc::clone(&llm), prompt_renderer);
+    let hypothesis_gen = HypothesisGenerator::new(llm);
 
     let research_loop = ResearchLoop::builder()
         .hypothesis_gen(hypothesis_gen)
-        .strategy_coder(strategy_coder)
-        .compiler(compiler)
-        .runtime(runtime)
+        .strategy_manager(strategy_manager)
         .backtester(backtester)
         .feedback_gen(feedback_gen)
         .prompt_renderer(prompt_renderer_for_loop)
         .trace(trace)
         .event_bus(event_bus)
         .generated_dir(paths::strategies_generated_dir())
-        .promoted_dir(paths::strategies_promoted_dir())
         .build();
 
     for i in 1..=iterations {
