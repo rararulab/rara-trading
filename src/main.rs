@@ -240,7 +240,6 @@ async fn run_research_loop(
     let hypothesis_gen = HypothesisGenerator::new(llm.clone());
     let strategy_coder = StrategyCoder::new(llm);
 
-    let strategies_base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies");
     let research_loop = ResearchLoop::builder()
         .hypothesis_gen(hypothesis_gen)
         .strategy_coder(strategy_coder)
@@ -251,8 +250,8 @@ async fn run_research_loop(
         .prompt_renderer(prompt_renderer_for_loop)
         .trace(trace)
         .event_bus(event_bus)
-        .generated_dir(strategies_base.join("generated"))
-        .promoted_dir(strategies_base.join("promoted"))
+        .generated_dir(paths::strategies_generated_dir())
+        .promoted_dir(paths::strategies_promoted_dir())
         .build();
 
     for i in 1..=iterations {
@@ -413,10 +412,7 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
 
 /// List promoted strategies from the promoted directory.
 fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
-    let dir = promoted_dir.map_or_else(
-        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/promoted"),
-        PathBuf::from,
-    );
+    let dir = promoted_dir.map_or_else(paths::strategies_promoted_dir, PathBuf::from);
 
     let promoted = list_promoted_from_dir(&dir).context(PromoterSnafu)?;
 

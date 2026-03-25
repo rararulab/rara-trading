@@ -39,3 +39,9 @@ pub fn config_file() -> PathBuf { data_dir().join("config.toml") }
 
 /// Cache directory: `<data>/cache`
 pub fn cache_dir() -> PathBuf { data_dir().join("cache") }
+
+/// Strategy generated code directory: `<data>/strategies/generated`
+pub fn strategies_generated_dir() -> PathBuf { data_dir().join("strategies/generated") }
+
+/// Strategy promoted directory: `<data>/strategies/promoted`
+pub fn strategies_promoted_dir() -> PathBuf { data_dir().join("strategies/promoted") }

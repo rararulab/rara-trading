@@ -1,4 +1,2 @@
-generated/
-promoted/
 template/target/
 template/Cargo.lock

@@ -81,7 +81,7 @@ pub enum ResearchAction {
     /// List promoted strategies.
     Promoted {
         /// Directory where promoted strategies are stored.
-        #[arg(long, default_value = "strategies/promoted")]
+        #[arg(long)]
         promoted_dir: Option<String>,
     },
 }
