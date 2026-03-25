@@ -33,6 +33,7 @@ rara-strategy-api.workspace = true
 
 [dev-dependencies]
 rara-agent.workspace = true
+rust_decimal_macros = "1"
 tempfile.workspace = true
 tokio.workspace = true
 
