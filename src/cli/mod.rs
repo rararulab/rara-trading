@@ -57,6 +57,33 @@ pub enum ResearchAction {
         #[arg(long)]
         trace_dir: Option<String>,
     },
+
+    /// List experiment history from the trace.
+    List {
+        /// Maximum number of entries to show.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Path to trace storage directory.
+        #[arg(long)]
+        trace_dir: Option<String>,
+    },
+
+    /// Show full details of a specific experiment.
+    Show {
+        /// Experiment ID to display.
+        #[arg(long)]
+        experiment_id: String,
+        /// Path to trace storage directory.
+        #[arg(long)]
+        trace_dir: Option<String>,
+    },
+
+    /// List promoted strategies.
+    Promoted {
+        /// Directory where promoted strategies are stored.
+        #[arg(long, default_value = "strategies/promoted")]
+        promoted_dir: Option<String>,
+    },
 }
 
 /// Config management subcommands.

@@ -44,6 +44,11 @@ pub enum AppError {
     PromptRenderer {
         source: crate::research::prompt_renderer::PromptError,
     },
+
+    #[snafu(display("strategy promoter error: {source}"))]
+    Promoter {
+        source: crate::research::strategy_promoter::PromoterError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

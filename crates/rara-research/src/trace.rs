@@ -361,6 +361,53 @@ impl Trace {
             .collect()
     }
 
+    /// List recent experiments in reverse chronological order (newest first).
+    ///
+    /// Returns up to `limit` entries, each containing the `hist_order` index,
+    /// the experiment, and its first feedback (if any).
+    pub fn list_recent(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(u64, Experiment, Option<HypothesisFeedback>)>> {
+        let total = self.hist_order.len();
+        let skip = total.saturating_sub(limit);
+
+        let mut entries: Vec<(u64, Experiment, Option<HypothesisFeedback>)> = self
+            .hist_order
+            .iter()
+            .skip(skip)
+            .filter_map(|res| {
+                let (key_bytes, exp_id_bytes) = match res {
+                    Ok(pair) => pair,
+                    Err(e) => return Some(Err(TraceError::Sled { source: e })),
+                };
+
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&key_bytes);
+                let idx = u64::from_be_bytes(buf);
+
+                let exp_id = Uuid::from_slice(&exp_id_bytes).unwrap_or_default();
+
+                let exp = match self.get_experiment(exp_id) {
+                    Ok(Some(e)) => e,
+                    Ok(None) => return None,
+                    Err(e) => return Some(Err(e)),
+                };
+
+                let fb = match self.get_feedback_for_experiment(exp_id) {
+                    Ok(fbs) => fbs.into_iter().next(),
+                    Err(e) => return Some(Err(e)),
+                };
+
+                Some(Ok((idx, exp, fb)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Reverse so newest is first
+        entries.reverse();
+        Ok(entries)
+    }
+
     /// Render trace history as structured text for LLM prompt injection.
     ///
     /// Shows the most recent `max_entries` entries from `hist_order`, formatted

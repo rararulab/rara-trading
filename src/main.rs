@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -10,10 +10,12 @@ use rara_trading::app_config;
 use rara_trading::cli::{Cli, Command, ConfigAction, ResearchAction};
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, EventBusSnafu, IoSnafu,
-    PromptRendererSnafu, TraceSnafu,
+    PromoterSnafu, PromptRendererSnafu, TraceSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::paths;
+use uuid::Uuid;
+
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
 use rara_trading::research::feedback_gen::FeedbackGenerator;
@@ -22,6 +24,7 @@ use rara_trading::research::prompt_renderer::PromptRenderer;
 use rara_trading::research::research_loop::ResearchLoop;
 use rara_trading::research::runtime::StrategyRuntime;
 use rara_trading::research::strategy_coder::StrategyCoder;
+use rara_trading::research::strategy_promoter::PromotedStrategy;
 use rara_trading::research::trace::Trace;
 
 #[tokio::main]
@@ -191,91 +194,282 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
             iterations,
             contract,
             trace_dir,
-        } => {
-            // 1. Set up paths
-            let trace_path = trace_dir
-                .map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
-            let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
-            let prompts_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("crates/rara-research/src/prompts");
+        } => run_research_loop(iterations, &contract, trace_dir).await,
+        ResearchAction::List { limit, trace_dir } => run_research_list(limit, trace_dir),
+        ResearchAction::Show {
+            experiment_id,
+            trace_dir,
+        } => run_research_show(&experiment_id, trace_dir),
+        ResearchAction::Promoted { promoted_dir } => run_research_promoted(promoted_dir),
+    }
+}
 
-            // 2. Initialize components
-            let trace = Trace::open(&trace_path).context(TraceSnafu)?;
-            let event_bus = Arc::new(
-                EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?,
-            );
-            let compiler = StrategyCompiler::builder()
-                .template_dir(template_dir)
-                .build();
-            let runtime = StrategyRuntime::builder().build();
-            let prompt_renderer =
-                PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
-            let prompt_renderer_for_loop =
-                PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
-            let backtester = BarterBacktester::builder()
-                .data_dir(paths::data_dir().join("market_data"))
-                .initial_capital(dec!(10000))
-                .fees_percent(dec!(0.1))
-                .build();
+/// Run N iterations of the research loop.
+async fn run_research_loop(
+    iterations: u32,
+    contract: &str,
+    trace_dir: Option<String>,
+) -> error::Result<()> {
+    let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
+    let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
+    let prompts_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/rara-research/src/prompts");
 
-            // 3. Initialize LLM via configured agent backend
-            let cfg = app_config::load();
-            let cli_backend =
-                CliBackend::from_agent_config(&cfg.agent).context(error::AgentBackendSnafu)?;
-            let llm = CliExecutor::new(cli_backend);
+    let trace = Trace::open(&trace_path).context(TraceSnafu)?;
+    let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
+    let compiler = StrategyCompiler::builder()
+        .template_dir(template_dir)
+        .build();
+    let runtime = StrategyRuntime::builder().build();
+    let prompt_renderer =
+        PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
+    let prompt_renderer_for_loop =
+        PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
+    let backtester = BarterBacktester::builder()
+        .data_dir(paths::data_dir().join("market_data"))
+        .initial_capital(dec!(10000))
+        .fees_percent(dec!(0.1))
+        .build();
 
-            // 4. Build sub-components
-            let feedback_gen = FeedbackGenerator::new(llm.clone(), prompt_renderer);
-            let hypothesis_gen = HypothesisGenerator::new(llm.clone());
-            let strategy_coder = StrategyCoder::new(llm);
+    let cfg = app_config::load();
+    let cli_backend =
+        CliBackend::from_agent_config(&cfg.agent).context(error::AgentBackendSnafu)?;
+    let llm = CliExecutor::new(cli_backend);
 
-            // 5. Build ResearchLoop
-            let strategies_base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies");
-            let research_loop = ResearchLoop::builder()
-                .hypothesis_gen(hypothesis_gen)
-                .strategy_coder(strategy_coder)
-                .compiler(compiler)
-                .runtime(runtime)
-                .backtester(backtester)
-                .feedback_gen(feedback_gen)
-                .prompt_renderer(prompt_renderer_for_loop)
-                .trace(trace)
-                .event_bus(event_bus)
-                .generated_dir(strategies_base.join("generated"))
-                .promoted_dir(strategies_base.join("promoted"))
-                .build();
+    let feedback_gen = FeedbackGenerator::new(llm.clone(), prompt_renderer);
+    let hypothesis_gen = HypothesisGenerator::new(llm.clone());
+    let strategy_coder = StrategyCoder::new(llm);
 
-            // 6. Run iterations
-            for i in 1..=iterations {
-                eprintln!("[iteration {i}/{iterations}] running...");
-                let result = research_loop.run_iteration(&contract).await;
-                match result {
-                    Ok(ir) => {
-                        let status = if ir.accepted { "ACCEPTED" } else { "rejected" };
-                        eprintln!(
-                            "[iteration {i}/{iterations}] {status} — hypothesis: {}",
-                            ir.hypothesis.text()
-                        );
-                        println!(
-                            "{}",
-                            serde_json::json!({
-                                "iteration": i,
-                                "accepted": ir.accepted,
-                                "hypothesis": ir.hypothesis.text(),
-                            })
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[iteration {i}/{iterations}] ERROR: {e}");
-                    }
-                }
+    let strategies_base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies");
+    let research_loop = ResearchLoop::builder()
+        .hypothesis_gen(hypothesis_gen)
+        .strategy_coder(strategy_coder)
+        .compiler(compiler)
+        .runtime(runtime)
+        .backtester(backtester)
+        .feedback_gen(feedback_gen)
+        .prompt_renderer(prompt_renderer_for_loop)
+        .trace(trace)
+        .event_bus(event_bus)
+        .generated_dir(strategies_base.join("generated"))
+        .promoted_dir(strategies_base.join("promoted"))
+        .build();
+
+    for i in 1..=iterations {
+        eprintln!("[iteration {i}/{iterations}] running...");
+        let result = research_loop.run_iteration(contract).await;
+        match result {
+            Ok(ir) => {
+                let status = if ir.accepted { "ACCEPTED" } else { "rejected" };
+                eprintln!(
+                    "[iteration {i}/{iterations}] {status} — hypothesis: {}",
+                    ir.hypothesis.text()
+                );
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "iteration": i,
+                        "accepted": ir.accepted,
+                        "hypothesis": ir.hypothesis.text(),
+                    })
+                );
             }
-
-            println!(
-                "{}",
-                serde_json::json!({"ok": true, "action": "research.run", "iterations": iterations})
-            );
+            Err(e) => {
+                eprintln!("[iteration {i}/{iterations}] ERROR: {e}");
+            }
         }
     }
+
+    println!(
+        "{}",
+        serde_json::json!({"ok": true, "action": "research.run", "iterations": iterations})
+    );
     Ok(())
+}
+
+/// List recent experiments from the trace store.
+fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<()> {
+    let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
+    let trace = Trace::open(&trace_path).context(TraceSnafu)?;
+
+    let entries = trace.list_recent(limit).context(TraceSnafu)?;
+
+    let items: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|(idx, exp, fb)| {
+            let hypothesis_text = trace
+                .get_hypothesis(exp.hypothesis_id())
+                .ok()
+                .flatten()
+                .map_or_else(|| "unknown".to_owned(), |h| h.text().to_owned());
+
+            let decision = fb.as_ref().map_or("no feedback", |f| {
+                if f.decision() {
+                    "accepted"
+                } else {
+                    "rejected"
+                }
+            });
+
+            let sharpe = exp
+                .backtest_result()
+                .map(rara_trading::domain::research::BacktestResult::sharpe_ratio);
+
+            serde_json::json!({
+                "index": idx,
+                "experiment_id": exp.id().to_string(),
+                "hypothesis": hypothesis_text,
+                "decision": decision,
+                "sharpe": sharpe,
+            })
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::json!({"ok": true, "action": "research.list", "experiments": items})
+    );
+    Ok(())
+}
+
+/// Show full details of a specific experiment.
+fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::Result<()> {
+    let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
+    let trace = Trace::open(&trace_path).context(TraceSnafu)?;
+
+    let exp_uuid = Uuid::parse_str(experiment_id).map_err(|_| error::AppError::Config {
+        message: format!("invalid experiment ID: {experiment_id}"),
+    })?;
+
+    let exp = trace
+        .get_experiment(exp_uuid)
+        .context(TraceSnafu)?
+        .ok_or_else(|| error::AppError::Config {
+            message: format!("experiment not found: {experiment_id}"),
+        })?;
+
+    let hypothesis = trace
+        .get_hypothesis(exp.hypothesis_id())
+        .context(TraceSnafu)?;
+
+    let feedbacks = trace
+        .get_feedback_for_experiment(exp_uuid)
+        .context(TraceSnafu)?;
+
+    let hyp_json = hypothesis.map(|h| {
+        serde_json::json!({
+            "id": h.id().to_string(),
+            "text": h.text(),
+            "reason": h.reason(),
+            "observation": h.observation(),
+            "knowledge": h.knowledge(),
+            "parent": h.parent().map(|p| p.to_string()),
+        })
+    });
+
+    let fb_json: Vec<serde_json::Value> = feedbacks
+        .iter()
+        .map(|fb| {
+            serde_json::json!({
+                "experiment_id": fb.experiment_id().to_string(),
+                "decision": fb.decision(),
+                "reason": fb.reason(),
+                "observations": fb.observations(),
+                "hypothesis_evaluation": fb.hypothesis_evaluation(),
+                "new_hypothesis": fb.new_hypothesis(),
+                "code_change_summary": fb.code_change_summary(),
+            })
+        })
+        .collect();
+
+    let backtest_json = exp.backtest_result().map(|br| {
+        serde_json::json!({
+            "pnl": br.pnl().to_string(),
+            "sharpe_ratio": br.sharpe_ratio(),
+            "max_drawdown": br.max_drawdown().to_string(),
+            "win_rate": br.win_rate(),
+            "trade_count": br.trade_count(),
+        })
+    });
+
+    println!(
+        "{}",
+        serde_json::json!({
+            "ok": true,
+            "action": "research.show",
+            "experiment": {
+                "id": exp.id().to_string(),
+                "hypothesis_id": exp.hypothesis_id().to_string(),
+                "status": format!("{:?}", exp.status()),
+                "strategy_code": exp.strategy_code(),
+                "backtest_result": backtest_json,
+            },
+            "hypothesis": hyp_json,
+            "feedbacks": fb_json,
+        })
+    );
+    Ok(())
+}
+
+/// List promoted strategies from the promoted directory.
+fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
+    let dir = promoted_dir.map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/promoted"),
+        PathBuf::from,
+    );
+
+    let promoted = list_promoted_from_dir(&dir).context(PromoterSnafu)?;
+
+    let items: Vec<serde_json::Value> = promoted
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "experiment_id": p.experiment_id().to_string(),
+                "hypothesis_id": p.hypothesis_id().to_string(),
+                "wasm_path": p.wasm_path().to_string_lossy(),
+                "source_path": p.source_path().map(|s| s.to_string_lossy().into_owned()),
+                "meta": {
+                    "name": p.meta().name,
+                    "version": p.meta().version,
+                    "api_version": p.meta().api_version,
+                    "description": p.meta().description,
+                },
+            })
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::json!({"ok": true, "action": "research.promoted", "strategies": items})
+    );
+    Ok(())
+}
+
+/// Read promoted strategy metadata files from a directory without requiring
+/// the full `StrategyPromoter` (which needs trace, runtime, and compiler).
+fn list_promoted_from_dir(
+    dir: &Path,
+) -> rara_trading::research::strategy_promoter::Result<Vec<PromotedStrategy>> {
+    use rara_trading::research::strategy_promoter::{IoSnafu as PmIoSnafu, SerializeSnafu as PmSerializeSnafu};
+
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut promoted = Vec::new();
+    let entries = std::fs::read_dir(dir).context(PmIoSnafu)?;
+
+    for entry in entries {
+        let entry = entry.context(PmIoSnafu)?;
+        let path = entry.path();
+
+        if path.extension().is_some_and(|ext| ext == "json") {
+            let contents = std::fs::read_to_string(&path).context(PmIoSnafu)?;
+            let strategy: PromotedStrategy =
+                serde_json::from_str(&contents).context(PmSerializeSnafu)?;
+            promoted.push(strategy);
+        }
+    }
+
+    Ok(promoted)
 }
