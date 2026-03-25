@@ -44,13 +44,13 @@ pub type WasmEngineState = EngineState<DefaultGlobalData, CandleInstrumentData>;
 pub struct WasmAlgoStrategy {
     /// Strategy identifier for order tagging.
     pub id: StrategyId,
-    /// Mutable inner state behind RefCell (barter calls generate_algo_orders with &self).
+    /// Mutable inner state behind `RefCell` (barter calls `generate_algo_orders` with `&self`).
     state: RefCell<WasmStrategyInner>,
 }
 
 /// Mutable state for candle aggregation and WASM strategy invocation.
 struct WasmStrategyInner {
-    /// WASM strategy handle for calling on_candles().
+    /// WASM strategy handle for calling `on_candles()`.
     handle: Box<dyn StrategyHandle>,
     /// Target timeframe for candle aggregation.
     timeframe: Timeframe,
@@ -58,7 +58,7 @@ struct WasmStrategyInner {
     buffer: Vec<ApiCandle>,
     /// Aggregated candle history passed to the WASM strategy.
     history: Vec<ApiCandle>,
-    /// Number of candles already consumed from CandleInstrumentData.
+    /// Number of candles already consumed from `CandleInstrumentData`.
     processed_count: usize,
     /// Most recent signal from the WASM strategy.
     current_signal: Option<Signal>,
@@ -132,7 +132,7 @@ impl AlgoStrategy for WasmAlgoStrategy {
         let mut open_orders: Vec<OrderRequestOpen<ExchangeIndex, InstrumentIndex>> = Vec::new();
 
         // Process each instrument's candle data
-        for (_name, instrument_state) in state.instruments.0.iter() {
+        for (_name, instrument_state) in &state.instruments.0 {
             let candles = instrument_state.data.candle_history();
             let new_count = candles.len();
 
@@ -202,28 +202,28 @@ impl AlgoStrategy for WasmAlgoStrategy {
                     }
                     Signal::Exit => {
                         // Close position by placing opposite-side market order
-                        if let Some(position) = instrument_state.position.current.as_ref() {
-                            if let Some(price) = price {
-                                let exit_side = match position.side {
-                                    Side::Buy => Side::Sell,
-                                    Side::Sell => Side::Buy,
-                                };
-                                open_orders.push(OrderRequestOpen {
-                                    key: OrderKey {
-                                        exchange: instrument_state.instrument.exchange,
-                                        instrument: instrument_state.key,
-                                        strategy: self.id.clone(),
-                                        cid: ClientOrderId::random(),
-                                    },
-                                    state: RequestOpen {
-                                        side: exit_side,
-                                        price,
-                                        quantity: position.quantity_abs,
-                                        kind: OrderKind::Market,
-                                        time_in_force: TimeInForce::ImmediateOrCancel,
-                                    },
-                                });
-                            }
+                        if let Some(position) = instrument_state.position.current.as_ref()
+                            && let Some(price) = price
+                        {
+                            let exit_side = match position.side {
+                                Side::Buy => Side::Sell,
+                                Side::Sell => Side::Buy,
+                            };
+                            open_orders.push(OrderRequestOpen {
+                                key: OrderKey {
+                                    exchange: instrument_state.instrument.exchange,
+                                    instrument: instrument_state.key,
+                                    strategy: self.id.clone(),
+                                    cid: ClientOrderId::random(),
+                                },
+                                state: RequestOpen {
+                                    side: exit_side,
+                                    price,
+                                    quantity: position.quantity_abs,
+                                    kind: OrderKind::Market,
+                                    time_in_force: TimeInForce::ImmediateOrCancel,
+                                },
+                            });
                         }
                     }
                     Signal::Hold => {}

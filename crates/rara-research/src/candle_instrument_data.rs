@@ -50,7 +50,7 @@ impl InstrumentDataState for CandleInstrumentData {
     fn price(&self) -> Option<Decimal> {
         self.l1
             .volume_weighed_mid_price()
-            .or(self.last_traded_price.as_ref().map(|timed| timed.value))
+            .or_else(|| self.last_traded_price.as_ref().map(|timed| timed.value))
     }
 }
 

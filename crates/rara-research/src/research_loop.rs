@@ -44,7 +44,8 @@ use crate::compiler::StrategyCompiler;
 use crate::feedback_gen::FeedbackGenerator;
 use crate::hypothesis_gen::HypothesisGenerator;
 use crate::prompt_renderer::PromptRenderer;
-use crate::runtime::StrategyRuntime;
+use crate::strategy_executor::StrategyExecutor;
+use crate::wasm_executor::WasmExecutor;
 use crate::strategy_coder::StrategyCoder;
 use crate::strategy_promoter::PromotedStrategy;
 use crate::trace::{DagSelection, Trace};
@@ -81,7 +82,7 @@ pub enum ResearchLoopError {
     #[snafu(display("runtime error: {source}"))]
     Runtime {
         /// The underlying runtime error.
-        source: crate::runtime::RuntimeError,
+        source: crate::strategy_executor::ExecutorError,
     },
     /// Feedback generation failed.
     #[snafu(display("feedback generation failed: {source}"))]
@@ -150,7 +151,7 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// Compiles strategy code to WASM.
     compiler: StrategyCompiler,
     /// Loads and validates compiled WASM modules.
-    runtime: StrategyRuntime,
+    runtime: WasmExecutor,
     /// Runs backtests against strategy code.
     backtester: B,
     /// LLM-driven feedback evaluator.
@@ -225,7 +226,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 6. Compile to WASM with retries
         let wasm_bytes = self.compile_with_retries(&mut code, &hypothesis).await?;
 
-        // 6. Load into StrategyRuntime to validate the module
+        // 6. Load into executor to validate the module
         let _loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
 
         // Keep wasm_bytes for potential promotion after acceptance
@@ -366,7 +367,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
                     tracing::info!(%timeframe, sharpe = bt.sharpe_ratio, "backtest completed");
                     let is_better = best
                         .as_ref()
-                        .map_or(true, |prev| bt.sharpe_ratio > prev.sharpe_ratio);
+                        .is_none_or(|prev| bt.sharpe_ratio > prev.sharpe_ratio);
                     if is_better {
                         best = Some(bt);
                     }
@@ -440,7 +441,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
                 )
                 .context(TraceSnafu)?,
             )
-            .runtime(StrategyRuntime::builder().build())
+            .runtime(WasmExecutor::builder().build())
             .compiler(
                 StrategyCompiler::builder()
                     .template_dir(PathBuf::new())

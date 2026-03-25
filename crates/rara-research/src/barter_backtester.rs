@@ -81,7 +81,7 @@ impl fmt::Debug for BarterBacktester {
 
 /// Extract performance metrics from a barter `TradingSummary` into our domain `BacktestResult`.
 ///
-/// Aggregates PnL, Sharpe ratio, max drawdown, and win rate across all instruments
+/// Aggregates `PnL`, Sharpe ratio, max drawdown, and win rate across all instruments
 /// in the trading summary, tagging the result with the given timeframe.
 fn extract_metrics(
     trading_summary: &barter::statistic::summary::TradingSummary<Daily>,

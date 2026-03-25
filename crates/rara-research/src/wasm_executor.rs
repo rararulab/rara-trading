@@ -35,6 +35,7 @@ pub struct WasmStrategyHandle {
 }
 
 /// Map a wasmtime error to an `ExecutorError::Load`.
+#[allow(clippy::needless_pass_by_value)]
 fn load_err(context: &str, source: wasmtime::Error) -> ExecutorError {
     ExecutorError::Load {
         message: format!("{context}: {source}"),
@@ -42,13 +43,15 @@ fn load_err(context: &str, source: wasmtime::Error) -> ExecutorError {
 }
 
 /// Map a wasmtime error to an `ExecutorError::Execution`.
+#[allow(clippy::needless_pass_by_value)]
 fn exec_err(context: &str, source: wasmtime::Error) -> ExecutorError {
     ExecutorError::Execution {
         message: format!("{context}: {source}"),
     }
 }
 
-/// Map a serde_json error to an `ExecutorError::Execution`.
+/// Map a `serde_json` error to an `ExecutorError::Execution`.
+#[allow(clippy::needless_pass_by_value)]
 fn serde_err(context: &str, source: serde_json::Error) -> ExecutorError {
     ExecutorError::Execution {
         message: format!("{context}: {source}"),

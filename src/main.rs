@@ -176,7 +176,6 @@ use rara_trading::research::feedback_gen::FeedbackGenerator;
 use rara_trading::research::hypothesis_gen::HypothesisGenerator;
 use rara_trading::research::prompt_renderer::PromptRenderer;
 use rara_trading::research::research_loop::ResearchLoop;
-use rara_trading::research::runtime::StrategyRuntime;
 use rara_trading::research::strategy_coder::StrategyCoder;
 use rara_trading::research::strategy_promoter::PromotedStrategy;
 use rara_trading::research::trace::Trace;
@@ -399,7 +398,7 @@ async fn run_research_loop(
     let compiler = StrategyCompiler::builder()
         .template_dir(template_dir)
         .build();
-    let runtime = StrategyRuntime::builder().build();
+    let runtime = WasmExecutor::builder().build();
     let prompt_renderer =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
     let prompt_renderer_for_loop =
