@@ -1,7 +1,8 @@
-//! Research loop orchestration — the full propose -> code -> backtest -> evaluate cycle.
+//! Research loop orchestration — the full propose -> code -> compile -> backtest -> evaluate cycle.
 
 use std::sync::Arc;
 
+use bon::Builder;
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
 
@@ -11,9 +12,13 @@ use rara_event_bus::bus::EventBus;
 use rara_infra::llm::LlmClient;
 
 use crate::backtester::Backtester;
+use crate::compiler::StrategyCompiler;
+use crate::feedback_gen::FeedbackGenerator;
 use crate::hypothesis_gen::HypothesisGenerator;
+use crate::prompt_renderer::PromptRenderer;
+use crate::runtime::StrategyRuntime;
 use crate::strategy_coder::StrategyCoder;
-use crate::trace::Trace;
+use crate::trace::{DagSelection, Trace};
 
 /// Errors from research loop execution.
 #[derive(Debug, Snafu)]
@@ -30,6 +35,30 @@ pub enum ResearchLoopError {
     StrategyCoding {
         /// The underlying error.
         source: crate::strategy_coder::StrategyCoderError,
+    },
+    /// Strategy compilation failed.
+    #[snafu(display("compilation failed: {source}"))]
+    Compile {
+        /// The underlying compiler error.
+        source: crate::compiler::CompilerError,
+    },
+    /// All compile retries exhausted.
+    #[snafu(display("compilation failed after retries: {}", errors.join("; ")))]
+    CompileFailed {
+        /// The last set of compilation errors.
+        errors: Vec<String>,
+    },
+    /// WASM runtime error.
+    #[snafu(display("runtime error: {source}"))]
+    Runtime {
+        /// The underlying runtime error.
+        source: crate::runtime::RuntimeError,
+    },
+    /// Feedback generation failed.
+    #[snafu(display("feedback generation failed: {source}"))]
+    FeedbackGen {
+        /// The underlying feedback generator error.
+        source: crate::feedback_gen::FeedbackGenError,
     },
     /// Backtesting failed.
     #[snafu(display("backtesting failed: {source}"))]
@@ -67,36 +96,39 @@ pub struct IterationResult {
 }
 
 /// Orchestrates the full RD-Agent style research loop:
-/// propose -> code -> backtest -> evaluate -> record.
+/// propose -> code -> compile -> backtest -> evaluate -> record.
+#[derive(Builder)]
 pub struct ResearchLoop<L: LlmClient, B: Backtester> {
+    /// Generates new hypotheses from trace history.
     hypothesis_gen: HypothesisGenerator<L>,
+    /// Generates and fixes strategy source code.
     strategy_coder: StrategyCoder<L>,
+    /// Compiles strategy code to WASM.
+    compiler: StrategyCompiler,
+    /// Loads and validates compiled WASM modules.
+    runtime: StrategyRuntime,
+    /// Runs backtests against strategy code.
     backtester: B,
+    /// LLM-driven feedback evaluator.
+    feedback_gen: FeedbackGenerator<L>,
+    /// Prompt template renderer (shared with `FeedbackGenerator` for other uses).
+    #[allow(dead_code)]
+    prompt_renderer: PromptRenderer,
+    /// DAG trace storage.
     trace: Trace,
+    /// Domain event bus.
     event_bus: Arc<EventBus>,
+    /// Maximum attempts to fix compile errors before giving up.
+    #[builder(default = 3)]
+    max_compile_retries: u32,
 }
 
 impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
-    /// Create a new research loop with all required components.
-    pub fn new(
-        llm: L,
-        backtester: B,
-        trace: Trace,
-        event_bus: Arc<EventBus>,
-    ) -> Self {
-        Self {
-            hypothesis_gen: HypothesisGenerator::new(llm.clone()),
-            strategy_coder: StrategyCoder::new(llm),
-            backtester,
-            trace,
-            event_bus,
-        }
-    }
-
     /// Run one full research iteration.
     ///
-    /// Steps: generate hypothesis -> generate code -> backtest -> evaluate ->
-    /// record feedback -> publish events.
+    /// Steps: generate hypothesis -> generate code -> compile to WASM ->
+    /// load into runtime -> backtest -> generate feedback -> record in DAG ->
+    /// publish events.
     pub async fn run_iteration(&self, context: &str) -> Result<IterationResult> {
         // 1. Generate hypothesis
         let hypothesis = self
@@ -117,13 +149,19 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         )?;
 
         // 4. Generate strategy code
-        let code = self
+        let mut code = self
             .strategy_coder
             .generate_code(&hypothesis, context)
             .await
             .context(StrategyCodingSnafu)?;
 
-        // 5. Create and save experiment
+        // 5. Compile to WASM with retries
+        let wasm_bytes = self.compile_with_retries(&mut code, &hypothesis).await?;
+
+        // 6. Load into StrategyRuntime to validate the module
+        let _loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
+
+        // 7. Create and save experiment
         let experiment = Experiment::builder()
             .hypothesis_id(hypothesis.id())
             .strategy_code(&code)
@@ -133,47 +171,43 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .save_experiment(&experiment)
             .context(TraceSnafu)?;
 
-        // 6. Run backtest
+        // 8. Run backtest (still using code string; WASM backtesting is Phase 4)
         let backtest_result = self
             .backtester
             .run(&code, "default")
             .await
             .context(BacktestSnafu)?;
 
-        // 7. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
+        // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
         let accepted = backtest_result.sharpe_ratio() > 1.0
             && backtest_result.max_drawdown() < max_drawdown_threshold;
 
-        // 8. Create feedback
-        let feedback = HypothesisFeedback::builder()
-            .experiment_id(experiment.id())
-            .decision(accepted)
-            .reason(if accepted {
-                format!(
-                    "Accepted: sharpe={:.2}, max_drawdown={}",
-                    backtest_result.sharpe_ratio(),
-                    backtest_result.max_drawdown()
-                )
-            } else {
-                format!(
-                    "Rejected: sharpe={:.2}, max_drawdown={}",
-                    backtest_result.sharpe_ratio(),
-                    backtest_result.max_drawdown()
-                )
-            })
-            .observations(format!(
-                "pnl={}, win_rate={:.2}, trades={}",
-                backtest_result.pnl(),
-                backtest_result.win_rate(),
-                backtest_result.trade_count()
-            ))
-            .build();
+        // 10. Generate feedback via FeedbackGenerator
+        let sota_result = self
+            .trace
+            .get_sota()
+            .context(TraceSnafu)?
+            .and_then(|(exp, _)| exp.backtest_result().cloned());
 
-        // 9. Save feedback
-        self.trace.save_feedback(&feedback).context(TraceSnafu)?;
+        let feedback = self
+            .feedback_gen
+            .generate(
+                experiment.id(),
+                &hypothesis,
+                &backtest_result,
+                &code,
+                sota_result.as_ref(),
+            )
+            .await
+            .context(FeedbackGenSnafu)?;
 
-        // 10. Publish experiment completed event
+        // 11. Record in Trace DAG
+        self.trace
+            .record(&experiment, &feedback, &DagSelection::Latest)
+            .context(TraceSnafu)?;
+
+        // 12. Publish experiment completed event
         self.publish_event(
             "research.experiment.completed",
             &serde_json::json!({
@@ -182,7 +216,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             }),
         )?;
 
-        // 11. If accepted, publish candidate event
+        // 13. If accepted, publish candidate event
         if accepted {
             self.publish_event(
                 "research.strategy.candidate",
@@ -198,6 +232,38 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             experiment,
             feedback,
             accepted,
+        })
+    }
+
+    /// Attempt to compile strategy code, retrying with LLM-driven fixes on failure.
+    async fn compile_with_retries(
+        &self,
+        code: &mut String,
+        hypothesis: &Hypothesis,
+    ) -> Result<Vec<u8>> {
+        let mut last_errors = vec![];
+
+        for attempt in 0..=self.max_compile_retries {
+            let result = self.compiler.compile(code).await.context(CompileSnafu)?;
+
+            if result.success {
+                return Ok(result.wasm_bytes.expect("success implies wasm_bytes"));
+            }
+
+            last_errors = result.errors;
+
+            // If we have retries left, ask the LLM to fix the errors
+            if attempt < self.max_compile_retries {
+                *code = self
+                    .strategy_coder
+                    .fix_errors(code, &last_errors, hypothesis)
+                    .await
+                    .context(StrategyCodingSnafu)?;
+            }
+        }
+
+        Err(ResearchLoopError::CompileFailed {
+            errors: last_errors,
         })
     }
 

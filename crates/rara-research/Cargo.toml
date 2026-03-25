@@ -18,6 +18,7 @@ sled.workspace = true
 uuid.workspace = true
 jiff.workspace = true
 rust_decimal.workspace = true
+toml.workspace = true
 tracing.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
@@ -33,6 +34,7 @@ rara-strategy-api.workspace = true
 
 [dev-dependencies]
 rara-agent.workspace = true
+rust_decimal_macros = "1"
 tempfile.workspace = true
 tokio.workspace = true
 
