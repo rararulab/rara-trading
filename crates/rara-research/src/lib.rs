@@ -12,6 +12,7 @@ pub mod research_loop;
 pub mod strategy_coder;
 pub mod strategy_executor;
 pub mod strategy_promoter;
+pub mod strategy_store;
 pub mod trace;
 pub mod wasm_executor;
 pub mod barter_strategy;
