@@ -1,12 +1,7 @@
-#![allow(unsafe_code)]
-//! Dual-layer market data storage: hot binary (`.rara`) + cold Parquet.
+//! Market data storage and fetching backed by `TimescaleDB`.
 //!
-//! Provides zero-copy mmap reads for high-performance backtesting,
-//! with moka-based caching and automatic hot-to-cold archival.
+//! Provides a `TimescaleDB`-backed store for persistence and querying
+//! of candles and tick data.
 
-pub mod archiver;
-pub mod cache;
 pub mod fetcher;
-pub mod file;
-pub mod ingester;
-pub mod record;
+pub mod store;
