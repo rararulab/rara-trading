@@ -49,6 +49,16 @@ pub enum AppError {
     Promoter {
         source: crate::research::strategy_promoter::PromoterError,
     },
+
+    #[snafu(display("market data store error: {source}"))]
+    MarketStore {
+        source: rara_market_data::store::StoreError,
+    },
+
+    #[snafu(display("data fetch error: {source}"))]
+    DataFetch {
+        source: rara_market_data::fetcher::FetchError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

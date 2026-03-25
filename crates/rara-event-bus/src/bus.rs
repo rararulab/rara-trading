@@ -53,6 +53,8 @@ impl EventBus {
 mod tests {
     use serde_json::json;
 
+    use rara_domain::event::EventType;
+
     use super::*;
 
     #[tokio::test]
@@ -62,7 +64,7 @@ mod tests {
         let mut rx = bus.subscribe();
 
         let event = Event::builder()
-            .event_type("test.ping")
+            .event_type(EventType::TradingOrderSubmitted)
             .source("test")
             .correlation_id("corr-1")
             .payload(json!({"msg": "hello"}))
@@ -73,7 +75,7 @@ mod tests {
         assert_eq!(received_seq, seq);
 
         let stored = bus.store().get(seq).unwrap().unwrap();
-        assert_eq!(stored.event_type(), "test.ping");
+        assert_eq!(stored.event_type, EventType::TradingOrderSubmitted);
     }
 
     #[tokio::test]
@@ -84,7 +86,7 @@ mod tests {
         // Publish 3 events before anyone subscribes
         for i in 0..3 {
             let event = Event::builder()
-                .event_type("trading.tick")
+                .event_type(EventType::TradingOrderUpdated)
                 .source("test")
                 .correlation_id(format!("corr-{i}"))
                 .payload(json!({"i": i}))

@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
-use rara_domain::event::Event;
+use rara_domain::event::{Event, EventType};
 use rara_domain::timeframe::Timeframe;
 
 /// Event payload for hypothesis creation.
@@ -173,10 +173,6 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// When set, each iteration's `.rs` source is persisted here for debugging
     /// and reproducibility.
     generated_dir: Option<PathBuf>,
-    /// Optional market data cache for zero-copy backtest data loading.
-    /// When present, backtest iterations use cached mmap'd data instead
-    /// of loading from disk each time.
-    data_cache: Option<Arc<rara_market_data::cache::DataCache>>,
     /// Timeframes to evaluate each hypothesis on.
     #[builder(default = vec![Timeframe::Hour1, Timeframe::Hour4, Timeframe::Day1])]
     timeframes: Vec<Timeframe>,
@@ -203,7 +199,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 3. Publish hypothesis created event
         self.publish_event(
-            "research.hypothesis.created",
+            EventType::ResearchHypothesisCreated,
             &HypothesisCreatedPayload {
                 hypothesis_id: hypothesis.id.to_string(),
             },
@@ -226,13 +222,13 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 6. Compile to WASM with retries
         let wasm_bytes = self.compile_with_retries(&mut code, &hypothesis).await?;
 
-        // 6. Load into executor to validate the module
+        // 7. Load into executor to validate the module
         let _loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
 
         // Keep wasm_bytes for potential promotion after acceptance
         let wasm_bytes_for_promotion = wasm_bytes;
 
-        // 7. Create and save experiment
+        // 8. Create and save experiment
         let experiment = Experiment::builder()
             .hypothesis_id(hypothesis.id)
             .strategy_code(&code)
@@ -242,17 +238,17 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .save_experiment(&experiment)
             .context(TraceSnafu)?;
 
-        // 8. Run backtests across all configured timeframes, pick best result
+        // 9. Run backtests across all configured timeframes, pick best result
         let backtest_result = self
             .run_multi_timeframe_backtest(&wasm_bytes_for_promotion)
             .await?;
 
-        // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
+        // 10. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
         let accepted = backtest_result.sharpe_ratio > 1.0
             && backtest_result.max_drawdown < max_drawdown_threshold;
 
-        // 10. Generate feedback via FeedbackGenerator
+        // 11. Generate feedback via FeedbackGenerator
         let sota_result = self
             .trace
             .get_sota()
@@ -271,24 +267,24 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .await
             .context(FeedbackGenSnafu)?;
 
-        // 11. Record in Trace DAG
+        // 12. Record in Trace DAG
         self.trace
             .record(&experiment, &feedback, &DagSelection::Latest)
             .context(TraceSnafu)?;
 
-        // 12. Publish experiment completed event
+        // 13. Publish experiment completed event
         self.publish_event(
-            "research.experiment.completed",
+            EventType::ResearchExperimentCompleted,
             &ExperimentCompletedPayload {
                 experiment_id: experiment.id.to_string(),
                 accepted,
             },
         )?;
 
-        // 13. If accepted, publish candidate event and auto-promote
+        // 14. If accepted, publish candidate event and auto-promote
         let promoted = if accepted {
             self.publish_event(
-                "research.strategy.candidate",
+                EventType::ResearchStrategyCandidate,
                 &StrategyCandidatePayload {
                     experiment_id: experiment.id.to_string(),
                     hypothesis_id: hypothesis.id.to_string(),
@@ -388,35 +384,16 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         })
     }
 
-    /// Run a single backtest for one timeframe, using the data cache when available.
+    /// Run a single backtest for one timeframe.
     async fn run_backtest_single(
         &self,
         wasm_bytes: &[u8],
         timeframe: Timeframe,
     ) -> Result<rara_domain::research::BacktestResult> {
-        if let Some(ref cache) = self.data_cache {
-            let slices = cache
-                .load_range(
-                    "default",
-                    rara_market_data::cache::DataType::Candle1m,
-                    "2020-01-01", // TODO: make configurable
-                    "2030-12-31",
-                )
-                .map_err(|e| ResearchLoopError::Backtest {
-                    source: crate::backtester::BacktestError::ExecutionFailed {
-                        message: format!("data cache error: {e}"),
-                    },
-                })?;
-            self.backtester
-                .run_with_data(wasm_bytes, "default", timeframe, &slices)
-                .await
-                .context(BacktestSnafu)
-        } else {
-            self.backtester
-                .run(wasm_bytes, "default", timeframe)
-                .await
-                .context(BacktestSnafu)
-        }
+        self.backtester
+            .run(wasm_bytes, "default", timeframe)
+            .await
+            .context(BacktestSnafu)
     }
 
     /// Auto-promote an accepted strategy if a promoted directory is configured.
@@ -466,7 +443,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
     /// Helper to publish a domain event with a typed payload.
     fn publish_event(
         &self,
-        event_type: &str,
+        event_type: EventType,
         payload: &impl Serialize,
     ) -> Result<()> {
         let event = Event::builder()

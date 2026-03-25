@@ -6,7 +6,7 @@ use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
-use rara_domain::event::Event;
+use rara_domain::event::{Event, EventType};
 use rara_domain::feedback::{FeedbackDecision, StrategyReport};
 
 /// Event payload published when a feedback decision is made.
@@ -111,10 +111,10 @@ impl FeedbackBridge {
 
         // 5. Publish lifecycle event
         let event_type = match decision {
-            FeedbackDecision::Promote => "feedback.strategy.promote",
-            FeedbackDecision::Demote => "feedback.strategy.demote",
-            FeedbackDecision::Hold => "feedback.strategy.hold",
-            FeedbackDecision::Retire => "feedback.research.retrain.requested",
+            FeedbackDecision::Promote => EventType::FeedbackStrategyPromote,
+            FeedbackDecision::Demote => EventType::FeedbackStrategyDemote,
+            FeedbackDecision::Hold => EventType::FeedbackStrategyHold,
+            FeedbackDecision::Retire => EventType::FeedbackResearchRetrainRequested,
         };
 
         let event = Event::builder()
@@ -179,7 +179,7 @@ mod tests {
 
     fn publish_fill(bus: &EventBus, strategy_id: &str, realized_pnl: &str) -> Uuid {
         let event = Event::builder()
-            .event_type("trading.order.filled")
+            .event_type(EventType::TradingOrderFilled)
             .source("test")
             .correlation_id("test-corr")
             .strategy_id(strategy_id.to_owned())
@@ -192,7 +192,7 @@ mod tests {
 
     fn publish_sentinel(bus: &EventBus, severity: &str) -> Uuid {
         let event = Event::builder()
-            .event_type("sentinel.signal.detected")
+            .event_type(EventType::SentinelSignalDetected)
             .source("test")
             .correlation_id("test-corr")
             .payload(json!({ "severity": severity }))
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(feedback_events.len(), 1);
         assert_eq!(
             feedback_events[0].event_type,
-            "feedback.strategy.promote"
+            EventType::FeedbackStrategyPromote
         );
     }
 
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(feedback_events.len(), 1);
         assert_eq!(
             feedback_events[0].event_type,
-            "feedback.research.retrain.requested"
+            EventType::FeedbackResearchRetrainRequested
         );
     }
 }

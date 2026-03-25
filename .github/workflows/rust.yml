@@ -12,6 +12,7 @@ env:
   RUSTFLAGS: -Dwarnings
   RUST_BACKTRACE: true
   CARGO_INCREMENTAL: false
+  SQLX_OFFLINE: true
 
 defaults:
   run:
@@ -90,11 +91,14 @@ jobs:
       - name: Format after substitution
         run: cargo fmt --all
 
+      - name: Install wasm target
+        run: rustup target add wasm32-wasip1
+
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
       - name: Run tests
-        run: cargo nextest run
+        run: cargo nextest run --workspace --no-tests=pass
 
   rust-success:
     name: Rust Success

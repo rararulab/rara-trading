@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use clap::Parser;
 use rust_decimal_macros::dec;
 use serde::Serialize;
@@ -8,10 +9,10 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, ResearchAction};
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
 use rara_trading::error::{
-    self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, EventBusSnafu, IoSnafu,
-    PromoterSnafu, PromptRendererSnafu, TraceSnafu,
+    self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
+    IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::paths;
@@ -78,6 +79,22 @@ struct ResearchRunResponse {
     ok: bool,
     action: &'static str,
     iterations: u32,
+}
+
+#[derive(Serialize)]
+struct DataFetchResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    source: &'a str,
+    symbol: &'a str,
+    candles: usize,
+}
+
+#[derive(Serialize)]
+struct DataInfoResponse {
+    ok: bool,
+    action: &'static str,
+    instruments: Vec<rara_market_data::store::candle::CandleCoverage>,
 }
 
 #[derive(Serialize)]
@@ -274,6 +291,9 @@ async fn run() -> error::Result<()> {
         Command::Research { action } => {
             run_research(action).await?;
         }
+        Command::Data { action } => {
+            run_data(action).await?;
+        }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
             let mut agent_cfg = cfg.agent.clone();
@@ -365,6 +385,99 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
     ]
 }
 
+/// Execute the data subcommand.
+async fn run_data(action: DataAction) -> error::Result<()> {
+    match action {
+        DataAction::Fetch {
+            source,
+            symbol,
+            start,
+            end,
+        } => run_data_fetch(&source, &symbol, &start, &end).await,
+        DataAction::Info => run_data_info().await,
+    }
+}
+
+/// Fetch historical market data from an exchange into `TimescaleDB`.
+async fn run_data_fetch(
+    source: &str,
+    symbol: &str,
+    start: &str,
+    end: &str,
+) -> error::Result<()> {
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d").map_err(|_| {
+        error::AppError::Config {
+            message: format!("invalid start date: {start}"),
+        }
+    })?;
+    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| {
+        error::AppError::Config {
+            message: format!("invalid end date: {end}"),
+        }
+    })?;
+
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let fetcher: Box<dyn rara_market_data::fetcher::HistoryFetcher> = match source {
+        "binance" => Box::new(rara_market_data::fetcher::binance::BinanceFetcher::new(
+            symbol,
+        )),
+        "yahoo" => Box::new(rara_market_data::fetcher::yahoo::YahooFetcher::new(symbol)),
+        _ => {
+            return ConfigSnafu {
+                message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
+            }
+            .fail();
+        }
+    };
+
+    let instrument_id = symbol;
+    let count = fetcher
+        .fetch_and_store(&store, instrument_id, start_date, end_date)
+        .await
+        .context(DataFetchSnafu)?;
+
+    eprintln!("fetched {count} candles for {instrument_id} from {source}");
+    println!(
+        "{}",
+        serde_json::to_string(&DataFetchResponse {
+            ok: true,
+            action: "data.fetch",
+            source,
+            symbol,
+            candles: count,
+        })
+        .expect("DataFetchResponse must serialize")
+    );
+    Ok(())
+}
+
+/// Show data coverage for all stored instruments.
+async fn run_data_info() -> error::Result<()> {
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let coverage = store.get_coverage().await.context(MarketStoreSnafu)?;
+
+    println!(
+        "{}",
+        serde_json::to_string(&DataInfoResponse {
+            ok: true,
+            action: "data.info",
+            instruments: coverage,
+        })
+        .expect("DataInfoResponse must serialize")
+    );
+    Ok(())
+}
+
 /// Execute the research subcommand.
 async fn run_research(action: ResearchAction) -> error::Result<()> {
     match action {
@@ -404,14 +517,20 @@ async fn run_research_loop(
     let prompt_renderer_for_loop =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
     let executor: Arc<dyn StrategyExecutor> = Arc::new(WasmExecutor::builder().build());
+    let cfg = app_config::load();
+    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+
     let backtester = BarterBacktester::builder()
-        .data_dir(paths::data_dir().join("market_data"))
+        .store(store)
         .initial_capital(dec!(10000))
         .fees_percent(dec!(0.1))
         .executor(executor)
+        .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
+        .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
         .build();
 
-    let cfg = app_config::load();
     let cli_backend =
         CliBackend::from_agent_config(&cfg.agent).context(error::AgentBackendSnafu)?;
     let llm = CliExecutor::new(cli_backend);

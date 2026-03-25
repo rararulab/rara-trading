@@ -1,13 +1,10 @@
 //! Backtester trait for strategy evaluation.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use snafu::Snafu;
 
 use rara_domain::research::BacktestResult;
 use rara_domain::timeframe::Timeframe;
-use rara_market_data::cache::MarketSlice;
 
 /// Errors from backtesting operations.
 #[derive(Debug, Snafu)]
@@ -31,19 +28,4 @@ pub trait Backtester: Send + Sync {
         contract_id: &str,
         timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError>;
-
-    /// Run a backtest with pre-loaded market data slices.
-    ///
-    /// Default implementation ignores the data and falls back to [`run`](Self::run).
-    /// Implementors should override this to use the cached data directly,
-    /// avoiding redundant disk I/O.
-    async fn run_with_data(
-        &self,
-        wasm_bytes: &[u8],
-        contract_id: &str,
-        timeframe: Timeframe,
-        _data: &[Arc<MarketSlice>],
-    ) -> Result<BacktestResult, BacktestError> {
-        self.run(wasm_bytes, contract_id, timeframe).await
-    }
 }

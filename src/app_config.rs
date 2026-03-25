@@ -14,6 +14,24 @@ static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
 pub struct AppConfig {
     /// Agent backend configuration.
     pub agent: AgentConfig,
+    /// Database configuration.
+    pub database: DatabaseConfig,
+}
+
+/// Database connection configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DatabaseConfig {
+    /// `PostgreSQL` connection URL.
+    pub url: String,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            url: "postgres://rara:rara@localhost:5432/rara_trading".to_string(),
+        }
+    }
 }
 
 /// Load config from TOML file, falling back to defaults.
