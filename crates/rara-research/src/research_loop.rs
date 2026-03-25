@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
-use rara_domain::event::Event;
+use rara_domain::event::{Event, EventType};
 
 /// Event payload for hypothesis creation.
 #[derive(Debug, Serialize)]
@@ -198,7 +198,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 3. Publish hypothesis created event
         self.publish_event(
-            "research.hypothesis.created",
+            EventType::ResearchHypothesisCreated,
             &HypothesisCreatedPayload {
                 hypothesis_id: hypothesis.id.to_string(),
             },
@@ -271,7 +271,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 12. Publish experiment completed event
         self.publish_event(
-            "research.experiment.completed",
+            EventType::ResearchExperimentCompleted,
             &ExperimentCompletedPayload {
                 experiment_id: experiment.id.to_string(),
                 accepted,
@@ -281,7 +281,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 13. If accepted, publish candidate event and auto-promote
         let promoted = if accepted {
             self.publish_event(
-                "research.strategy.candidate",
+                EventType::ResearchStrategyCandidate,
                 &StrategyCandidatePayload {
                     experiment_id: experiment.id.to_string(),
                     hypothesis_id: hypothesis.id.to_string(),
@@ -416,7 +416,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
     /// Helper to publish a domain event with a typed payload.
     fn publish_event(
         &self,
-        event_type: &str,
+        event_type: EventType,
         payload: &impl Serialize,
     ) -> Result<()> {
         let event = Event::builder()

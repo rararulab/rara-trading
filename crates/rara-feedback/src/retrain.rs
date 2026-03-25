@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
-use rara_domain::event::Event;
+use rara_domain::event::{Event, EventType};
 use rara_event_bus::bus::EventBus;
 use rara_event_bus::store::StoreError;
 
@@ -174,7 +174,7 @@ impl RetrainChecker {
 
         let decision = if reasons.is_empty() {
             let event = Event::builder()
-                .event_type("feedback.strategy.confirmed")
+                .event_type(EventType::FeedbackStrategyConfirmed)
                 .source("feedback-bridge")
                 .correlation_id(experiment_id.to_string())
                 .payload(
@@ -194,7 +194,7 @@ impl RetrainChecker {
             let combined_reason = reasons.join("; ");
 
             let event = Event::builder()
-                .event_type("feedback.research.retrain.requested")
+                .event_type(EventType::FeedbackResearchRetrainRequested)
                 .source("feedback-bridge")
                 .correlation_id(experiment_id.to_string())
                 .payload(
@@ -302,7 +302,7 @@ mod tests {
 
         let events = bus.store().read_topic("feedback", 0, 10).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type(), "feedback.strategy.confirmed");
+        assert_eq!(events[0].event_type, EventType::FeedbackStrategyConfirmed);
     }
 
     #[test]
@@ -328,8 +328,8 @@ mod tests {
 
         let events = bus.store().read_topic("feedback", 0, 10).unwrap();
         assert_eq!(
-            events[0].event_type(),
-            "feedback.research.retrain.requested"
+            events[0].event_type,
+            EventType::FeedbackResearchRetrainRequested
         );
     }
 
