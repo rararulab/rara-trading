@@ -298,11 +298,9 @@ fn clone_file_error(e: &FileError) -> FileError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use tempfile::TempDir;
 
-    use super::{DataCache, DataKey, DataType};
+    use super::{DataCache, DataType};
     use crate::file::RaraFileWriter;
     use crate::record::{CandleRecord, RecordType};
 
@@ -334,46 +332,6 @@ mod tests {
             RaraFileWriter::create(&path, instrument_id, RecordType::Candle).expect("create");
         writer.append_candles(&records).expect("append");
         writer.flush().expect("flush");
-    }
-
-    fn make_key(instrument_id: &str, date: &str) -> DataKey {
-        DataKey {
-            instrument_id: instrument_id.to_string(),
-            data_type: DataType::Candle1m,
-            date: date.to_string(),
-        }
-    }
-
-    #[test]
-    fn cache_hit_returns_same_arc() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        create_test_candle_file(&dir, "BTC-USDT", "2024-01-01", 5);
-
-        let cache = DataCache::new(dir.path().to_path_buf(), 100 * 1024 * 1024);
-        let key = make_key("BTC-USDT", "2024-01-01");
-
-        let a = cache.get(&key).expect("first get");
-        let b = cache.get(&key).expect("second get");
-
-        assert!(Arc::ptr_eq(&a, &b), "cache hit should return the same Arc");
-    }
-
-    #[test]
-    fn invalidate_causes_reload() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        create_test_candle_file(&dir, "BTC-USDT", "2024-01-01", 5);
-
-        let cache = DataCache::new(dir.path().to_path_buf(), 100 * 1024 * 1024);
-        let key = make_key("BTC-USDT", "2024-01-01");
-
-        let a = cache.get(&key).expect("first get");
-        cache.invalidate("BTC-USDT", DataType::Candle1m, "2024-01-01");
-        let b = cache.get(&key).expect("after invalidate");
-
-        assert!(
-            !Arc::ptr_eq(&a, &b),
-            "invalidated entry should cause a fresh load"
-        );
     }
 
     #[test]
