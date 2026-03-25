@@ -4,6 +4,7 @@ pub mod backtester;
 pub mod backtest_pool;
 pub mod compiler;
 pub mod barter_backtester;
+pub mod candle_instrument_data;
 pub mod feedback_gen;
 pub mod hypothesis_gen;
 pub mod market_data;
