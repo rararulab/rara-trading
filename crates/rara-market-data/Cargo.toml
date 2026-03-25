@@ -16,6 +16,8 @@ rust_decimal.workspace = true
 tokio.workspace = true
 zerocopy = { version = "0.8", features = ["derive"] }
 memmap2 = "0.9"
+arrow = { version = "55", default-features = false, features = ["ipc"] }
+parquet = { version = "55", default-features = false, features = ["arrow", "snap"] }
 moka = { version = "0.12", features = ["sync"] }
 
 [dev-dependencies]
