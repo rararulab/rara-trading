@@ -92,6 +92,8 @@ pub struct PromotedStrategy {
     wasm_path: PathBuf,
     /// Strategy metadata extracted from the WASM module.
     meta: StrategyMeta,
+    /// Filesystem path to the saved `.rs` source code, if available.
+    source_path: Option<PathBuf>,
 }
 
 impl PromotedStrategy {
@@ -113,6 +115,11 @@ impl PromotedStrategy {
     /// Returns the strategy metadata.
     pub const fn meta(&self) -> &StrategyMeta {
         &self.meta
+    }
+
+    /// Returns the path to the saved `.rs` source code, if available.
+    pub fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
     }
 }
 
@@ -179,11 +186,16 @@ impl StrategyPromoter {
             .join(format!("{experiment_id}.wasm"));
         std::fs::write(&wasm_path, &wasm_bytes).context(IoSnafu)?;
 
-        // 6. Build and save metadata
+        // 6. Save strategy source code alongside the binary
+        let source_path = self.promoted_dir.join(format!("{experiment_id}.rs"));
+        std::fs::write(&source_path, experiment.strategy_code()).context(IoSnafu)?;
+
+        // 7. Build and save metadata
         let promoted = PromotedStrategy::builder()
             .experiment_id(experiment_id)
             .hypothesis_id(hypothesis_id)
             .wasm_path(wasm_path)
+            .source_path(source_path)
             .meta(meta)
             .build();
 
@@ -200,11 +212,13 @@ impl StrategyPromoter {
     ///
     /// Used when WASM bytes are already available (e.g. immediately after
     /// compilation in the research loop) to avoid a redundant compile step.
+    /// When `source_code` is provided, the `.rs` source is saved alongside the binary.
     pub fn promote_from_wasm(
         &self,
         experiment_id: Uuid,
         hypothesis_id: Uuid,
         wasm_bytes: &[u8],
+        source_code: Option<&str>,
     ) -> Result<PromotedStrategy> {
         // 1. Load into runtime to validate and extract metadata
         let mut loaded = self.runtime.load(wasm_bytes).context(RuntimeSnafu)?;
@@ -219,11 +233,21 @@ impl StrategyPromoter {
             .join(format!("{experiment_id}.wasm"));
         std::fs::write(&wasm_path, wasm_bytes).context(IoSnafu)?;
 
-        // 4. Build and save metadata
+        // 4. Save strategy source code if provided
+        let source_path = if let Some(code) = source_code {
+            let path = self.promoted_dir.join(format!("{experiment_id}.rs"));
+            std::fs::write(&path, code).context(IoSnafu)?;
+            Some(path)
+        } else {
+            None
+        };
+
+        // 5. Build and save metadata
         let promoted = PromotedStrategy::builder()
             .experiment_id(experiment_id)
             .hypothesis_id(hypothesis_id)
             .wasm_path(wasm_path)
+            .maybe_source_path(source_path)
             .meta(meta)
             .build();
 

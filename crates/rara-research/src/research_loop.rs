@@ -86,6 +86,12 @@ pub enum ResearchLoopError {
         /// The underlying promoter error.
         source: crate::strategy_promoter::PromoterError,
     },
+    /// Filesystem I/O failed.
+    #[snafu(display("I/O error: {source}"))]
+    Io {
+        /// The underlying I/O error.
+        source: std::io::Error,
+    },
 }
 
 /// Alias for research loop results.
@@ -135,6 +141,10 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// Directory for promoted strategies. When set, accepted strategies are
     /// automatically saved here for paper trading pickup.
     promoted_dir: Option<PathBuf>,
+    /// Directory for saving generated strategy source code each iteration.
+    /// When set, each iteration's `.rs` source is persisted here for debugging
+    /// and reproducibility.
+    generated_dir: Option<PathBuf>,
 }
 
 impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
@@ -169,7 +179,14 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .await
             .context(StrategyCodingSnafu)?;
 
-        // 5. Compile to WASM with retries
+        // 5. Save generated source to generated_dir for debugging/reproducibility
+        if let Some(ref dir) = self.generated_dir {
+            std::fs::create_dir_all(dir).context(IoSnafu)?;
+            let path = dir.join(format!("{}.rs", hypothesis.id()));
+            std::fs::write(&path, &code).context(IoSnafu)?;
+        }
+
+        // 6. Compile to WASM with retries
         let wasm_bytes = self.compile_with_retries(&mut code, &hypothesis).await?;
 
         // 6. Load into StrategyRuntime to validate the module
@@ -247,6 +264,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
                 experiment.id(),
                 hypothesis.id(),
                 &wasm_bytes_for_promotion,
+                &code,
             )?
         } else {
             None
@@ -299,6 +317,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         experiment_id: uuid::Uuid,
         hypothesis_id: uuid::Uuid,
         wasm_bytes: &[u8],
+        source_code: &str,
     ) -> Result<Option<PromotedStrategy>> {
         let Some(ref promoted_dir) = self.promoted_dir else {
             return Ok(None);
@@ -324,7 +343,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .build();
 
         let promoted_strategy = promoter
-            .promote_from_wasm(experiment_id, hypothesis_id, wasm_bytes)
+            .promote_from_wasm(experiment_id, hypothesis_id, wasm_bytes, Some(source_code))
             .context(PromoteSnafu)?;
 
         tracing::info!(
