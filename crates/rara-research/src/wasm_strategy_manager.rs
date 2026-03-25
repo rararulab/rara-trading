@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bon::Builder;
 use uuid::Uuid;
 
-use rara_domain::research::{Hypothesis, ResearchStrategy};
+use rara_domain::research::{Hypothesis, ResearchStrategy, ResearchStrategyStatus};
 
 use crate::compiler::StrategyCompiler;
 use crate::strategy_coder::StrategyCoder;
@@ -45,7 +45,7 @@ impl StrategyManager for WasmStrategyManager {
             })
     }
 
-    async fn compile(&self, hypothesis_id: Uuid, source_code: &str) -> Result<ResearchStrategy> {
+    async fn try_compile(&self, source_code: &str) -> Result<Vec<u8>> {
         let result = self
             .compiler
             .compile(source_code)
@@ -60,8 +60,15 @@ impl StrategyManager for WasmStrategyManager {
             });
         }
 
-        let artifact = result.wasm_bytes.expect("success implies wasm_bytes");
+        Ok(result.wasm_bytes.expect("success implies wasm_bytes"))
+    }
 
+    fn save_strategy(
+        &self,
+        hypothesis_id: Uuid,
+        source_code: &str,
+        artifact: &[u8],
+    ) -> Result<ResearchStrategy> {
         let strategy = ResearchStrategy::builder()
             .hypothesis_id(hypothesis_id)
             .source_code(source_code)
@@ -74,7 +81,7 @@ impl StrategyManager for WasmStrategyManager {
             })?;
 
         self.store
-            .save_artifact(strategy.id, &artifact)
+            .save_artifact(strategy.id, artifact)
             .map_err(|e| StrategyManagerError::Store {
                 message: e.to_string(),
             })?;
@@ -111,7 +118,11 @@ impl StrategyManager for WasmStrategyManager {
             })
     }
 
-    fn store(&self) -> &StrategyStore {
-        &self.store
+    fn update_status(&self, strategy_id: Uuid, status: ResearchStrategyStatus) -> Result<()> {
+        self.store
+            .update_status(strategy_id, status)
+            .map_err(|e| StrategyManagerError::Store {
+                message: e.to_string(),
+            })
     }
 }

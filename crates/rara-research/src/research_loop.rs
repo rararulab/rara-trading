@@ -252,13 +252,8 @@ impl ResearchLoop {
         // 14. If accepted, update status and publish candidate event
         if accepted {
             self.strategy_manager
-                .store()
                 .update_status(strategy.id, ResearchStrategyStatus::Accepted)
-                .map_err(|e| ResearchLoopError::StrategyManager {
-                    source: StrategyManagerError::Store {
-                        message: e.to_string(),
-                    },
-                })?;
+                .context(StrategyManagerSnafu)?;
 
             self.publish_event(
                 EventType::ResearchStrategyCandidate,
@@ -279,6 +274,9 @@ impl ResearchLoop {
     }
 
     /// Attempt to compile strategy code, retrying with LLM-driven fixes on failure.
+    ///
+    /// Only persists the strategy record and artifact after a successful compilation,
+    /// avoiding orphaned records from failed attempts.
     async fn compile_with_retries(
         &self,
         code: &mut String,
@@ -287,12 +285,15 @@ impl ResearchLoop {
         let mut last_errors = vec![];
 
         for attempt in 0..=self.max_compile_retries {
-            match self
-                .strategy_manager
-                .compile(hypothesis.id, code)
-                .await
-            {
-                Ok(strategy) => return Ok(strategy),
+            match self.strategy_manager.try_compile(code).await {
+                Ok(artifact) => {
+                    // Compilation succeeded — persist strategy + artifact
+                    let strategy = self
+                        .strategy_manager
+                        .save_strategy(hypothesis.id, code, &artifact)
+                        .context(StrategyManagerSnafu)?;
+                    return Ok(strategy);
+                }
                 Err(StrategyManagerError::CompileFailed { errors }) => {
                     last_errors = errors;
                 }
