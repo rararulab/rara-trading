@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bon::Builder;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::source::{DataSource, RawSignal, SourceError};
 
@@ -31,7 +31,7 @@ pub struct SignalsResponse {
 }
 
 /// A single signal type and its occurrence count for a given day.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DaySignal {
     /// Signal type name (e.g. "TARIFF", "DEAL", "RELIEF").
     #[serde(rename = "type")]
@@ -41,7 +41,7 @@ pub struct DaySignal {
 }
 
 /// Notable pattern summaries from the playbook analysis.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PlaybookSummary {
     /// The most dangerous signal pattern observed.
     pub most_dangerous: String,
@@ -49,6 +49,25 @@ pub struct PlaybookSummary {
     pub most_profitable: String,
     /// The biggest surprise in the data.
     pub biggest_surprise: String,
+}
+
+/// Typed metadata attached to each [`RawSignal`] produced by trump-code.
+#[derive(Debug, Serialize)]
+pub struct TrumpCodeMetadata<'a> {
+    /// Date of the signal day.
+    pub date: &'a str,
+    /// Overall directional consensus.
+    pub consensus: &'a str,
+    /// Number of posts analyzed today.
+    pub posts_today: u32,
+    /// Per-signal-type confidence scores.
+    pub signal_confidence: &'a HashMap<String, f64>,
+    /// Playbook pattern summaries.
+    pub playbook: &'a PlaybookSummary,
+    /// Claude Opus deep analysis insight.
+    pub opus_insight: &'a str,
+    /// Individual signal observations for this day.
+    pub day_signals: &'a [DaySignal],
 }
 
 impl SignalsResponse {
@@ -88,29 +107,18 @@ impl SignalsResponse {
                     signal_types.join(", "),
                 );
 
-                let day_details: Vec<serde_json::Value> = day_signals
-                    .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "type": s.signal_type,
-                            "count": s.count,
-                        })
-                    })
-                    .collect();
+                let metadata = TrumpCodeMetadata {
+                    date: &date,
+                    consensus: &consensus,
+                    posts_today: posts,
+                    signal_confidence: &signal_confidence,
+                    playbook: &playbook,
+                    opus_insight: &opus_insight,
+                    day_signals: &day_signals,
+                };
 
-                let metadata = serde_json::json!({
-                    "date": date,
-                    "consensus": consensus,
-                    "posts_today": posts,
-                    "signal_confidence": signal_confidence,
-                    "playbook": {
-                        "most_dangerous": playbook.most_dangerous,
-                        "most_profitable": playbook.most_profitable,
-                        "biggest_surprise": playbook.biggest_surprise,
-                    },
-                    "opus_insight": opus_insight,
-                    "day_signals": day_details,
-                });
+                let metadata = serde_json::to_value(&metadata)
+                    .expect("TrumpCodeMetadata must serialize");
 
                 RawSignal {
                     source_name: "trump-code".to_owned(),
