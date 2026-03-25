@@ -54,30 +54,46 @@ pub enum ContractFilter {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 #[allow(clippy::struct_field_names)]
 pub struct Strategy {
+    /// Stable strategy identifier.
     #[builder(into)]
     pub id: String,
+    /// Monotonic strategy version.
     pub version: u32,
+    /// Human-readable strategy name.
     #[builder(into)]
     pub name: String,
+    /// Strategy description and intent.
     #[builder(into)]
     pub description: String,
+    /// Executable strategy source code.
     #[builder(into)]
     pub code: String,
+    /// Strategy classification.
     pub strategy_type: StrategyType,
+    /// Contract matching rules this strategy applies to.
     pub applicable_contracts: Vec<ContractFilter>,
+    /// JSON parameters consumed by strategy runtime.
     pub parameters: serde_json::Value,
+    /// Lifecycle status of the strategy.
     pub status: StrategyStatus,
 }
 
 /// Risk limits and constraints for a specific security type.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct RiskProfile {
+    /// Security type this risk profile targets.
     pub sec_type: SecType,
+    /// Maximum leverage allowed.
     pub max_leverage: Decimal,
+    /// Maximum position size as portfolio fraction.
     pub max_position_pct: Decimal,
+    /// Maximum tolerated drawdown.
     pub max_drawdown: Decimal,
+    /// Whether stop-loss orders are mandatory.
     pub require_stop_loss: bool,
+    /// Minimum liquidation safety buffer.
     pub liquidation_buffer: Decimal,
+    /// Whether funding-rate checks are required.
     pub funding_rate_check: bool,
 }
 

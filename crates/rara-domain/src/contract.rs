@@ -26,11 +26,15 @@ pub enum SecType {
 /// A tradable instrument on a specific exchange.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct Contract {
+    /// Exchange identifier, e.g. `"binance"`.
     #[builder(into)]
     pub exchange: String,
+    /// Exchange-native symbol, e.g. `"BTCUSDT"`.
     #[builder(into)]
     pub symbol: String,
+    /// Security type classification.
     pub sec_type: SecType,
+    /// Quote currency code, e.g. `"USDT"`.
     #[builder(into)]
     pub currency: String,
 }

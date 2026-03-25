@@ -37,16 +37,25 @@ pub struct StrategyMetrics {
 /// A periodic evaluation report for a strategy.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct StrategyReport {
+    /// Strategy identifier being evaluated.
     #[builder(into)]
     pub strategy_id: String,
+    /// Strategy version under evaluation.
     pub strategy_version: u32,
+    /// Evaluation window start timestamp.
     pub window_start: jiff::Timestamp,
+    /// Evaluation window end timestamp.
     pub window_end: jiff::Timestamp,
+    /// Aggregated performance metrics in the window.
     pub metrics: StrategyMetrics,
+    /// Related sentinel event identifiers.
     pub sentinel_events: Vec<Uuid>,
+    /// Lifecycle decision from evaluator.
     pub decision: FeedbackDecision,
+    /// Human-readable decision rationale.
     #[builder(into)]
     pub reason: String,
+    /// Report generation timestamp.
     #[builder(default = jiff::Timestamp::now())]
     pub generated_at: jiff::Timestamp,
 }

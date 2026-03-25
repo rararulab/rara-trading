@@ -45,12 +45,18 @@ pub enum ActionType {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 #[allow(clippy::struct_field_names)]
 pub struct StagedAction {
+    /// Action category to execute.
     pub action_type: ActionType,
+    /// Target contract identifier.
     #[builder(into)]
     pub contract_id: String,
+    /// Order side.
     pub side: Side,
+    /// Order quantity in contract units.
     pub quantity: Decimal,
+    /// Order type semantics.
     pub order_type: OrderType,
+    /// Optional limit/trigger price depending on order type.
     pub limit_price: Option<Decimal>,
 }
 
@@ -62,14 +68,20 @@ fn generate_hash() -> String {
 /// A git-style commit of trading actions, bundling multiple staged actions.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct TradingCommit {
+    /// Short commit hash used as correlation key.
     #[builder(default = generate_hash())]
     pub hash: String,
+    /// Commit message describing intent.
     #[builder(into)]
     pub message: String,
+    /// Batched staged actions.
     pub actions: Vec<StagedAction>,
+    /// Strategy that produced this commit.
     #[builder(into)]
     pub strategy_id: String,
+    /// Strategy version used for generation.
     pub strategy_version: u32,
+    /// Commit creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
     pub created_at: jiff::Timestamp,
 }
@@ -77,10 +89,14 @@ pub struct TradingCommit {
 /// One leg of an arbitrage opportunity.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ArbLeg {
+    /// Contract identifier for this leg.
     #[builder(into)]
     pub contract_id: String,
+    /// Execution side for this leg.
     pub side: Side,
+    /// Leg quantity.
     pub quantity: Decimal,
+    /// Broker/exchange route for this leg.
     #[builder(into)]
     pub broker: String,
 }
@@ -88,10 +104,15 @@ pub struct ArbLeg {
 /// A detected arbitrage opportunity across legs.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ArbOpportunity {
+    /// Strategy that discovered the opportunity.
     #[builder(into)]
     pub strategy_id: String,
+    /// Arbitrage legs to execute atomically.
     pub legs: Vec<ArbLeg>,
+    /// Expected gross spread across legs.
     pub expected_spread: Decimal,
+    /// Maximum tolerated execution slippage.
     pub max_slippage: Decimal,
+    /// Opportunity expiry timestamp.
     pub expiry: jiff::Timestamp,
 }
