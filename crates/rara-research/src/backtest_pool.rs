@@ -29,7 +29,7 @@ pub struct BacktestTask {
     /// Unique identifier for this task.
     pub id: String,
     /// Compiled WASM strategy bytes.
-    pub wasm_bytes: Arc<Vec<u8>>,
+    pub strategy_artifact: Arc<Vec<u8>>,
     /// Contract to run the backtest against.
     pub contract_id: String,
     /// Target timeframe for candle aggregation.
@@ -79,7 +79,7 @@ impl<B: Backtester + 'static> BacktestPool<B> {
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
                 backtester
-                    .run(&task.wasm_bytes, &task.contract_id, task.timeframe)
+                    .run(&task.strategy_artifact, &task.contract_id, task.timeframe)
                     .await
                     .map_err(|source| PoolError::TaskFailed {
                         task_id: task.id,
@@ -110,7 +110,7 @@ impl<B: Backtester + 'static> BacktestPool<B> {
         task: BacktestTask,
     ) -> Result<BacktestResult, PoolError> {
         self.backtester
-            .run(&task.wasm_bytes, &task.contract_id, task.timeframe)
+            .run(&task.strategy_artifact, &task.contract_id, task.timeframe)
             .await
             .map_err(|source| PoolError::TaskFailed {
                 task_id: task.id,
@@ -146,7 +146,7 @@ mod tests {
     impl Backtester for CountingBacktester {
         async fn run(
             &self,
-            _wasm_bytes: &[u8],
+            _strategy_artifact: &[u8],
             _contract_id: &str,
             _timeframe: Timeframe,
         ) -> Result<BacktestResult, BacktestError> {
@@ -180,7 +180,7 @@ mod tests {
         let tasks: Vec<BacktestTask> = (0..8)
             .map(|i| BacktestTask {
                 id: format!("task-{i}"),
-                wasm_bytes: Arc::new(vec![]),
+                strategy_artifact: Arc::new(vec![]),
                 contract_id: "contract".to_string(),
                 timeframe: Timeframe::Min1,
             })
@@ -207,7 +207,7 @@ mod tests {
 
         let task = BacktestTask {
             id: "single".to_string(),
-            wasm_bytes: Arc::new(vec![]),
+            strategy_artifact: Arc::new(vec![]),
             contract_id: "contract".to_string(),
             timeframe: Timeframe::Min1,
         };

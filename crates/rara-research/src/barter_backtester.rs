@@ -1,7 +1,7 @@
 //! Real backtester implementation using the barter-rs engine.
 //!
 //! Queries historical market data from `TimescaleDB`, runs it through barter's
-//! engine with a WASM-compiled strategy, and extracts performance metrics into
+//! engine with a compiled strategy, and extracts performance metrics into
 //! our domain `BacktestResult`.
 
 use std::fmt;
@@ -48,7 +48,7 @@ type BtRisk = DefaultRiskManager<BacktestEngineState>;
 /// Real backtester powered by the barter-rs trading engine.
 ///
 /// Queries historical market data from `TimescaleDB`, runs it through barter's
-/// backtest infrastructure with a WASM-compiled strategy and mock execution,
+/// backtest infrastructure with a compiled strategy and mock execution,
 /// and extracts performance metrics into our domain `BacktestResult`.
 #[derive(Builder)]
 pub struct BarterBacktester {
@@ -58,7 +58,7 @@ pub struct BarterBacktester {
     pub initial_capital: Decimal,
     /// Trading fees as a percentage (e.g., 0.1 for 0.1%).
     pub fees_percent: Decimal,
-    /// Strategy executor for loading WASM artifacts into executable handles.
+    /// Strategy executor for loading compiled artifacts into executable handles.
     pub executor: Arc<dyn StrategyExecutor>,
     /// Backtest window start date.
     pub backtest_start: NaiveDate,
@@ -159,19 +159,19 @@ fn build_instrument(contract_id: &str) -> Instrument<ExchangeId, Asset> {
 impl BarterBacktester {
     /// Shared backtest execution logic.
     ///
-    /// Loads the WASM strategy via the executor, builds the barter engine with
+    /// Loads the strategy via the executor, builds the barter engine with
     /// `CandleInstrumentData`, and runs the backtest to extract metrics.
     async fn run_with_market_data(
         &self,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
         contract_id: &str,
         timeframe: Timeframe,
         market_data: MarketDataInMemory<DataKind>,
     ) -> Result<BacktestResult, BacktestError> {
         // Load WASM strategy via executor
-        let handle = self.executor.load(wasm_bytes).map_err(|e| {
+        let handle = self.executor.load(strategy_artifact).map_err(|e| {
             BacktestError::ExecutionFailed {
-                message: format!("failed to load WASM strategy: {e}"),
+                message: format!("failed to load strategy: {e}"),
             }
         })?;
         let strategy = BarterStrategy::new(handle, timeframe);
@@ -246,7 +246,7 @@ impl BarterBacktester {
 impl Backtester for BarterBacktester {
     async fn run(
         &self,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
         contract_id: &str,
         timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError> {
@@ -293,7 +293,7 @@ impl Backtester for BarterBacktester {
             .collect();
 
         let market_data = MarketDataInMemory::new(Arc::new(events));
-        self.run_with_market_data(wasm_bytes, contract_id, timeframe, market_data)
+        self.run_with_market_data(strategy_artifact, contract_id, timeframe, market_data)
             .await
     }
 }

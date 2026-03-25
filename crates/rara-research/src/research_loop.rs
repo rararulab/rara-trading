@@ -220,13 +220,13 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         }
 
         // 6. Compile to WASM with retries
-        let wasm_bytes = self.compile_with_retries(&mut code, &hypothesis).await?;
+        let strategy_artifact = self.compile_with_retries(&mut code, &hypothesis).await?;
 
         // 7. Load into executor to validate the module
-        let _loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
+        let _loaded = self.runtime.load(&strategy_artifact).context(RuntimeSnafu)?;
 
-        // Keep wasm_bytes for potential promotion after acceptance
-        let wasm_bytes_for_promotion = wasm_bytes;
+        // Keep strategy_artifact for potential promotion after acceptance
+        let strategy_artifact_for_promotion = strategy_artifact;
 
         // 8. Create and save experiment
         let experiment = Experiment::builder()
@@ -240,7 +240,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 9. Run backtests across all configured timeframes, pick best result
         let backtest_result = self
-            .run_multi_timeframe_backtest(&wasm_bytes_for_promotion)
+            .run_multi_timeframe_backtest(&strategy_artifact_for_promotion)
             .await?;
 
         // 10. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
@@ -294,7 +294,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             self.try_promote(
                 experiment.id,
                 hypothesis.id,
-                &wasm_bytes_for_promotion,
+                &strategy_artifact_for_promotion,
                 &code,
             )?
         } else {
@@ -350,13 +350,13 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
     /// error is propagated.
     async fn run_multi_timeframe_backtest(
         &self,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
     ) -> Result<rara_domain::research::BacktestResult> {
         let mut best: Option<rara_domain::research::BacktestResult> = None;
         let mut last_error: Option<ResearchLoopError> = None;
 
         for &timeframe in &self.timeframes {
-            let result = self.run_backtest_single(wasm_bytes, timeframe).await;
+            let result = self.run_backtest_single(strategy_artifact, timeframe).await;
 
             match result {
                 Ok(bt) => {
@@ -387,11 +387,11 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
     /// Run a single backtest for one timeframe.
     async fn run_backtest_single(
         &self,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
         timeframe: Timeframe,
     ) -> Result<rara_domain::research::BacktestResult> {
         self.backtester
-            .run(wasm_bytes, "default", timeframe)
+            .run(strategy_artifact, "default", timeframe)
             .await
             .context(BacktestSnafu)
     }
@@ -401,7 +401,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         &self,
         experiment_id: uuid::Uuid,
         hypothesis_id: uuid::Uuid,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
         source_code: &str,
     ) -> Result<Option<PromotedStrategy>> {
         let Some(ref promoted_dir) = self.promoted_dir else {
@@ -428,7 +428,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .build();
 
         let promoted_strategy = promoter
-            .promote_from_wasm(experiment_id, hypothesis_id, wasm_bytes, Some(source_code))
+            .promote_from_wasm(experiment_id, hypothesis_id, strategy_artifact, Some(source_code))
             .context(PromoteSnafu)?;
 
         tracing::info!(

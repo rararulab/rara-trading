@@ -18,13 +18,13 @@ pub enum BacktestError {
     },
 }
 
-/// Trait for running backtests with compiled WASM strategy bytes.
+/// Trait for running backtests with compiled strategy artifacts.
 #[async_trait]
 pub trait Backtester: Send + Sync {
-    /// Run a backtest with compiled strategy bytes, contract, and timeframe.
+    /// Run a backtest with compiled strategy artifact, contract, and timeframe.
     async fn run(
         &self,
-        wasm_bytes: &[u8],
+        strategy_artifact: &[u8],
         contract_id: &str,
         timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError>;
