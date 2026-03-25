@@ -6,6 +6,7 @@
 
 pub mod archiver;
 pub mod cache;
+pub mod fetcher;
 pub mod file;
 pub mod ingester;
 pub mod record;

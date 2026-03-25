@@ -19,6 +19,9 @@ memmap2 = "0.9"
 arrow = { version = "55", default-features = false, features = ["ipc"] }
 parquet = { version = "55", default-features = false, features = ["arrow", "snap"] }
 moka = { version = "0.12", features = ["sync"] }
+reqwest.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

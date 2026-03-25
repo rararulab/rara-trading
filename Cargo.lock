@@ -3763,11 +3763,14 @@ name = "rara-market-data"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "async-trait",
  "bon",
+ "chrono",
  "jiff",
  "memmap2",
  "moka",
  "parquet",
+ "reqwest 0.13.2",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -3849,6 +3852,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "async-trait",
+ "chrono",
  "clap",
  "config",
  "dirs",
