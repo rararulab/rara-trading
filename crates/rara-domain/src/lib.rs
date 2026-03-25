@@ -6,4 +6,5 @@ pub mod feedback;
 pub mod research;
 pub mod sentinel;
 pub mod strategy;
+pub mod timeframe;
 pub mod trading;

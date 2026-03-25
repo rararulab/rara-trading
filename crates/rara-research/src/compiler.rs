@@ -255,6 +255,110 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
         );
     }
 
+    /// End-to-end: compile → load via `WasmExecutor` → call `on_candles()` → verify signal.
+    #[tokio::test]
+    async fn wasm_strategy_executes_end_to_end() {
+        use crate::strategy_executor::StrategyExecutor;
+        use crate::wasm_executor::WasmExecutor;
+        use rara_strategy_api::{Candle, Signal};
+
+        let compiler = StrategyCompiler::builder()
+            .template_dir(template_dir())
+            .build();
+
+        let code = r#"
+fn meta() -> StrategyMeta {
+    StrategyMeta {
+        name: "e2e-test".into(),
+        version: 1,
+        api_version: API_VERSION,
+        description: "End-to-end test strategy".into(),
+    }
+}
+
+fn on_candles(candles: &[Candle]) -> Signal {
+    if candles.len() < 2 {
+        return Signal::Hold;
+    }
+    let last = candles.last().unwrap();
+    let prev = &candles[candles.len() - 2];
+    if last.close > prev.close {
+        Signal::Entry { side: Side::Long, strength: 0.7 }
+    } else {
+        Signal::Entry { side: Side::Short, strength: 0.5 }
+    }
+}
+
+fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
+    match side {
+        Side::Long => RiskLevels {
+            stop_loss: entry_price * 0.98,
+            take_profit: entry_price * 1.04,
+        },
+        Side::Short => RiskLevels {
+            stop_loss: entry_price * 1.02,
+            take_profit: entry_price * 0.96,
+        },
+    }
+}
+"#;
+
+        // 1. Compile to WASM
+        let result = compiler.compile(code).await.expect("compile should succeed");
+        assert!(result.success, "compile errors: {:?}", result.errors);
+        let wasm_bytes = result.wasm_bytes.expect("should produce wasm bytes");
+
+        // 2. Load via WasmExecutor
+        let executor = WasmExecutor::builder().build();
+        let mut handle = executor.load(&wasm_bytes).expect("should load WASM module");
+
+        // 3. Verify meta()
+        let meta = handle.meta().expect("meta() should succeed");
+        assert_eq!(meta.name, "e2e-test");
+        assert_eq!(meta.api_version, rara_strategy_api::API_VERSION);
+
+        // 4. Call on_candles() with < 2 candles → Hold
+        let one_candle = vec![Candle {
+            timestamp: 1000,
+            open: 100.0,
+            high: 105.0,
+            low: 95.0,
+            close: 102.0,
+            volume: 50.0,
+        }];
+        let signal = handle.on_candles(&one_candle).expect("on_candles should succeed");
+        assert!(matches!(signal, Signal::Hold), "expected Hold with 1 candle, got {signal:?}");
+
+        // 5. Call on_candles() with rising price → Long
+        let rising = vec![
+            Candle { timestamp: 1000, open: 100.0, high: 105.0, low: 95.0, close: 100.0, volume: 50.0 },
+            Candle { timestamp: 1060, open: 100.0, high: 110.0, low: 99.0, close: 108.0, volume: 60.0 },
+        ];
+        let signal = handle.on_candles(&rising).expect("on_candles should succeed");
+        assert!(
+            matches!(signal, Signal::Entry { side: rara_strategy_api::Side::Long, .. }),
+            "expected Long entry on rising price, got {signal:?}"
+        );
+
+        // 6. Call on_candles() with falling price → Short
+        let falling = vec![
+            Candle { timestamp: 2000, open: 100.0, high: 105.0, low: 95.0, close: 100.0, volume: 50.0 },
+            Candle { timestamp: 2060, open: 100.0, high: 101.0, low: 90.0, close: 92.0, volume: 70.0 },
+        ];
+        let signal = handle.on_candles(&falling).expect("on_candles should succeed");
+        assert!(
+            matches!(signal, Signal::Entry { side: rara_strategy_api::Side::Short, .. }),
+            "expected Short entry on falling price, got {signal:?}"
+        );
+
+        // 7. Verify risk_levels()
+        let levels = handle
+            .risk_levels(100.0, rara_strategy_api::Side::Long)
+            .expect("risk_levels should succeed");
+        assert!((levels.stop_loss - 98.0).abs() < 0.01, "stop_loss should be ~98.0");
+        assert!((levels.take_profit - 104.0).abs() < 0.01, "take_profit should be ~104.0");
+    }
+
     #[tokio::test]
     async fn returns_errors_for_invalid_code() {
         let compiler = StrategyCompiler::builder()

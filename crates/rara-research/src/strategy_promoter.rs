@@ -14,8 +14,9 @@ use uuid::Uuid;
 use rara_strategy_api::StrategyMeta;
 
 use crate::compiler::StrategyCompiler;
-use crate::runtime::StrategyRuntime;
+use crate::strategy_executor::StrategyExecutor;
 use crate::trace::Trace;
+use crate::wasm_executor::WasmExecutor;
 
 /// Errors from strategy promotion operations.
 #[derive(Debug, Snafu)]
@@ -53,7 +54,7 @@ pub enum PromoterError {
     #[snafu(display("runtime validation failed: {source}"))]
     Runtime {
         /// The underlying runtime error.
-        source: crate::runtime::RuntimeError,
+        source: crate::strategy_executor::ExecutorError,
     },
 
     /// Trace storage lookup failed.
@@ -133,7 +134,7 @@ pub struct StrategyPromoter {
     /// Trace storage for looking up experiments and hypotheses.
     trace: Trace,
     /// WASM runtime for validating promoted modules.
-    runtime: StrategyRuntime,
+    runtime: WasmExecutor,
     /// Strategy compiler for producing WASM from source code.
     compiler: StrategyCompiler,
     /// Base directory for promoted strategies (e.g. `strategies/promoted/`).
@@ -304,7 +305,7 @@ mod tests {
 
         let sut = StrategyPromoter::builder()
             .trace(Trace::open(&dir.path().join("trace")).unwrap())
-            .runtime(StrategyRuntime::builder().build())
+            .runtime(WasmExecutor::builder().build())
             .compiler(
                 StrategyCompiler::builder()
                     .template_dir(PathBuf::from("nonexistent"))
@@ -344,7 +345,7 @@ mod tests {
 
         let sut = StrategyPromoter::builder()
             .trace(Trace::open(&dir.path().join("trace")).unwrap())
-            .runtime(StrategyRuntime::builder().build())
+            .runtime(WasmExecutor::builder().build())
             .compiler(
                 StrategyCompiler::builder()
                     .template_dir(PathBuf::from("nonexistent"))

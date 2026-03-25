@@ -1,5 +1,7 @@
 //! Strategy code generation from hypotheses using an LLM.
 
+use std::sync::Arc;
+
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::research::Hypothesis;
@@ -21,13 +23,13 @@ pub enum StrategyCoderError {
 pub type Result<T> = std::result::Result<T, StrategyCoderError>;
 
 /// Generates strategy source code from a hypothesis using an LLM.
-pub struct StrategyCoder<L: LlmClient> {
-    llm: L,
+pub struct StrategyCoder {
+    llm: Arc<dyn LlmClient>,
 }
 
-impl<L: LlmClient> StrategyCoder<L> {
+impl StrategyCoder {
     /// Create a new strategy coder backed by the given LLM client.
-    pub const fn new(llm: L) -> Self {
+    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
         Self { llm }
     }
 
@@ -91,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn generate_code_returns_llm_response() {
         let executor = echo_executor("fn strategy() { buy() }");
-        let coder = StrategyCoder::new(executor);
+        let coder = StrategyCoder::new(Arc::new(executor));
 
         let h = Hypothesis::builder()
             .text("momentum works")

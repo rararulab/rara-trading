@@ -4,6 +4,9 @@ use async_trait::async_trait;
 use snafu::Snafu;
 
 use rara_domain::research::BacktestResult;
+use rara_domain::timeframe::Timeframe;
+
+use crate::strategy_executor::StrategyHandle;
 
 /// Errors from backtesting operations.
 #[derive(Debug, Snafu)]
@@ -17,13 +20,14 @@ pub enum BacktestError {
     },
 }
 
-/// Trait for running backtests against strategy code.
+/// Trait for running backtests with a loaded strategy handle.
 #[async_trait]
 pub trait Backtester: Send + Sync {
-    /// Run a backtest with the given strategy code and contract.
+    /// Run a backtest with a loaded strategy handle, contract, and timeframe.
     async fn run(
         &self,
-        strategy_code: &str,
+        handle: Box<dyn StrategyHandle>,
         contract_id: &str,
+        timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError>;
 }
