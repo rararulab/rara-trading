@@ -9,6 +9,7 @@ use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::event::Event;
+use rara_domain::timeframe::Timeframe;
 
 /// Event payload for hypothesis creation.
 #[derive(Debug, Serialize)]
@@ -175,6 +176,9 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// When present, backtest iterations use cached mmap'd data instead
     /// of loading from disk each time.
     data_cache: Option<Arc<rara_market_data::cache::DataCache>>,
+    /// Timeframes to evaluate each hypothesis on.
+    #[builder(default = vec![Timeframe::Hour1, Timeframe::Hour4, Timeframe::Day1])]
+    timeframes: Vec<Timeframe>,
 }
 
 impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
@@ -237,9 +241,9 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .save_experiment(&experiment)
             .context(TraceSnafu)?;
 
-        // 8. Run backtest — use cached data when available
+        // 8. Run backtests across all configured timeframes, pick best result
         let backtest_result = self
-            .run_backtest(&wasm_bytes_for_promotion)
+            .run_multi_timeframe_backtest(&wasm_bytes_for_promotion)
             .await?;
 
         // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
@@ -341,14 +345,54 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         })
     }
 
-    /// Run a backtest, using the data cache when available for zero-copy loading.
+    /// Run backtests across all configured timeframes, returning the best result.
     ///
-    /// Currently uses `Timeframe::Min1` as default; Task 8 will add multi-timeframe support.
-    async fn run_backtest(
+    /// Each timeframe is tested sequentially. Failed individual timeframes are
+    /// logged as warnings but do not abort the entire run. The result with the
+    /// highest `sharpe_ratio` is returned. If all timeframes fail, the last
+    /// error is propagated.
+    async fn run_multi_timeframe_backtest(
         &self,
         wasm_bytes: &[u8],
     ) -> Result<rara_domain::research::BacktestResult> {
-        let timeframe = rara_domain::timeframe::Timeframe::Min1;
+        let mut best: Option<rara_domain::research::BacktestResult> = None;
+        let mut last_error: Option<ResearchLoopError> = None;
+
+        for &timeframe in &self.timeframes {
+            let result = self.run_backtest_single(wasm_bytes, timeframe).await;
+
+            match result {
+                Ok(bt) => {
+                    tracing::info!(%timeframe, sharpe = bt.sharpe_ratio, "backtest completed");
+                    let is_better = best
+                        .as_ref()
+                        .map_or(true, |prev| bt.sharpe_ratio > prev.sharpe_ratio);
+                    if is_better {
+                        best = Some(bt);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(%timeframe, error = %e, "backtest failed for timeframe");
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        best.ok_or_else(|| {
+            last_error.unwrap_or_else(|| ResearchLoopError::Backtest {
+                source: crate::backtester::BacktestError::ExecutionFailed {
+                    message: "no timeframes configured".to_string(),
+                },
+            })
+        })
+    }
+
+    /// Run a single backtest for one timeframe, using the data cache when available.
+    async fn run_backtest_single(
+        &self,
+        wasm_bytes: &[u8],
+        timeframe: Timeframe,
+    ) -> Result<rara_domain::research::BacktestResult> {
         if let Some(ref cache) = self.data_cache {
             let slices = cache
                 .load_range(
