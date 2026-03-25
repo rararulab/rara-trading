@@ -170,6 +170,8 @@ struct ResearchPromotedResponse {
 
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
+use rara_trading::research::strategy_executor::StrategyExecutor;
+use rara_trading::research::wasm_executor::WasmExecutor;
 use rara_trading::research::feedback_gen::FeedbackGenerator;
 use rara_trading::research::hypothesis_gen::HypothesisGenerator;
 use rara_trading::research::prompt_renderer::PromptRenderer;
@@ -402,10 +404,12 @@ async fn run_research_loop(
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
     let prompt_renderer_for_loop =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;
+    let executor: Arc<dyn StrategyExecutor> = Arc::new(WasmExecutor::builder().build());
     let backtester = BarterBacktester::builder()
         .data_dir(paths::data_dir().join("market_data"))
         .initial_capital(dec!(10000))
         .fees_percent(dec!(0.1))
+        .executor(executor)
         .build();
 
     let cfg = app_config::load();
