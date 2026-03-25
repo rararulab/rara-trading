@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 use uuid::Uuid;
 
+use crate::timeframe::Timeframe;
+
 /// A trading hypothesis to be tested experimentally.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct Hypothesis {
@@ -83,6 +85,8 @@ pub struct BacktestResult {
     pub win_rate: f64,
     /// Total number of trades.
     pub trade_count: u32,
+    /// Timeframe this result was evaluated on, if applicable.
+    pub timeframe: Option<Timeframe>,
 }
 
 /// Feedback on an experiment guiding the next research iteration.
