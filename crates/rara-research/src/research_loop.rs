@@ -238,7 +238,9 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .context(TraceSnafu)?;
 
         // 8. Run backtest — use cached data when available
-        let backtest_result = self.run_backtest(&code).await?;
+        let backtest_result = self
+            .run_backtest(&wasm_bytes_for_promotion)
+            .await?;
 
         // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
@@ -340,10 +342,13 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
     }
 
     /// Run a backtest, using the data cache when available for zero-copy loading.
+    ///
+    /// Currently uses `Timeframe::Min1` as default; Task 8 will add multi-timeframe support.
     async fn run_backtest(
         &self,
-        code: &str,
+        wasm_bytes: &[u8],
     ) -> Result<rara_domain::research::BacktestResult> {
+        let timeframe = rara_domain::timeframe::Timeframe::Min1;
         if let Some(ref cache) = self.data_cache {
             let slices = cache
                 .load_range(
@@ -358,12 +363,12 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
                     },
                 })?;
             self.backtester
-                .run_with_data(code, "default", &slices)
+                .run_with_data(wasm_bytes, "default", timeframe, &slices)
                 .await
                 .context(BacktestSnafu)
         } else {
             self.backtester
-                .run(code, "default")
+                .run(wasm_bytes, "default", timeframe)
                 .await
                 .context(BacktestSnafu)
         }

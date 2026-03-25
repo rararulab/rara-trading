@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use snafu::Snafu;
 
 use rara_domain::research::BacktestResult;
+use rara_domain::timeframe::Timeframe;
 use rara_market_data::cache::MarketSlice;
 
 /// Errors from backtesting operations.
@@ -20,14 +21,15 @@ pub enum BacktestError {
     },
 }
 
-/// Trait for running backtests against strategy code.
+/// Trait for running backtests with compiled WASM strategy bytes.
 #[async_trait]
 pub trait Backtester: Send + Sync {
-    /// Run a backtest with the given strategy code and contract.
+    /// Run a backtest with compiled strategy bytes, contract, and timeframe.
     async fn run(
         &self,
-        strategy_code: &str,
+        wasm_bytes: &[u8],
         contract_id: &str,
+        timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError>;
 
     /// Run a backtest with pre-loaded market data slices.
@@ -37,10 +39,11 @@ pub trait Backtester: Send + Sync {
     /// avoiding redundant disk I/O.
     async fn run_with_data(
         &self,
-        strategy_code: &str,
+        wasm_bytes: &[u8],
         contract_id: &str,
+        timeframe: Timeframe,
         _data: &[Arc<MarketSlice>],
     ) -> Result<BacktestResult, BacktestError> {
-        self.run(strategy_code, contract_id).await
+        self.run(wasm_bytes, contract_id, timeframe).await
     }
 }

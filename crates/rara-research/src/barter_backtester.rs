@@ -1,9 +1,10 @@
 //! Real backtester implementation using the barter-rs engine.
 //!
 //! Replaces the mock backtester with a real backtest runner that loads historical
-//! market data, runs it through barter's engine with a configurable strategy, and
+//! market data, runs it through barter's engine with a WASM-compiled strategy, and
 //! extracts performance metrics into our domain `BacktestResult`.
 
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,11 +13,9 @@ use barter::backtest::market_data::MarketDataInMemory;
 use barter::backtest::{BacktestArgsConstant, BacktestArgsDynamic, run_backtests};
 use barter::engine::state::EngineState;
 use barter::engine::state::global::DefaultGlobalData;
-use barter::engine::state::instrument::data::DefaultInstrumentMarketData;
 use barter::engine::state::trading::TradingState;
 use barter::risk::DefaultRiskManager;
 use barter::statistic::time::Daily;
-use barter::strategy::DefaultStrategy;
 use barter::system::config::ExecutionConfig;
 use barter_data::event::{DataKind, MarketEvent};
 use barter_data::streams::reconnect::Event as ReconnectEvent;
@@ -36,38 +35,57 @@ use rust_decimal::Decimal;
 use smol_str::SmolStr;
 
 use rara_domain::research::BacktestResult;
+use rara_domain::timeframe::Timeframe;
 use rara_market_data::cache::MarketSlice;
 use rara_market_data::record::FIXED_POINT_SCALE;
 
 use crate::backtester::{BacktestError, Backtester};
+use crate::candle_instrument_data::CandleInstrumentData;
 use crate::market_data::load_market_data_for_contract;
+use crate::strategy_executor::StrategyExecutor;
+use crate::wasm_strategy::{WasmAlgoStrategy, WasmEngineState};
+
+/// Engine state type using our candle-aware instrument data.
+type BtEngineState = WasmEngineState;
+
+/// Risk manager type parameterized over our engine state.
+type BtRisk = DefaultRiskManager<BtEngineState>;
 
 /// Real backtester powered by the barter-rs trading engine.
 ///
 /// Loads historical market data from JSON files, runs it through barter's
-/// backtest infrastructure with mock execution, and extracts performance
-/// metrics into our domain `BacktestResult`.
-#[derive(Debug, Clone, Builder)]
+/// backtest infrastructure with a WASM-compiled strategy and mock execution,
+/// and extracts performance metrics into our domain `BacktestResult`.
+#[derive(Clone, Builder)]
 pub struct BarterBacktester {
     /// Directory containing historical market data JSON files.
-    data_dir: PathBuf,
+    pub data_dir: PathBuf,
     /// Initial capital for the simulated account.
-    initial_capital: Decimal,
+    pub initial_capital: Decimal,
     /// Trading fees as a percentage (e.g., 0.1 for 0.1%).
-    fees_percent: Decimal,
+    pub fees_percent: Decimal,
+    /// Strategy executor for loading WASM artifacts into executable handles.
+    pub executor: Arc<dyn StrategyExecutor>,
 }
 
-/// Default state types used by the barter backtest engine.
-type BtEngineState = EngineState<DefaultGlobalData, DefaultInstrumentMarketData>;
-type BtStrategy = DefaultStrategy<BtEngineState>;
-type BtRisk = DefaultRiskManager<BtEngineState>;
+impl fmt::Debug for BarterBacktester {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BarterBacktester")
+            .field("data_dir", &self.data_dir)
+            .field("initial_capital", &self.initial_capital)
+            .field("fees_percent", &self.fees_percent)
+            .field("executor", &"<dyn StrategyExecutor>")
+            .finish()
+    }
+}
 
 /// Extract performance metrics from a barter `TradingSummary` into our domain `BacktestResult`.
 ///
-/// Aggregates `PnL`, Sharpe ratio, max drawdown, and win rate across all instruments
-/// in the trading summary.
+/// Aggregates PnL, Sharpe ratio, max drawdown, and win rate across all instruments
+/// in the trading summary, tagging the result with the given timeframe.
 fn extract_metrics(
     trading_summary: &barter::statistic::summary::TradingSummary<Daily>,
+    timeframe: Timeframe,
 ) -> BacktestResult {
     let (total_pnl, sharpe, max_dd, win_rate_val, trade_count) = trading_summary
         .instruments
@@ -114,6 +132,7 @@ fn extract_metrics(
         .max_drawdown(max_dd)
         .win_rate(win_rate_f64)
         .trade_count(trade_count)
+        .timeframe(timeframe)
         .build()
 }
 
@@ -204,14 +223,23 @@ const fn timestamp_from_nanos(nanos: i64) -> DateTime<Utc> {
 impl BarterBacktester {
     /// Shared backtest execution logic used by both `run` and `run_with_data`.
     ///
-    /// Takes pre-built market data and runs it through the barter engine,
-    /// returning extracted performance metrics.
+    /// Loads the WASM strategy via the executor, builds the barter engine with
+    /// `CandleInstrumentData`, and runs the backtest to extract metrics.
     async fn run_with_market_data(
         &self,
-        _strategy_code: &str,
+        wasm_bytes: &[u8],
         contract_id: &str,
+        timeframe: Timeframe,
         market_data: MarketDataInMemory<DataKind>,
     ) -> Result<BacktestResult, BacktestError> {
+        // Load WASM strategy via executor
+        let handle = self.executor.load(wasm_bytes).map_err(|e| {
+            BacktestError::ExecutionFailed {
+                message: format!("failed to load WASM strategy: {e}"),
+            }
+        })?;
+        let strategy = WasmAlgoStrategy::new(handle, timeframe);
+
         let instrument = build_instrument(contract_id);
         let instruments = IndexedInstruments::new(vec![instrument]);
 
@@ -240,7 +268,7 @@ impl BarterBacktester {
         let engine_state: BtEngineState = EngineState::builder(
             &instruments,
             DefaultGlobalData,
-            |_| DefaultInstrumentMarketData::default(),
+            |_| CandleInstrumentData::default(),
         )
         .trading_state(TradingState::Enabled)
         .build();
@@ -256,7 +284,7 @@ impl BarterBacktester {
         let args_dynamic = BacktestArgsDynamic {
             id: SmolStr::new(contract_id),
             risk_free_return: Decimal::new(5, 2), // 0.05 risk-free rate
-            strategy: BtStrategy::default(),
+            strategy,
             risk: BtRisk::default(),
         };
 
@@ -274,7 +302,7 @@ impl BarterBacktester {
                 message: "no backtest summary produced".to_string(),
             })?;
 
-        Ok(extract_metrics(&summary.trading_summary))
+        Ok(extract_metrics(&summary.trading_summary, timeframe))
     }
 }
 
@@ -282,8 +310,9 @@ impl BarterBacktester {
 impl Backtester for BarterBacktester {
     async fn run(
         &self,
-        strategy_code: &str,
+        wasm_bytes: &[u8],
         contract_id: &str,
+        timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError> {
         let market_data = load_market_data_for_contract(
             &self.data_dir,
@@ -295,20 +324,21 @@ impl Backtester for BarterBacktester {
             message: format!("failed to load market data: {e}"),
         })?;
 
-        self.run_with_market_data(strategy_code, contract_id, market_data)
+        self.run_with_market_data(wasm_bytes, contract_id, timeframe, market_data)
             .await
     }
 
     async fn run_with_data(
         &self,
-        strategy_code: &str,
+        wasm_bytes: &[u8],
         contract_id: &str,
+        timeframe: Timeframe,
         data: &[Arc<MarketSlice>],
     ) -> Result<BacktestResult, BacktestError> {
         let market_data =
             market_data_from_slices(data, InstrumentIndex(0), ExchangeId::Simulated)?;
 
-        self.run_with_market_data(strategy_code, contract_id, market_data)
+        self.run_with_market_data(wasm_bytes, contract_id, timeframe, market_data)
             .await
     }
 }
