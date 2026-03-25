@@ -1,5 +1,6 @@
 //! Research loop orchestration — the full propose -> code -> compile -> backtest -> evaluate cycle.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use bon::Builder;
@@ -18,6 +19,7 @@ use crate::hypothesis_gen::HypothesisGenerator;
 use crate::prompt_renderer::PromptRenderer;
 use crate::runtime::StrategyRuntime;
 use crate::strategy_coder::StrategyCoder;
+use crate::strategy_promoter::PromotedStrategy;
 use crate::trace::{DagSelection, Trace};
 
 /// Errors from research loop execution.
@@ -78,6 +80,12 @@ pub enum ResearchLoopError {
         /// The underlying store error.
         source: rara_event_bus::store::StoreError,
     },
+    /// Strategy promotion failed.
+    #[snafu(display("promotion failed: {source}"))]
+    Promote {
+        /// The underlying promoter error.
+        source: crate::strategy_promoter::PromoterError,
+    },
 }
 
 /// Alias for research loop results.
@@ -93,6 +101,9 @@ pub struct IterationResult {
     pub feedback: HypothesisFeedback,
     /// Whether the experiment was accepted.
     pub accepted: bool,
+    /// Promoted strategy metadata, present when the experiment was accepted
+    /// and auto-promotion is enabled.
+    pub promoted: Option<PromotedStrategy>,
 }
 
 /// Orchestrates the full RD-Agent style research loop:
@@ -121,6 +132,9 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// Maximum attempts to fix compile errors before giving up.
     #[builder(default = 3)]
     max_compile_retries: u32,
+    /// Directory for promoted strategies. When set, accepted strategies are
+    /// automatically saved here for paper trading pickup.
+    promoted_dir: Option<PathBuf>,
 }
 
 impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
@@ -160,6 +174,9 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 6. Load into StrategyRuntime to validate the module
         let _loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
+
+        // Keep wasm_bytes for potential promotion after acceptance
+        let wasm_bytes_for_promotion = wasm_bytes;
 
         // 7. Create and save experiment
         let experiment = Experiment::builder()
@@ -216,8 +233,8 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             }),
         )?;
 
-        // 13. If accepted, publish candidate event
-        if accepted {
+        // 13. If accepted, publish candidate event and auto-promote
+        let promoted = if accepted {
             self.publish_event(
                 "research.strategy.candidate",
                 &serde_json::json!({
@@ -225,13 +242,22 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
                     "hypothesis_id": hypothesis.id().to_string(),
                 }),
             )?;
-        }
+
+            self.try_promote(
+                experiment.id(),
+                hypothesis.id(),
+                &wasm_bytes_for_promotion,
+            )?
+        } else {
+            None
+        };
 
         Ok(IterationResult {
             hypothesis,
             experiment,
             feedback,
             accepted,
+            promoted,
         })
     }
 
@@ -265,6 +291,49 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         Err(ResearchLoopError::CompileFailed {
             errors: last_errors,
         })
+    }
+
+    /// Auto-promote an accepted strategy if a promoted directory is configured.
+    fn try_promote(
+        &self,
+        experiment_id: uuid::Uuid,
+        hypothesis_id: uuid::Uuid,
+        wasm_bytes: &[u8],
+    ) -> Result<Option<PromotedStrategy>> {
+        let Some(ref promoted_dir) = self.promoted_dir else {
+            return Ok(None);
+        };
+
+        let promoter = crate::strategy_promoter::StrategyPromoter::builder()
+            .trace(
+                crate::trace::Trace::open(
+                    &promoted_dir
+                        .parent()
+                        .unwrap_or(promoted_dir)
+                        .join("trace_promote"),
+                )
+                .context(TraceSnafu)?,
+            )
+            .runtime(StrategyRuntime::builder().build())
+            .compiler(
+                StrategyCompiler::builder()
+                    .template_dir(PathBuf::new())
+                    .build(),
+            )
+            .promoted_dir(promoted_dir.clone())
+            .build();
+
+        let promoted_strategy = promoter
+            .promote_from_wasm(experiment_id, hypothesis_id, wasm_bytes)
+            .context(PromoteSnafu)?;
+
+        tracing::info!(
+            %experiment_id,
+            wasm_path = %promoted_strategy.wasm_path().display(),
+            "strategy promoted for paper trading"
+        );
+
+        Ok(Some(promoted_strategy))
     }
 
     /// Helper to publish a domain event.
