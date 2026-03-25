@@ -105,6 +105,7 @@ mod tests {
 
     use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
     use rara_agent::executor::CliExecutor;
+    use rara_domain::sentinel::{SignalSource, SignalType};
     use crate::source::RawSignal;
     use crate::sources::webhook::WebhookDataSource;
 
@@ -181,5 +182,40 @@ mod tests {
         // No events should be published
         let events = event_bus.store().read_topic("sentinel", 0, 10).unwrap();
         assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn trump_code_signal_flows_through_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_bus = Arc::new(EventBus::open(dir.path()).unwrap());
+
+        // Simulate a trump-code signal via webhook
+        let raw = RawSignal {
+            source_name: "trump-code".to_owned(),
+            content: "Trump Code signals for 2026-03-25: TARIFF(x3), DEAL(x1). \
+                      Consensus: BULLISH. Posts today: 12. \
+                      Opus insight: Deal signals suggest resolution".to_owned(),
+            metadata: json!({
+                "consensus": "BULLISH",
+                "signal_confidence": {"TARIFF": 0.65, "DEAL": 0.72},
+            }),
+            timestamp: jiff::Timestamp::now(),
+        };
+
+        let source = WebhookDataSource::new("trump-code");
+        source.push(raw).await;
+
+        let executor = echo_executor(
+            "SEVERITY: Warning\nTYPE: PoliticalSignal\nCONTRACTS: SPY,SPX\nSUMMARY: Trump tariff signals with deal offset",
+        );
+
+        let analyzer = SignalAnalyzer::new(executor);
+        let engine = SentinelEngine::new(vec![Box::new(source)], analyzer, event_bus.clone());
+
+        let signals = engine.poll_and_analyze().await.unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].signal_type, SignalType::PoliticalSignal);
+        assert_eq!(signals[0].source, SignalSource::TrumpCode);
+        assert!(!signals[0].should_block_trading()); // Warning, not Critical
     }
 }
