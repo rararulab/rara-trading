@@ -2,6 +2,7 @@
 //!
 //! Uses the public `/api/v3/klines` endpoint (no authentication required).
 //! Paginates at 1000 candles per request (~16.6 hours of 1m data).
+//! Resumes from the latest stored candle via `MAX(ts)` query.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Days, NaiveDate, NaiveTime, Utc};
@@ -78,42 +79,43 @@ impl HistoryFetcher for BinanceFetcher {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<usize> {
+        let range_start_ms = start
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .timestamp_millis();
+        let range_end_ms = end
+            .checked_add_days(Days::new(1))
+            .expect("date overflow")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .timestamp_millis()
+            - 1;
+
+        // Resume from last stored candle + 1 minute
+        let resume_ms = store
+            .max_ts(instrument_id, "1m")
+            .await
+            .context(StoreSnafu)?
+            .map_or(i64::MIN, |ts| ts.timestamp_millis() + 60_000);
+
+        let fetch_start_ms = range_start_ms.max(resume_ms);
+        if fetch_start_ms > range_end_ms {
+            info!("binance: already up to date, nothing to fetch");
+            return Ok(0);
+        }
+
         let mut total = 0usize;
-        let mut current = start;
+        let mut cursor_ms = fetch_start_ms;
 
-        while current <= end {
-            // Skip days already fully stored (1440 = 24h * 60m)
-            let existing = store
-                .count_candles_for_day(instrument_id, "1m", current)
-                .await
-                .context(StoreSnafu)?;
-            if existing >= 1440 {
-                info!(date = %current, existing, "binance: day complete, skipping");
-                current = current
-                    .checked_add_days(Days::new(1))
-                    .expect("date overflow");
-                continue;
+        while cursor_ms <= range_end_ms {
+            let page = self.fetch_page(cursor_ms, range_end_ms).await?;
+            if page.is_empty() {
+                break;
             }
 
-            let day_start_ms = current
-                .and_time(NaiveTime::MIN)
-                .and_utc()
-                .timestamp_millis();
-            let day_end_ms = day_start_ms + 86_400_000 - 1;
+            cursor_ms = page.last().expect("non-empty page").open_time_ms + 60_001;
 
-            let mut klines = Vec::new();
-            let mut page_start = day_start_ms;
-
-            while page_start <= day_end_ms {
-                let page = self.fetch_page(page_start, day_end_ms).await?;
-                if page.is_empty() {
-                    break;
-                }
-                page_start = page.last().expect("non-empty page").open_time_ms + 60_001;
-                klines.extend(page);
-            }
-
-            let candle_rows: Vec<CandleRow> = klines
+            let candle_rows: Vec<CandleRow> = page
                 .iter()
                 .map(|k| CandleRow {
                     ts: DateTime::from_timestamp_millis(k.open_time_ms)
@@ -130,14 +132,10 @@ impl HistoryFetcher for BinanceFetcher {
                 .collect();
 
             let count = store.insert_candles(&candle_rows).await.context(StoreSnafu)?;
-            info!(date = %current, candles = count, "binance: ingested day");
             total += usize::try_from(count).expect("candle count fits in usize");
-
-            current = current
-                .checked_add_days(Days::new(1))
-                .expect("date overflow");
         }
 
+        info!(total, "binance: fetch complete");
         Ok(total)
     }
 }
