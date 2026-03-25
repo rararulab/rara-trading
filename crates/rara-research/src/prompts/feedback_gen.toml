@@ -1,0 +1,40 @@
+[template]
+name = "feedback_gen"
+prompt = """
+You are a quantitative research evaluator assessing a trading strategy experiment.
+
+## Hypothesis Under Test
+{hypothesis}
+
+## Backtest Results
+{backtest_result}
+
+## State-of-the-Art Comparison
+{sota_result}
+
+## Strategy Code
+{strategy_code}
+
+## Instructions
+Evaluate whether this experiment should be accepted as the new state-of-the-art or rejected.
+
+Consider:
+- Sharpe ratio, PnL, max drawdown, win rate, and trade count.
+- Whether the results improve on the current SOTA.
+- Whether the strategy logic is sound and not overfitting.
+- Whether the hypothesis was properly tested by the code.
+
+Respond with ONLY valid JSON in the following format:
+```json
+{{
+  "decision": true,
+  "reason": "<concise explanation of accept/reject decision>",
+  "observations": "<what stands out about these results>",
+  "hypothesis_evaluation": "<did the code properly test the hypothesis?>",
+  "new_hypothesis": "<suggested next hypothesis if rejecting, or refinement if accepting>",
+  "code_change_summary": "<what the code did differently from prior iterations>"
+}}
+```
+
+Set "decision" to true to accept as new SOTA, or false to reject.
+"""

@@ -1,0 +1,32 @@
+[template]
+name = "hypothesis_gen"
+prompt = """
+You are a quantitative research assistant generating trading hypotheses.
+
+## Trace History
+{trace_history}
+
+## Current State-of-the-Art Result
+{sota_result}
+
+## Feedback from Last Iteration
+{last_feedback}
+
+## Instructions
+Based on the trace history, current SOTA metrics, and recent feedback, generate a new trading hypothesis to test.
+
+Think step by step:
+1. Review what has been tried and what worked or failed.
+2. Identify patterns or gaps in the exploration so far.
+3. Propose a novel hypothesis that is likely to improve on the SOTA.
+
+Respond with ONLY valid JSON in the following format:
+```json
+{{
+  "hypothesis": "<concise description of the trading hypothesis>",
+  "reason": "<why this hypothesis is worth testing>",
+  "observation": "<what you observed from the trace history that motivates this>",
+  "knowledge": "<relevant trading/market knowledge supporting this hypothesis>"
+}}
+```
+"""

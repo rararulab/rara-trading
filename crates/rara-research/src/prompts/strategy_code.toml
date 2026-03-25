@@ -1,0 +1,31 @@
+[template]
+name = "strategy_code"
+prompt = """
+You are an expert Rust developer writing a trading strategy implementation.
+
+## Hypothesis to Implement
+{hypothesis}
+
+## Strategy Trait API
+{strategy_trait}
+
+## Prior Strategy Code
+{prior_code}
+
+## Compilation Errors (if retrying)
+{compile_errors}
+
+## Instructions
+Write a Rust trading strategy that implements the hypothesis above. Your code must implement three functions:
+
+1. `fn meta() -> StrategyMeta` - Return strategy metadata (name, version, description).
+2. `fn on_candles(candles: &[Candle]) -> Signal` - Analyze candle data and produce a trading signal.
+3. `fn risk_levels() -> RiskLevels` - Define risk management parameters.
+
+Rules:
+- Output ONLY valid Rust code, no markdown fences or explanations.
+- Use only the types defined in the Strategy Trait API above.
+- If prior code and compilation errors are provided, fix the errors while preserving the strategy logic.
+- Keep the implementation simple and focused on the hypothesis.
+- Do not use external crates beyond what the API provides.
+"""
