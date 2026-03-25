@@ -73,7 +73,7 @@ impl Trace {
     pub fn save_hypothesis(&self, h: &Hypothesis) -> Result<()> {
         let json = serde_json::to_vec(h).context(SerializeSnafu)?;
         self.hypotheses
-            .insert(h.id().as_bytes(), json)
+            .insert(h.id.as_bytes(), json)
             .context(SledSnafu)?;
         Ok(())
     }
@@ -97,7 +97,7 @@ impl Trace {
             let Some(h) = self.get_hypothesis(cid)? else {
                 break;
             };
-            current_id = h.parent();
+            current_id = h.parent;
             chain.push(h);
         }
 
@@ -108,7 +108,7 @@ impl Trace {
     pub fn save_experiment(&self, exp: &Experiment) -> Result<()> {
         let json = serde_json::to_vec(exp).context(SerializeSnafu)?;
         self.experiments
-            .insert(exp.id().as_bytes(), json)
+            .insert(exp.id.as_bytes(), json)
             .context(SledSnafu)?;
         Ok(())
     }
@@ -126,7 +126,7 @@ impl Trace {
     pub fn save_feedback(&self, fb: &HypothesisFeedback) -> Result<()> {
         let json = serde_json::to_vec(fb).context(SerializeSnafu)?;
         // Key: "{experiment_id}/{created_at}" for multiple feedbacks per experiment
-        let key = format!("{}/{}", fb.experiment_id(), fb.reason());
+        let key = format!("{}/{}", fb.experiment_id, fb.reason);
         self.feedbacks
             .insert(key.as_bytes(), json)
             .context(SledSnafu)?;
@@ -160,11 +160,11 @@ impl Trace {
             let fb: HypothesisFeedback =
                 serde_json::from_slice(&bytes).context(SerializeSnafu)?;
 
-            if !fb.decision() {
+            if !fb.decision {
                 continue;
             }
 
-            let Some(exp) = self.get_experiment(fb.experiment_id())? else {
+            let Some(exp) = self.get_experiment(fb.experiment_id)? else {
                 continue;
             };
 
@@ -212,7 +212,7 @@ impl Trace {
 
         // Store experiment ID in hist_order
         self.hist_order
-            .insert(idx_bytes, exp.id().as_bytes().as_slice())
+            .insert(idx_bytes, exp.id.as_bytes().as_slice())
             .context(SledSnafu)?;
 
         // Determine parent indices
@@ -279,17 +279,18 @@ impl Trace {
             let fb: HypothesisFeedback =
                 serde_json::from_slice(&bytes).context(SerializeSnafu)?;
 
-            if !fb.decision() {
+            if !fb.decision {
                 continue;
             }
 
-            let Some(exp) = self.get_experiment(fb.experiment_id())? else {
+            let Some(exp) = self.get_experiment(fb.experiment_id)? else {
                 continue;
             };
 
             let sharpe = exp
-                .backtest_result()
-                .map_or(f64::NEG_INFINITY, rara_domain::research::BacktestResult::sharpe_ratio);
+                .backtest_result
+                .as_ref()
+                .map_or(f64::NEG_INFINITY, |result| result.sharpe_ratio);
 
             let dominated = best.as_ref().is_some_and(|(_, _, best_sharpe)| *best_sharpe >= sharpe);
             if !dominated {
@@ -443,23 +444,23 @@ impl Trace {
                 let fb = fbs.into_iter().next()?;
 
                 // Look up the hypothesis text
-                let hyp_text = match self.get_hypothesis(exp.hypothesis_id()) {
-                    Ok(Some(h)) => h.text().to_owned(),
+                let hyp_text = match self.get_hypothesis(exp.hypothesis_id) {
+                    Ok(Some(h)) => h.text,
                     _ => "unknown".to_owned(),
                 };
 
-                let decision_str = if fb.decision() { "accepted" } else { "rejected" };
+                let decision_str = if fb.decision { "accepted" } else { "rejected" };
 
-                let (sharpe, pnl) = exp.backtest_result().map_or_else(
+                let (sharpe, pnl) = exp.backtest_result.map_or_else(
                     || ("N/A".to_owned(), "N/A".to_owned()),
-                    |br| (format!("{:.2}", br.sharpe_ratio()), format!("{:.2}", br.pnl())),
+                    |br| (format!("{:.2}", br.sharpe_ratio), format!("{:.2}", br.pnl)),
                 );
 
                 let iteration = skip + i;
 
                 Some(Ok(format!(
                     "[Iteration {iteration}] Hypothesis: {hyp_text} | Result: {decision_str} | Sharpe: {sharpe} | PnL: {pnl} | Feedback: {}",
-                    fb.reason()
+                    fb.reason
                 )))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -517,18 +518,18 @@ mod tests {
         let trace = Trace::open(dir.path()).unwrap();
 
         let root = make_hypothesis("root", None);
-        let mid = make_hypothesis("mid", Some(root.id()));
-        let leaf = make_hypothesis("leaf", Some(mid.id()));
+        let mid = make_hypothesis("mid", Some(root.id));
+        let leaf = make_hypothesis("leaf", Some(mid.id));
 
         trace.save_hypothesis(&root).unwrap();
         trace.save_hypothesis(&mid).unwrap();
         trace.save_hypothesis(&leaf).unwrap();
 
-        let chain = trace.ancestor_chain(leaf.id()).unwrap();
+        let chain = trace.ancestor_chain(leaf.id).unwrap();
         assert_eq!(chain.len(), 3);
-        assert_eq!(chain[0].id(), leaf.id());
-        assert_eq!(chain[1].id(), mid.id());
-        assert_eq!(chain[2].id(), root.id());
+        assert_eq!(chain[0].id, leaf.id);
+        assert_eq!(chain[1].id, mid.id);
+        assert_eq!(chain[2].id, root.id);
     }
 
     #[test]
@@ -541,13 +542,13 @@ mod tests {
 
         // Create rejected experiment
         let rejected_exp = Experiment::builder()
-            .hypothesis_id(h.id())
+            .hypothesis_id(h.id)
             .strategy_code("bad code")
             .build();
         trace.save_experiment(&rejected_exp).unwrap();
 
         let rejected_fb = HypothesisFeedback::builder()
-            .experiment_id(rejected_exp.id())
+            .experiment_id(rejected_exp.id)
             .decision(false)
             .reason("poor performance")
             .observations("low sharpe")
@@ -556,13 +557,13 @@ mod tests {
 
         // Create accepted experiment
         let accepted_exp = Experiment::builder()
-            .hypothesis_id(h.id())
+            .hypothesis_id(h.id)
             .strategy_code("good code")
             .build();
         trace.save_experiment(&accepted_exp).unwrap();
 
         let accepted_fb = HypothesisFeedback::builder()
-            .experiment_id(accepted_exp.id())
+            .experiment_id(accepted_exp.id)
             .decision(true)
             .reason("strong performance")
             .observations("high sharpe")
@@ -572,8 +573,8 @@ mod tests {
         let best = trace.get_best_experiment().unwrap();
         assert!(best.is_some());
         let (exp, fb) = best.unwrap();
-        assert!(fb.decision());
-        assert_eq!(exp.id(), accepted_exp.id());
+        assert!(fb.decision);
+        assert_eq!(exp.id, accepted_exp.id);
     }
 
     #[test]
@@ -584,18 +585,18 @@ mod tests {
         let h = make_hypothesis("h1", None);
         trace.save_hypothesis(&h).unwrap();
 
-        let exp0 = make_experiment(h.id(), "code0", Some(1.0));
-        let fb0 = make_feedback(exp0.id(), true, "reason0");
+        let exp0 = make_experiment(h.id, "code0", Some(1.0));
+        let fb0 = make_feedback(exp0.id, true, "reason0");
         let idx0 = trace.record(&exp0, &fb0, &DagSelection::NewRoot).unwrap();
         assert_eq!(idx0, 0);
 
-        let exp1 = make_experiment(h.id(), "code1", Some(1.5));
-        let fb1 = make_feedback(exp1.id(), true, "reason1");
+        let exp1 = make_experiment(h.id, "code1", Some(1.5));
+        let fb1 = make_feedback(exp1.id, true, "reason1");
         let idx1 = trace.record(&exp1, &fb1, &DagSelection::Latest).unwrap();
         assert_eq!(idx1, 1);
 
-        let exp2 = make_experiment(h.id(), "code2", Some(2.0));
-        let fb2 = make_feedback(exp2.id(), false, "reason2");
+        let exp2 = make_experiment(h.id, "code2", Some(2.0));
+        let fb2 = make_feedback(exp2.id, false, "reason2");
         let idx2 = trace
             .record(&exp2, &fb2, &DagSelection::Specific(0))
             .unwrap();
@@ -604,14 +605,14 @@ mod tests {
         // Walk ancestors from idx1: should get idx1 -> idx0
         let anc = trace.ancestors(idx1).unwrap();
         assert_eq!(anc.len(), 2);
-        assert_eq!(anc[0].0.id(), exp1.id());
-        assert_eq!(anc[1].0.id(), exp0.id());
+        assert_eq!(anc[0].0.id, exp1.id);
+        assert_eq!(anc[1].0.id, exp0.id);
 
         // Walk ancestors from idx2: should get idx2 -> idx0
         let anc2 = trace.ancestors(idx2).unwrap();
         assert_eq!(anc2.len(), 2);
-        assert_eq!(anc2[0].0.id(), exp2.id());
-        assert_eq!(anc2[1].0.id(), exp0.id());
+        assert_eq!(anc2[0].0.id, exp2.id);
+        assert_eq!(anc2[1].0.id, exp0.id);
     }
 
     #[test]
@@ -622,18 +623,18 @@ mod tests {
         let h = make_hypothesis("h1", None);
         trace.save_hypothesis(&h).unwrap();
 
-        let exp0 = make_experiment(h.id(), "code0", Some(1.0));
-        let fb0 = make_feedback(exp0.id(), true, "root reason");
+        let exp0 = make_experiment(h.id, "code0", Some(1.0));
+        let fb0 = make_feedback(exp0.id, true, "root reason");
         let idx0 = trace.record(&exp0, &fb0, &DagSelection::NewRoot).unwrap();
 
-        let exp1 = make_experiment(h.id(), "code1", Some(1.5));
-        let fb1 = make_feedback(exp1.id(), true, "child1 reason");
+        let exp1 = make_experiment(h.id, "code1", Some(1.5));
+        let fb1 = make_feedback(exp1.id, true, "child1 reason");
         trace
             .record(&exp1, &fb1, &DagSelection::Specific(idx0))
             .unwrap();
 
-        let exp2 = make_experiment(h.id(), "code2", Some(0.5));
-        let fb2 = make_feedback(exp2.id(), false, "child2 reason");
+        let exp2 = make_experiment(h.id, "code2", Some(0.5));
+        let fb2 = make_feedback(exp2.id, false, "child2 reason");
         trace
             .record(&exp2, &fb2, &DagSelection::Specific(idx0))
             .unwrap();
@@ -641,9 +642,9 @@ mod tests {
         let kids = trace.children(idx0).unwrap();
         assert_eq!(kids.len(), 2);
 
-        let kid_ids: Vec<Uuid> = kids.iter().map(|(e, _)| e.id()).collect();
-        assert!(kid_ids.contains(&exp1.id()));
-        assert!(kid_ids.contains(&exp2.id()));
+        let kid_ids: Vec<Uuid> = kids.iter().map(|(e, _)| e.id).collect();
+        assert!(kid_ids.contains(&exp1.id));
+        assert!(kid_ids.contains(&exp2.id));
     }
 
     #[test]
@@ -655,23 +656,23 @@ mod tests {
         trace.save_hypothesis(&h).unwrap();
 
         // Accepted with low Sharpe
-        let exp_low = make_experiment(h.id(), "low", Some(0.5));
-        let fb_low = make_feedback(exp_low.id(), true, "low sharpe reason");
+        let exp_low = make_experiment(h.id, "low", Some(0.5));
+        let fb_low = make_feedback(exp_low.id, true, "low sharpe reason");
         trace.record(&exp_low, &fb_low, &DagSelection::NewRoot).unwrap();
 
         // Rejected with high Sharpe (should not win)
-        let exp_rej = make_experiment(h.id(), "rejected", Some(5.0));
-        let fb_rej = make_feedback(exp_rej.id(), false, "rejected reason");
+        let exp_rej = make_experiment(h.id, "rejected", Some(5.0));
+        let fb_rej = make_feedback(exp_rej.id, false, "rejected reason");
         trace.record(&exp_rej, &fb_rej, &DagSelection::Latest).unwrap();
 
         // Accepted with high Sharpe (should win)
-        let exp_high = make_experiment(h.id(), "high", Some(2.5));
-        let fb_high = make_feedback(exp_high.id(), true, "high sharpe reason");
+        let exp_high = make_experiment(h.id, "high", Some(2.5));
+        let fb_high = make_feedback(exp_high.id, true, "high sharpe reason");
         trace.record(&exp_high, &fb_high, &DagSelection::Latest).unwrap();
 
         let sota = trace.get_sota().unwrap().unwrap();
-        assert_eq!(sota.0.id(), exp_high.id());
-        assert!(sota.1.decision());
+        assert_eq!(sota.0.id, exp_high.id);
+        assert!(sota.1.decision);
     }
 
     #[test]
@@ -682,12 +683,12 @@ mod tests {
         let h = make_hypothesis("mean reversion", None);
         trace.save_hypothesis(&h).unwrap();
 
-        let exp0 = make_experiment(h.id(), "code0", Some(1.23));
-        let fb0 = make_feedback(exp0.id(), true, "good performance");
+        let exp0 = make_experiment(h.id, "code0", Some(1.23));
+        let fb0 = make_feedback(exp0.id, true, "good performance");
         trace.record(&exp0, &fb0, &DagSelection::NewRoot).unwrap();
 
-        let exp1 = make_experiment(h.id(), "code1", Some(-0.5));
-        let fb1 = make_feedback(exp1.id(), false, "poor drawdown");
+        let exp1 = make_experiment(h.id, "code1", Some(-0.5));
+        let fb1 = make_feedback(exp1.id, false, "poor drawdown");
         trace.record(&exp1, &fb1, &DagSelection::Latest).unwrap();
 
         let output = trace.format_for_prompt(10).unwrap();

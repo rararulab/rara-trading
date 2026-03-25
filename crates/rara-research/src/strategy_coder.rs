@@ -43,8 +43,8 @@ impl<L: LlmClient> StrategyCoder<L> {
              Reason: {}\n\
              Context: {context}\n\n\
              Return only the strategy code.",
-            hypothesis.text(),
-            hypothesis.reason()
+            hypothesis.text,
+            hypothesis.reason
         );
 
         self.llm.complete(&prompt).await.context(LlmSnafu)
@@ -63,7 +63,7 @@ impl<L: LlmClient> StrategyCoder<L> {
              Current code:\n```rust\n{code}\n```\n\n\
              Compilation errors:\n{}\n\n\
              Return only the corrected Rust code.",
-            hypothesis.text(),
+            hypothesis.text,
             errors.join("\n")
         );
 

@@ -3,11 +3,12 @@
 use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 use crate::contract::SecType;
 
 /// Classification of trading strategy approaches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum StrategyType {
     /// Directional bets on price movement.
     Directional,
@@ -22,7 +23,7 @@ pub enum StrategyType {
 }
 
 /// Lifecycle status of a strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum StrategyStatus {
     /// Newly identified, not yet tested.
     Candidate,
@@ -53,81 +54,50 @@ pub enum ContractFilter {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 #[allow(clippy::struct_field_names)]
 pub struct Strategy {
+    /// Stable strategy identifier.
     #[builder(into)]
-    id: String,
-    version: u32,
+    pub id: String,
+    /// Monotonic strategy version.
+    pub version: u32,
+    /// Human-readable strategy name.
     #[builder(into)]
-    name: String,
+    pub name: String,
+    /// Strategy description and intent.
     #[builder(into)]
-    description: String,
+    pub description: String,
+    /// Executable strategy source code.
     #[builder(into)]
-    code: String,
-    strategy_type: StrategyType,
-    applicable_contracts: Vec<ContractFilter>,
-    parameters: serde_json::Value,
-    status: StrategyStatus,
-}
-
-impl Strategy {
-    /// Returns the strategy identifier.
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Returns the strategy version number.
-    pub const fn version(&self) -> u32 {
-        self.version
-    }
-
-    /// Returns the human-readable strategy name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the current lifecycle status.
-    pub const fn status(&self) -> StrategyStatus {
-        self.status
-    }
-
-    /// Returns the strategy type classification.
-    pub const fn strategy_type(&self) -> StrategyType {
-        self.strategy_type
-    }
-
-    /// Returns the contract filters this strategy applies to.
-    pub fn applicable_contracts(&self) -> &[ContractFilter] {
-        &self.applicable_contracts
-    }
+    pub code: String,
+    /// Strategy classification.
+    pub strategy_type: StrategyType,
+    /// Contract matching rules this strategy applies to.
+    pub applicable_contracts: Vec<ContractFilter>,
+    /// JSON parameters consumed by strategy runtime.
+    pub parameters: serde_json::Value,
+    /// Lifecycle status of the strategy.
+    pub status: StrategyStatus,
 }
 
 /// Risk limits and constraints for a specific security type.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct RiskProfile {
-    sec_type: SecType,
-    max_leverage: Decimal,
-    max_position_pct: Decimal,
-    max_drawdown: Decimal,
-    require_stop_loss: bool,
-    liquidation_buffer: Decimal,
-    funding_rate_check: bool,
+    /// Security type this risk profile targets.
+    pub sec_type: SecType,
+    /// Maximum leverage allowed.
+    pub max_leverage: Decimal,
+    /// Maximum position size as portfolio fraction.
+    pub max_position_pct: Decimal,
+    /// Maximum tolerated drawdown.
+    pub max_drawdown: Decimal,
+    /// Whether stop-loss orders are mandatory.
+    pub require_stop_loss: bool,
+    /// Minimum liquidation safety buffer.
+    pub liquidation_buffer: Decimal,
+    /// Whether funding-rate checks are required.
+    pub funding_rate_check: bool,
 }
 
 impl RiskProfile {
-    /// Returns the maximum allowed leverage.
-    pub const fn max_leverage(&self) -> Decimal {
-        self.max_leverage
-    }
-
-    /// Returns whether a stop-loss is required.
-    pub const fn require_stop_loss(&self) -> bool {
-        self.require_stop_loss
-    }
-
-    /// Returns whether funding rate checks are enabled.
-    pub const fn funding_rate_check(&self) -> bool {
-        self.funding_rate_check
-    }
-
     /// Default risk profile for crypto spot trading.
     pub fn crypto_spot_default() -> Self {
         Self {

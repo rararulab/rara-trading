@@ -5,6 +5,9 @@
 - Do NOT write manual `fn new()` constructors for structs with 3+ fields — use `#[derive(bon::Builder)]`
 - Do NOT hardcode config defaults in Rust code — use the config system
 - Do NOT write code comments in any language other than English
+- Do NOT write getter methods that just return `&self.field` — make the field `pub` instead
+- Do NOT write manual string ↔ enum conversion functions — use `strum` derives
+- Do NOT write trivial tests (builder roundtrips, getter roundtrips, serde roundtrips) — they test derive macros, not your logic
 
 ## Workflow
 - Do NOT work directly on `main` — ALL changes require a worktree + PR, no exceptions

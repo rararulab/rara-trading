@@ -154,12 +154,12 @@ impl StrategyPromoter {
             .context(TraceSnafu)?
             .ok_or(PromoterError::ExperimentNotFound { id: experiment_id })?;
 
-        let hypothesis_id = experiment.hypothesis_id();
+        let hypothesis_id = experiment.hypothesis_id;
 
         // 2. Compile strategy code to WASM
         let compile_result = self
             .compiler
-            .compile(experiment.strategy_code())
+            .compile(&experiment.strategy_code)
             .await
             .context(CompileSnafu)?;
 
@@ -188,7 +188,7 @@ impl StrategyPromoter {
 
         // 6. Save strategy source code alongside the binary
         let source_path = self.promoted_dir.join(format!("{experiment_id}.rs"));
-        std::fs::write(&source_path, experiment.strategy_code()).context(IoSnafu)?;
+        std::fs::write(&source_path, &experiment.strategy_code).context(IoSnafu)?;
 
         // 7. Build and save metadata
         let promoted = PromotedStrategy::builder()
@@ -355,8 +355,8 @@ mod tests {
 
         let result = sut.list_promoted().unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].experiment_id(), exp_id);
-        assert_eq!(result[0].hypothesis_id(), hyp_id);
+        assert_eq!(result[0].experiment_id, exp_id);
+        assert_eq!(result[0].hypothesis_id, hyp_id);
         assert_eq!(result[0].meta().name, "test-strategy");
     }
 }

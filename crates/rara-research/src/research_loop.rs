@@ -169,7 +169,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 3. Publish hypothesis created event
         self.publish_event(
             "research.hypothesis.created",
-            &serde_json::json!({ "hypothesis_id": hypothesis.id().to_string() }),
+            &serde_json::json!({ "hypothesis_id": hypothesis.id.to_string() }),
         )?;
 
         // 4. Generate strategy code
@@ -182,7 +182,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 5. Save generated source to generated_dir for debugging/reproducibility
         if let Some(ref dir) = self.generated_dir {
             std::fs::create_dir_all(dir).context(IoSnafu)?;
-            let path = dir.join(format!("{}.rs", hypothesis.id()));
+            let path = dir.join(format!("{}.rs", hypothesis.id));
             std::fs::write(&path, &code).context(IoSnafu)?;
         }
 
@@ -197,7 +197,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 7. Create and save experiment
         let experiment = Experiment::builder()
-            .hypothesis_id(hypothesis.id())
+            .hypothesis_id(hypothesis.id)
             .strategy_code(&code)
             .build();
 
@@ -214,20 +214,20 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
 
         // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
-        let accepted = backtest_result.sharpe_ratio() > 1.0
-            && backtest_result.max_drawdown() < max_drawdown_threshold;
+        let accepted = backtest_result.sharpe_ratio > 1.0
+            && backtest_result.max_drawdown < max_drawdown_threshold;
 
         // 10. Generate feedback via FeedbackGenerator
         let sota_result = self
             .trace
             .get_sota()
             .context(TraceSnafu)?
-            .and_then(|(exp, _)| exp.backtest_result().cloned());
+            .and_then(|(exp, _)| exp.backtest_result);
 
         let feedback = self
             .feedback_gen
             .generate(
-                experiment.id(),
+                experiment.id,
                 &hypothesis,
                 &backtest_result,
                 &code,
@@ -245,7 +245,7 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         self.publish_event(
             "research.experiment.completed",
             &serde_json::json!({
-                "experiment_id": experiment.id().to_string(),
+                "experiment_id": experiment.id.to_string(),
                 "accepted": accepted,
             }),
         )?;
@@ -255,14 +255,14 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             self.publish_event(
                 "research.strategy.candidate",
                 &serde_json::json!({
-                    "experiment_id": experiment.id().to_string(),
-                    "hypothesis_id": hypothesis.id().to_string(),
+                    "experiment_id": experiment.id.to_string(),
+                    "hypothesis_id": hypothesis.id.to_string(),
                 }),
             )?;
 
             self.try_promote(
-                experiment.id(),
-                hypothesis.id(),
+                experiment.id,
+                hypothesis.id,
                 &wasm_bytes_for_promotion,
                 &code,
             )?

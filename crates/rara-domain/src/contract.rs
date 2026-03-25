@@ -2,9 +2,10 @@
 
 use bon::Builder;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 /// Classification of tradable security types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum SecType {
     /// Spot cryptocurrency — no leverage.
     CryptoSpot,
@@ -25,38 +26,22 @@ pub enum SecType {
 /// A tradable instrument on a specific exchange.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Builder)]
 pub struct Contract {
+    /// Exchange identifier, e.g. `"binance"`.
     #[builder(into)]
-    exchange: String,
+    pub exchange: String,
+    /// Exchange-native symbol, e.g. `"BTCUSDT"`.
     #[builder(into)]
-    symbol: String,
-    sec_type: SecType,
+    pub symbol: String,
+    /// Security type classification.
+    pub sec_type: SecType,
+    /// Quote currency code, e.g. `"USDT"`.
     #[builder(into)]
-    currency: String,
+    pub currency: String,
 }
 
 impl Contract {
     /// Returns a unique identifier in the format `"{exchange}-{symbol}"`.
     pub fn id(&self) -> String {
         format!("{}-{}", self.exchange, self.symbol)
-    }
-
-    /// Returns the exchange name.
-    pub fn exchange(&self) -> &str {
-        &self.exchange
-    }
-
-    /// Returns the trading symbol.
-    pub fn symbol(&self) -> &str {
-        &self.symbol
-    }
-
-    /// Returns the security type.
-    pub const fn sec_type(&self) -> SecType {
-        self.sec_type
-    }
-
-    /// Returns the quote currency.
-    pub fn currency(&self) -> &str {
-        &self.currency
     }
 }

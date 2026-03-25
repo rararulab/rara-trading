@@ -285,63 +285,63 @@ impl Broker for CcxtBroker {
         let mut results = Vec::with_capacity(actions.len());
 
         for action in actions {
-            let result = match action.action_type() {
+            let result = match action.action_type {
                 ActionType::PlaceOrder => {
-                    let ccxt_side = to_ccxt_side(action.side());
-                    let ccxt_type = to_ccxt_order_type(action.order_type());
-                    let amount = Amount::new(action.quantity());
-                    let price = action.limit_price().map(Price::new);
+                    let ccxt_side = to_ccxt_side(action.side);
+                    let ccxt_type = to_ccxt_order_type(action.order_type);
+                    let amount = Amount::new(action.quantity);
+                    let price = action.limit_price.map(Price::new);
 
                     debug!(
-                        contract = action.contract_id(),
-                        side = ?action.side(),
-                        qty = %action.quantity(),
+                        contract = action.contract_id,
+                        side = ?action.side,
+                        qty = %action.quantity,
                         "placing order"
                     );
 
                     let order = client
-                        .create_order(action.contract_id(), ccxt_type, ccxt_side, amount, price)
+                        .create_order(&action.contract_id, ccxt_type, ccxt_side, amount, price)
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
                     OrderResult {
                         order_id: order.id,
-                        contract_id: action.contract_id().to_string(),
+                        contract_id: action.contract_id.clone(),
                         status: from_ccxt_order_status(order.status),
                     }
                 }
                 ActionType::CancelOrder => {
-                    debug!(contract = action.contract_id(), "cancelling order");
+                    debug!(contract = action.contract_id, "cancelling order");
 
                     let order = client
-                        .cancel_order(action.contract_id(), action.contract_id())
+                        .cancel_order(&action.contract_id, &action.contract_id)
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
                     OrderResult {
                         order_id: order.id,
-                        contract_id: action.contract_id().to_string(),
+                        contract_id: action.contract_id.clone(),
                         status: from_ccxt_order_status(order.status),
                     }
                 }
                 ActionType::ClosePosition => {
                     // Close position by placing an opposite-side market order
-                    let close_side = match action.side() {
+                    let close_side = match action.side {
                         Side::Buy => CcxtOrderSide::Sell,
                         Side::Sell => CcxtOrderSide::Buy,
                     };
-                    let amount = Amount::new(action.quantity());
+                    let amount = Amount::new(action.quantity);
 
                     debug!(
-                        contract = action.contract_id(),
+                        contract = action.contract_id,
                         side = ?close_side,
-                        qty = %action.quantity(),
+                        qty = %action.quantity,
                         "closing position with opposite market order"
                     );
 
                     let order = client
                         .create_order(
-                            action.contract_id(),
+                            &action.contract_id,
                             CcxtOrderType::Market,
                             close_side,
                             amount,
@@ -352,35 +352,35 @@ impl Broker for CcxtBroker {
 
                     OrderResult {
                         order_id: order.id,
-                        contract_id: action.contract_id().to_string(),
+                        contract_id: action.contract_id.clone(),
                         status: from_ccxt_order_status(order.status),
                     }
                 }
                 ActionType::ModifyOrder => {
                     // ccxt-rust Exchange trait has no edit_order, so cancel + re-place
                     warn!(
-                        contract = action.contract_id(),
+                        contract = action.contract_id,
                         "ModifyOrder: cancel + re-place (no native edit_order in ccxt-rust)"
                     );
 
                     let _ = client
-                        .cancel_order(action.contract_id(), action.contract_id())
+                        .cancel_order(&action.contract_id, &action.contract_id)
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    let ccxt_side = to_ccxt_side(action.side());
-                    let ccxt_type = to_ccxt_order_type(action.order_type());
-                    let amount = Amount::new(action.quantity());
-                    let price = action.limit_price().map(Price::new);
+                    let ccxt_side = to_ccxt_side(action.side);
+                    let ccxt_type = to_ccxt_order_type(action.order_type);
+                    let amount = Amount::new(action.quantity);
+                    let price = action.limit_price.map(Price::new);
 
                     let order = client
-                        .create_order(action.contract_id(), ccxt_type, ccxt_side, amount, price)
+                        .create_order(&action.contract_id, ccxt_type, ccxt_side, amount, price)
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
                     OrderResult {
                         order_id: order.id,
-                        contract_id: action.contract_id().to_string(),
+                        contract_id: action.contract_id.clone(),
                         status: from_ccxt_order_status(order.status),
                     }
                 }

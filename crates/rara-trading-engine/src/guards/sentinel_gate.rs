@@ -54,12 +54,12 @@ impl Guard for SentinelGate {
     async fn check(&self, commit: &TradingCommit, _account: &AccountInfo) -> GuardResult {
         let blocked = self.blocked.read().await;
 
-        for action in commit.actions() {
-            if blocked.contains(action.contract_id()) {
+        for action in &commit.actions {
+            if blocked.contains(action.contract_id.as_str()) {
                 return GuardResult::Reject {
                     reason: format!(
                         "contract {} is blocked by sentinel signal",
-                        action.contract_id(),
+                        action.contract_id,
                     ),
                 };
             }

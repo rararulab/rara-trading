@@ -88,16 +88,16 @@ impl TradingEngine {
         }
 
         // Publish submitted events
-        for action in commit.actions() {
+        for action in &commit.actions {
             let event = Event::builder()
                 .event_type("trading.order.submitted")
                 .source("trading-engine")
-                .correlation_id(commit.hash())
-                .strategy_id(commit.strategy_id().to_string())
+                .correlation_id(&commit.hash)
+                .strategy_id(commit.strategy_id.clone())
                 .payload(json!({
-                    "contract_id": action.contract_id(),
-                    "side": action.side(),
-                    "quantity": action.quantity().to_string(),
+                    "contract_id": action.contract_id,
+                    "side": action.side,
+                    "quantity": action.quantity.to_string(),
                 }))
                 .build();
 
@@ -111,7 +111,7 @@ impl TradingEngine {
         // Execute via broker
         let results = self
             .broker
-            .push(commit.actions())
+            .push(&commit.actions)
             .await
             .map_err(|e| EngineError::Broker { source: e })?;
 
@@ -126,8 +126,8 @@ impl TradingEngine {
             let event = Event::builder()
                 .event_type(event_type)
                 .source("trading-engine")
-                .correlation_id(commit.hash())
-                .strategy_id(commit.strategy_id().to_string())
+                .correlation_id(&commit.hash)
+                .strategy_id(commit.strategy_id.clone())
                 .payload(json!({
                     "order_id": result.order_id,
                     "contract_id": result.contract_id,

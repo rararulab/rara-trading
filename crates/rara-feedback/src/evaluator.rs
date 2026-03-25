@@ -46,35 +46,35 @@ impl StrategyEvaluator {
             );
         }
 
-        if metrics.trade_count() < self.min_trades {
+        if metrics.trade_count < self.min_trades {
             return (
                 FeedbackDecision::Hold,
                 format!(
                     "insufficient trades: {} < {} minimum",
-                    metrics.trade_count(),
+                    metrics.trade_count,
                     self.min_trades
                 ),
             );
         }
 
-        if metrics.max_drawdown() > self.demote_drawdown {
+        if metrics.max_drawdown > self.demote_drawdown {
             return (
                 FeedbackDecision::Retire,
                 format!(
                     "excessive drawdown: {} > {} threshold — requesting retrain",
-                    metrics.max_drawdown(),
+                    metrics.max_drawdown,
                     self.demote_drawdown
                 ),
             );
         }
 
-        if metrics.sharpe_ratio() >= self.promote_threshold && metrics.win_rate() > 0.5 {
+        if metrics.sharpe_ratio >= self.promote_threshold && metrics.win_rate > 0.5 {
             return (
                 FeedbackDecision::Promote,
                 format!(
                     "strong performance: sharpe={:.2}, win_rate={:.2}",
-                    metrics.sharpe_ratio(),
-                    metrics.win_rate()
+                    metrics.sharpe_ratio,
+                    metrics.win_rate
                 ),
             );
         }
@@ -83,9 +83,9 @@ impl StrategyEvaluator {
             FeedbackDecision::Hold,
             format!(
                 "metrics within tolerance: sharpe={:.2}, win_rate={:.2}, drawdown={}",
-                metrics.sharpe_ratio(),
-                metrics.win_rate(),
-                metrics.max_drawdown()
+                metrics.sharpe_ratio,
+                metrics.win_rate,
+                metrics.max_drawdown
             ),
         )
     }

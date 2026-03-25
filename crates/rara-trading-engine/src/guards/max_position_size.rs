@@ -39,14 +39,14 @@ impl Guard for MaxPositionSize {
     async fn check(&self, commit: &TradingCommit, account: &AccountInfo) -> GuardResult {
         let max_notional = account.total_equity * self.max_pct;
 
-        for action in commit.actions() {
-            let notional = action.quantity() * self.estimated_price;
+        for action in &commit.actions {
+            let notional = action.quantity * self.estimated_price;
             if notional > max_notional {
                 return GuardResult::Reject {
                     reason: format!(
                         "action on {} has notional {notional} exceeding max {max_notional} \
                          ({} of equity)",
-                        action.contract_id(),
+                        action.contract_id,
                         self.max_pct,
                     ),
                 };

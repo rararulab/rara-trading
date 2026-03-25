@@ -3,10 +3,11 @@
 use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 use uuid::Uuid;
 
 /// Direction of a trade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum Side {
     /// Buy / go long.
     Buy,
@@ -15,7 +16,7 @@ pub enum Side {
 }
 
 /// Type of order to place.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum OrderType {
     /// Execute at current market price.
     Market,
@@ -28,7 +29,7 @@ pub enum OrderType {
 }
 
 /// Type of trading action to perform.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum ActionType {
     /// Place a new order.
     PlaceOrder,
@@ -44,45 +45,19 @@ pub enum ActionType {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 #[allow(clippy::struct_field_names)]
 pub struct StagedAction {
-    action_type: ActionType,
+    /// Action category to execute.
+    pub action_type: ActionType,
+    /// Target contract identifier.
     #[builder(into)]
-    contract_id: String,
-    side: Side,
-    quantity: Decimal,
-    order_type: OrderType,
-    limit_price: Option<Decimal>,
-}
-
-impl StagedAction {
-    /// Returns the action type.
-    pub const fn action_type(&self) -> ActionType {
-        self.action_type
-    }
-
-    /// Returns the contract identifier.
-    pub fn contract_id(&self) -> &str {
-        &self.contract_id
-    }
-
-    /// Returns the trade side.
-    pub const fn side(&self) -> Side {
-        self.side
-    }
-
-    /// Returns the order quantity.
-    pub const fn quantity(&self) -> Decimal {
-        self.quantity
-    }
-
-    /// Returns the order type.
-    pub const fn order_type(&self) -> OrderType {
-        self.order_type
-    }
-
-    /// Returns the optional limit price.
-    pub const fn limit_price(&self) -> Option<Decimal> {
-        self.limit_price
-    }
+    pub contract_id: String,
+    /// Order side.
+    pub side: Side,
+    /// Order quantity in contract units.
+    pub quantity: Decimal,
+    /// Order type semantics.
+    pub order_type: OrderType,
+    /// Optional limit/trigger price depending on order type.
+    pub limit_price: Option<Decimal>,
 }
 
 /// Generates an 8-character hex hash from a UUID.
@@ -93,102 +68,51 @@ fn generate_hash() -> String {
 /// A git-style commit of trading actions, bundling multiple staged actions.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct TradingCommit {
+    /// Short commit hash used as correlation key.
     #[builder(default = generate_hash())]
-    hash: String,
+    pub hash: String,
+    /// Commit message describing intent.
     #[builder(into)]
-    message: String,
-    actions: Vec<StagedAction>,
+    pub message: String,
+    /// Batched staged actions.
+    pub actions: Vec<StagedAction>,
+    /// Strategy that produced this commit.
     #[builder(into)]
-    strategy_id: String,
-    strategy_version: u32,
+    pub strategy_id: String,
+    /// Strategy version used for generation.
+    pub strategy_version: u32,
+    /// Commit creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    created_at: jiff::Timestamp,
-}
-
-impl TradingCommit {
-    /// Returns the commit hash (8 characters).
-    pub fn hash(&self) -> &str {
-        &self.hash
-    }
-
-    /// Returns the staged actions in this commit.
-    pub fn actions(&self) -> &[StagedAction] {
-        &self.actions
-    }
-
-    /// Returns the strategy identifier that produced this commit.
-    pub fn strategy_id(&self) -> &str {
-        &self.strategy_id
-    }
+    pub created_at: jiff::Timestamp,
 }
 
 /// One leg of an arbitrage opportunity.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ArbLeg {
+    /// Contract identifier for this leg.
     #[builder(into)]
-    contract_id: String,
-    side: Side,
-    quantity: Decimal,
+    pub contract_id: String,
+    /// Execution side for this leg.
+    pub side: Side,
+    /// Leg quantity.
+    pub quantity: Decimal,
+    /// Broker/exchange route for this leg.
     #[builder(into)]
-    broker: String,
-}
-
-impl ArbLeg {
-    /// Returns the contract identifier.
-    pub fn contract_id(&self) -> &str {
-        &self.contract_id
-    }
-
-    /// Returns the trade side.
-    pub const fn side(&self) -> Side {
-        self.side
-    }
-
-    /// Returns the order quantity.
-    pub const fn quantity(&self) -> Decimal {
-        self.quantity
-    }
-
-    /// Returns the broker name.
-    pub fn broker(&self) -> &str {
-        &self.broker
-    }
+    pub broker: String,
 }
 
 /// A detected arbitrage opportunity across legs.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ArbOpportunity {
+    /// Strategy that discovered the opportunity.
     #[builder(into)]
-    strategy_id: String,
-    legs: Vec<ArbLeg>,
-    expected_spread: Decimal,
-    max_slippage: Decimal,
-    expiry: jiff::Timestamp,
-}
-
-impl ArbOpportunity {
-    /// Returns the strategy identifier.
-    pub fn strategy_id(&self) -> &str {
-        &self.strategy_id
-    }
-
-    /// Returns the arbitrage legs.
-    pub fn legs(&self) -> &[ArbLeg] {
-        &self.legs
-    }
-
-    /// Returns the expected spread.
-    pub const fn expected_spread(&self) -> Decimal {
-        self.expected_spread
-    }
-
-    /// Returns the maximum allowed slippage.
-    pub const fn max_slippage(&self) -> Decimal {
-        self.max_slippage
-    }
-
-    /// Returns the expiry timestamp.
-    pub const fn expiry(&self) -> jiff::Timestamp {
-        self.expiry
-    }
+    pub strategy_id: String,
+    /// Arbitrage legs to execute atomically.
+    pub legs: Vec<ArbLeg>,
+    /// Expected gross spread across legs.
+    pub expected_spread: Decimal,
+    /// Maximum tolerated execution slippage.
+    pub max_slippage: Decimal,
+    /// Opportunity expiry timestamp.
+    pub expiry: jiff::Timestamp,
 }
