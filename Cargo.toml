@@ -14,8 +14,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde-str"] }
 snafu = "0.9"
-wasmtime = "29"
-wasmtime-wasi = "29"
+wasmtime = "41"
+wasmtime-wasi = "41"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 tracing = "0.1"

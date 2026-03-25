@@ -7,7 +7,7 @@ use bon::Builder;
 use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
 use snafu::{ResultExt, Snafu};
 use wasmtime::{Engine, Linker, Memory, Module, Store, TypedFunc};
-use wasmtime_wasi::preview1::WasiP1Ctx;
+use wasmtime_wasi::p1::WasiP1Ctx;
 
 /// Errors from WASM strategy runtime.
 #[derive(Debug, Snafu)]
@@ -78,7 +78,7 @@ impl StrategyRuntime {
         store.set_fuel(self.fuel_limit).context(WasmEngineSnafu)?;
 
         let mut linker = Linker::new(&engine);
-        wasmtime_wasi::preview1::add_to_linker_sync(&mut linker, |ctx| ctx)
+        wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |ctx| ctx)
             .context(WasmEngineSnafu)?;
 
         let instance = linker
