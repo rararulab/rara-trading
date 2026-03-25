@@ -1,6 +1,7 @@
 //! Research engine — hypothesis generation, backtesting, and feedback loops.
 
 pub mod backtester;
+pub mod backtest_pool;
 pub mod compiler;
 pub mod barter_backtester;
 pub mod feedback_gen;

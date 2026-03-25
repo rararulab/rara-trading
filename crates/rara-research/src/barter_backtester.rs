@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use barter::backtest::market_data::MarketDataInMemory;
 use barter::backtest::{BacktestArgsConstant, BacktestArgsDynamic, run_backtests};
 use barter::engine::state::EngineState;
 use barter::engine::state::global::DefaultGlobalData;
@@ -17,6 +18,9 @@ use barter::risk::DefaultRiskManager;
 use barter::statistic::time::Daily;
 use barter::strategy::DefaultStrategy;
 use barter::system::config::ExecutionConfig;
+use barter_data::event::{DataKind, MarketEvent};
+use barter_data::streams::reconnect::Event as ReconnectEvent;
+use barter_data::subscription::candle::Candle;
 use barter_execution::balance::Balance;
 use barter_execution::client::mock::MockExecutionConfig;
 use barter_execution::UnindexedAccountSnapshot;
@@ -24,13 +28,16 @@ use barter_instrument::asset::name::AssetNameExchange;
 use barter_instrument::asset::Asset;
 use barter_instrument::exchange::ExchangeId;
 use barter_instrument::index::IndexedInstruments;
-use barter_instrument::instrument::Instrument;
+use barter_instrument::instrument::{Instrument, InstrumentIndex};
 use barter_instrument::Underlying;
 use bon::Builder;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use smol_str::SmolStr;
 
 use rara_domain::research::BacktestResult;
+use rara_market_data::cache::MarketSlice;
+use rara_market_data::record::FIXED_POINT_SCALE;
 
 use crate::backtester::{BacktestError, Backtester};
 use crate::market_data::load_market_data_for_contract;
@@ -131,31 +138,84 @@ fn build_instrument(contract_id: &str) -> Instrument<ExchangeId, Asset> {
     )
 }
 
-#[async_trait]
-impl Backtester for BarterBacktester {
-    async fn run(
+/// Convert cached `MarketSlice` candle data to barter `MarketDataInMemory`.
+///
+/// Each candle record is converted from fixed-point representation back to
+/// floating-point and wrapped as a barter `MarketEvent<DataKind::Candle>`.
+fn market_data_from_slices(
+    slices: &[Arc<MarketSlice>],
+    instrument_index: InstrumentIndex,
+    exchange: ExchangeId,
+) -> Result<MarketDataInMemory<DataKind>, BacktestError> {
+    #[allow(clippy::cast_precision_loss)]
+    let scale = FIXED_POINT_SCALE as f64;
+
+    let all_events: Vec<_> = slices
+        .iter()
+        .map(|slice| {
+            slice.candles().map_err(|e| BacktestError::ExecutionFailed {
+                message: format!("failed to read candle data: {e}"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flat_map(|candles| candles.iter())
+        .map(|record| {
+            // Precision loss is acceptable: barter uses f64 internally and
+            // the fixed-point values fit well within f64's mantissa range
+            // for realistic price/volume magnitudes.
+            #[allow(clippy::cast_precision_loss)]
+            let candle = Candle {
+                close_time: timestamp_from_nanos(record.ts_event),
+                open: record.open as f64 / scale,
+                high: record.high as f64 / scale,
+                low: record.low as f64 / scale,
+                close: record.close as f64 / scale,
+                volume: record.volume as f64 / scale,
+                trade_count: u64::from(record.trade_count),
+            };
+
+            let market_event = MarketEvent {
+                time_exchange: timestamp_from_nanos(record.ts_event),
+                time_received: timestamp_from_nanos(record.ts_event),
+                exchange,
+                instrument: instrument_index,
+                kind: DataKind::Candle(candle),
+            };
+
+            ReconnectEvent::Item(market_event)
+        })
+        .collect();
+
+    if all_events.is_empty() {
+        return Err(BacktestError::ExecutionFailed {
+            message: "no market data in slices".to_string(),
+        });
+    }
+
+    Ok(MarketDataInMemory::new(Arc::new(all_events)))
+}
+
+/// Convert nanosecond timestamp to chrono `DateTime<Utc>`.
+const fn timestamp_from_nanos(nanos: i64) -> DateTime<Utc> {
+    DateTime::from_timestamp_nanos(nanos)
+}
+
+impl BarterBacktester {
+    /// Shared backtest execution logic used by both `run` and `run_with_data`.
+    ///
+    /// Takes pre-built market data and runs it through the barter engine,
+    /// returning extracted performance metrics.
+    async fn run_with_market_data(
         &self,
         _strategy_code: &str,
         contract_id: &str,
+        market_data: MarketDataInMemory<DataKind>,
     ) -> Result<BacktestResult, BacktestError> {
-        // Build indexed instruments from the contract_id
         let instrument = build_instrument(contract_id);
         let instruments = IndexedInstruments::new(vec![instrument]);
 
-        // Load market data from disk
-        let market_data = load_market_data_for_contract(
-            &self.data_dir,
-            contract_id,
-            // First instrument is always at index 0
-            barter_instrument::instrument::InstrumentIndex(0),
-            ExchangeId::Simulated,
-        )
-        .map_err(|e| BacktestError::ExecutionFailed {
-            message: format!("failed to load market data: {e}"),
-        })?;
-
         // Build the initial account snapshot with configured capital
-        // The quote asset (e.g., "usdt") gets the initial balance
         let (_, quote_name) = contract_id
             .split_once('_')
             .unwrap_or((contract_id, "usdt"));
@@ -177,7 +237,6 @@ impl Backtester for BarterBacktester {
             self.fees_percent,
         ));
 
-        // Build engine state from instruments
         let engine_state: BtEngineState = EngineState::builder(
             &instruments,
             DefaultGlobalData,
@@ -201,14 +260,12 @@ impl Backtester for BarterBacktester {
             risk: BtRisk::default(),
         };
 
-        // Run the backtest
         let multi_summary = run_backtests(args_constant, vec![args_dynamic])
             .await
             .map_err(|e| BacktestError::ExecutionFailed {
                 message: format!("barter backtest engine error: {e}"),
             })?;
 
-        // Extract metrics from the first (and only) backtest summary
         let summary = multi_summary
             .summaries
             .into_iter()
@@ -218,5 +275,40 @@ impl Backtester for BarterBacktester {
             })?;
 
         Ok(extract_metrics(&summary.trading_summary))
+    }
+}
+
+#[async_trait]
+impl Backtester for BarterBacktester {
+    async fn run(
+        &self,
+        strategy_code: &str,
+        contract_id: &str,
+    ) -> Result<BacktestResult, BacktestError> {
+        let market_data = load_market_data_for_contract(
+            &self.data_dir,
+            contract_id,
+            InstrumentIndex(0),
+            ExchangeId::Simulated,
+        )
+        .map_err(|e| BacktestError::ExecutionFailed {
+            message: format!("failed to load market data: {e}"),
+        })?;
+
+        self.run_with_market_data(strategy_code, contract_id, market_data)
+            .await
+    }
+
+    async fn run_with_data(
+        &self,
+        strategy_code: &str,
+        contract_id: &str,
+        data: &[Arc<MarketSlice>],
+    ) -> Result<BacktestResult, BacktestError> {
+        let market_data =
+            market_data_from_slices(data, InstrumentIndex(0), ExchangeId::Simulated)?;
+
+        self.run_with_market_data(strategy_code, contract_id, market_data)
+            .await
     }
 }

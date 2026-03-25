@@ -145,6 +145,10 @@ pub struct ResearchLoop<L: LlmClient, B: Backtester> {
     /// When set, each iteration's `.rs` source is persisted here for debugging
     /// and reproducibility.
     generated_dir: Option<PathBuf>,
+    /// Optional market data cache for zero-copy backtest data loading.
+    /// When present, backtest iterations use cached mmap'd data instead
+    /// of loading from disk each time.
+    data_cache: Option<Arc<rara_market_data::cache::DataCache>>,
 }
 
 impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
@@ -205,12 +209,8 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
             .save_experiment(&experiment)
             .context(TraceSnafu)?;
 
-        // 8. Run backtest (still using code string; WASM backtesting is Phase 4)
-        let backtest_result = self
-            .backtester
-            .run(&code, "default")
-            .await
-            .context(BacktestSnafu)?;
+        // 8. Run backtest — use cached data when available
+        let backtest_result = self.run_backtest(&code).await?;
 
         // 9. Evaluate: accept if sharpe > 1.0 and max_drawdown < 0.15
         let max_drawdown_threshold = Decimal::new(15, 2);
@@ -309,6 +309,36 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         Err(ResearchLoopError::CompileFailed {
             errors: last_errors,
         })
+    }
+
+    /// Run a backtest, using the data cache when available for zero-copy loading.
+    async fn run_backtest(
+        &self,
+        code: &str,
+    ) -> Result<rara_domain::research::BacktestResult> {
+        if let Some(ref cache) = self.data_cache {
+            let slices = cache
+                .load_range(
+                    "default",
+                    rara_market_data::cache::DataType::Candle1m,
+                    "2020-01-01", // TODO: make configurable
+                    "2030-12-31",
+                )
+                .map_err(|e| ResearchLoopError::Backtest {
+                    source: crate::backtester::BacktestError::ExecutionFailed {
+                        message: format!("data cache error: {e}"),
+                    },
+                })?;
+            self.backtester
+                .run_with_data(code, "default", &slices)
+                .await
+                .context(BacktestSnafu)
+        } else {
+            self.backtester
+                .run(code, "default")
+                .await
+                .context(BacktestSnafu)
+        }
     }
 
     /// Auto-promote an accepted strategy if a promoted directory is configured.
