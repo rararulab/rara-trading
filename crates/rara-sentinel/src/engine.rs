@@ -84,7 +84,7 @@ impl<L: LlmClient> SentinelEngine<L> {
                 let event = Event::builder()
                     .event_type("sentinel.signal.detected")
                     .source("sentinel-engine")
-                    .correlation_id(signal.id().to_string())
+                    .correlation_id(signal.id.to_string())
                     .payload(serde_json::to_value(&signal).expect("signal must serialize"))
                     .build();
 
@@ -150,7 +150,7 @@ mod tests {
         // Verify event was published to the bus
         let events = event_bus.store().read_topic("sentinel", 0, 10).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type(), "sentinel.signal.detected");
+        assert_eq!(events[0].event_type, "sentinel.signal.detected");
     }
 
     #[tokio::test]

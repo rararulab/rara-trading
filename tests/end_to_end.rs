@@ -34,19 +34,19 @@ fn run_research_phase(event_bus: &EventBus, trace: &Trace) -> usize {
         .event_type("research.hypothesis.created")
         .source("research_loop")
         .correlation_id(uuid::Uuid::new_v4().to_string())
-        .payload(json!({ "hypothesis_id": hypothesis.id().to_string() }))
+        .payload(json!({ "hypothesis_id": hypothesis.id.to_string() }))
         .build();
     event_bus.publish(&hyp_event).unwrap();
 
     let experiment = Experiment::builder()
-        .hypothesis_id(hypothesis.id())
+        .hypothesis_id(hypothesis.id)
         .strategy_code("fn strategy() { /* SMA crossover */ }")
         .build();
 
     trace.save_experiment(&experiment).unwrap();
 
     let feedback = HypothesisFeedback::builder()
-        .experiment_id(experiment.id())
+        .experiment_id(experiment.id)
         .decision(true)
         .reason("Accepted: sharpe=2.50, max_drawdown=0.05")
         .observations("pnl=5000, win_rate=0.65, trades=100")
@@ -59,7 +59,7 @@ fn run_research_phase(event_bus: &EventBus, trace: &Trace) -> usize {
         .source("research_loop")
         .correlation_id(uuid::Uuid::new_v4().to_string())
         .payload(json!({
-            "experiment_id": experiment.id().to_string(),
+            "experiment_id": experiment.id.to_string(),
             "accepted": true,
         }))
         .build();
@@ -70,8 +70,8 @@ fn run_research_phase(event_bus: &EventBus, trace: &Trace) -> usize {
         .source("research_loop")
         .correlation_id(uuid::Uuid::new_v4().to_string())
         .payload(json!({
-            "experiment_id": experiment.id().to_string(),
-            "hypothesis_id": hypothesis.id().to_string(),
+            "experiment_id": experiment.id.to_string(),
+            "hypothesis_id": hypothesis.id.to_string(),
         }))
         .build();
     event_bus.publish(&candidate_event).unwrap();
@@ -158,7 +158,7 @@ fn run_feedback_phase(
     // With 9 positive PnL trades + 1 engine fill (0 pnl) = 10 trades,
     // all positive → win_rate=0.9, sharpe well above threshold, low drawdown
     assert_eq!(
-        report.decision(),
+        report.decision,
         FeedbackDecision::Promote,
         "strategy with strong results should be promoted"
     );
@@ -169,9 +169,9 @@ fn run_feedback_phase(
         .unwrap();
 
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_type(), "feedback.strategy.promote");
+    assert_eq!(events[0].event_type, "feedback.strategy.promote");
     assert_eq!(
-        events[0].strategy_id(),
+        events[0].strategy_id.as_deref(),
         Some(strategy_id),
         "feedback event should reference the strategy"
     );

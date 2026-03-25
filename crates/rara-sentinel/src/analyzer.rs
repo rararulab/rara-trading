@@ -1,6 +1,8 @@
 //! LLM-based signal analyzer that classifies raw signals into actionable
 //! sentinel signals.
 
+use std::str::FromStr;
+
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
@@ -91,8 +93,18 @@ fn parse_response(
         return Ok(None);
     }
 
-    let severity = parse_severity(severity_str)?;
-    let signal_type = parse_signal_type(type_str)?;
+    let severity = Severity::from_str(severity_str).map_err(|e| {
+        ParseSnafu {
+            message: e.to_string(),
+        }
+        .build()
+    })?;
+    let signal_type = SignalType::from_str(type_str).map_err(|e| {
+        ParseSnafu {
+            message: e.to_string(),
+        }
+        .build()
+    })?;
     let affected_contracts: Vec<String> = contracts_str
         .split(',')
         .map(|s| s.trim().to_owned())
@@ -113,34 +125,6 @@ fn parse_response(
         .build();
 
     Ok(Some(signal))
-}
-
-/// Parse a severity string into a `Severity` enum variant.
-fn parse_severity(s: &str) -> Result<Severity, AnalyzerError> {
-    match s.to_ascii_lowercase().as_str() {
-        "critical" => Ok(Severity::Critical),
-        "warning" => Ok(Severity::Warning),
-        "info" => Ok(Severity::Info),
-        other => Err(ParseSnafu {
-            message: format!("unknown severity: {other}"),
-        }
-        .build()),
-    }
-}
-
-/// Parse a signal type string into a `SignalType` enum variant.
-fn parse_signal_type(s: &str) -> Result<SignalType, AnalyzerError> {
-    match s {
-        "BlackSwan" => Ok(SignalType::BlackSwan),
-        "RegulatoryAction" => Ok(SignalType::RegulatoryAction),
-        "AbnormalVolatility" => Ok(SignalType::AbnormalVolatility),
-        "SentimentShift" => Ok(SignalType::SentimentShift),
-        "OnChainAnomaly" => Ok(SignalType::OnChainAnomaly),
-        other => Err(ParseSnafu {
-            message: format!("unknown signal type: {other}"),
-        }
-        .build()),
-    }
 }
 
 #[cfg(test)]
@@ -181,9 +165,9 @@ mod tests {
         let result = analyzer.analyze(&raw).await.expect("analysis should succeed");
         let signal = result.expect("should return Some for Critical severity");
 
-        assert_eq!(signal.severity(), Severity::Critical);
+        assert_eq!(signal.severity, Severity::Critical);
         assert!(signal.should_block_trading());
-        assert_eq!(signal.affected_contracts(), &["BTC-PERP", "ETH-PERP"]);
+        assert_eq!(signal.affected_contracts, ["BTC-PERP", "ETH-PERP"]);
     }
 
     #[tokio::test]

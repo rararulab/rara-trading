@@ -110,7 +110,7 @@ impl<L: LlmClient> FeedbackGenerator<L> {
     ) -> HashMap<String, String> {
         let mut vars = HashMap::new();
 
-        vars.insert("hypothesis".to_owned(), hypothesis.text().to_owned());
+        vars.insert("hypothesis".to_owned(), hypothesis.text.clone());
         vars.insert(
             "backtest_result".to_owned(),
             format_backtest_result(backtest_result),
@@ -143,11 +143,11 @@ impl<L: LlmClient> FeedbackGenerator<L> {
 fn format_backtest_result(result: &BacktestResult) -> String {
     format!(
         "Sharpe: {:.2}, PnL: {}, Max Drawdown: {}, Win Rate: {:.1}%, Trades: {}",
-        result.sharpe_ratio(),
-        result.pnl(),
-        result.max_drawdown(),
-        result.win_rate() * 100.0,
-        result.trade_count(),
+        result.sharpe_ratio,
+        result.pnl,
+        result.max_drawdown,
+        result.win_rate * 100.0,
+        result.trade_count,
     )
 }
 
@@ -268,12 +268,12 @@ mod tests {
             .await
             .expect("should parse valid JSON");
 
-        assert_eq!(feedback.experiment_id(), experiment_id);
-        assert!(feedback.decision());
-        assert_eq!(feedback.reason(), "Improved Sharpe ratio from 1.5 to 2.1");
-        assert_eq!(feedback.observations(), "Strong win rate and lower drawdown");
+        assert_eq!(feedback.experiment_id, experiment_id);
+        assert!(feedback.decision);
+        assert_eq!(feedback.reason, "Improved Sharpe ratio from 1.5 to 2.1");
+        assert_eq!(feedback.observations, "Strong win rate and lower drawdown");
         assert_eq!(
-            feedback.new_hypothesis(),
+            feedback.new_hypothesis,
             Some("Try adding volume confirmation filter")
         );
     }
@@ -295,7 +295,7 @@ mod tests {
             .await
             .expect("should extract JSON from code fences");
 
-        assert!(feedback.decision());
+        assert!(feedback.decision);
     }
 
     #[tokio::test]

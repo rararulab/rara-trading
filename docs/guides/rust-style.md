@@ -12,6 +12,28 @@
 
 Structs with 3+ fields MUST use `#[derive(bon::Builder)]` — do NOT write manual `fn new()` constructors.
 
+## Struct Fields — Prefer `pub`
+
+Data/value structs SHOULD have `pub` fields. Do NOT write manual getter methods that simply return
+`&self.field` or `self.field`. Only write methods that contain real logic (formatting, parsing, computation).
+
+Correct:
+- `pub fn id(&self) -> String { format!("{}-{}", self.exchange, self.symbol) }` — computed value
+- `pub fn topic(&self) -> &str { self.event_type.split('.').next()... }` — parsing logic
+- `pub fn should_block_trading(&self) -> bool { self.severity == Severity::Critical }` — business rule
+
+Wrong:
+- `pub fn name(&self) -> &str { &self.name }` — use `pub name: String` instead
+
+## Enum Derives — Use `strum`
+
+All enums that may need string conversion MUST derive `strum::Display` and `strum::EnumString`.
+Do NOT write manual `match` blocks for string ↔ enum conversion.
+
+## Crate Utilities — Use `derive_more`
+
+Use `derive_more` for common trait implementations (`Display`, `From`) instead of manual `impl` blocks.
+
 ## Async
 
 - Use `tokio` runtime
@@ -32,3 +54,12 @@ Structs with 3+ fields MUST use `#[derive(bon::Builder)]` — do NOT write manua
 - Imports grouped: `std` → external crates → internal (`crate::` / `super::`)
 - No wildcard imports (`use foo::*`)
 - All `pub` items must have `///` doc comments in English
+
+## Tests — No Trivial Roundtrips
+
+Do NOT write trivial tests that only exercise derive macros or obvious wiring:
+- builder roundtrip tests
+- getter roundtrip tests
+- serde roundtrip tests
+
+Tests MUST validate real logic, invariants, or integration behavior.

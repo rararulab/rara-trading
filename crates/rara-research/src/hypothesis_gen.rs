@@ -65,8 +65,8 @@ impl<L: LlmClient> HypothesisGenerator<L> {
             let _ = write!(
                 prompt,
                 "Best experiment so far:\n- Code: {}\n- Feedback: {}\n\n",
-                exp.strategy_code(),
-                fb.reason()
+                exp.strategy_code,
+                fb.reason
             );
         }
 
@@ -97,7 +97,7 @@ impl<L: LlmClient> HypothesisGenerator<L> {
         let parent_id = trace
             .get_best_experiment()
             .context(TraceSnafu)?
-            .map(|(exp, _)| exp.hypothesis_id());
+            .map(|(exp, _)| exp.hypothesis_id);
 
         let hypothesis = Hypothesis::builder()
             .text(*text)
@@ -140,13 +140,13 @@ mod tests {
         trace.save_hypothesis(&parent_hyp).unwrap();
 
         let exp = Experiment::builder()
-            .hypothesis_id(parent_hyp.id())
+            .hypothesis_id(parent_hyp.id)
             .strategy_code("fn run() {}")
             .build();
         trace.save_experiment(&exp).unwrap();
 
         let fb = rara_domain::research::HypothesisFeedback::builder()
-            .experiment_id(exp.id())
+            .experiment_id(exp.id)
             .decision(true)
             .reason("good")
             .observations("ok")
@@ -157,8 +157,8 @@ mod tests {
         let generator = HypothesisGenerator::new(executor);
 
         let h = generator.generate(&trace, "BTC market").await.unwrap();
-        assert_eq!(h.text(), "momentum crossover");
-        assert_eq!(h.reason(), "SMA cross signals trend reversal");
-        assert_eq!(h.parent(), Some(parent_hyp.id()));
+        assert_eq!(h.text, "momentum crossover");
+        assert_eq!(h.reason, "SMA cross signals trend reversal");
+        assert_eq!(h.parent, Some(parent_hyp.id));
     }
 }

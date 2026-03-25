@@ -2,10 +2,11 @@
 
 use bon::Builder;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 use uuid::Uuid;
 
 /// Classification of detected market signals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum SignalType {
     /// Regulatory enforcement or policy change.
     RegulatoryAction,
@@ -20,7 +21,7 @@ pub enum SignalType {
 }
 
 /// Where the signal was detected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 pub enum SignalSource {
     /// RSS news feeds.
     NewsRss,
@@ -33,7 +34,8 @@ pub enum SignalSource {
 }
 
 /// Severity level of a sentinel signal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
+#[strum(ascii_case_insensitive)]
 pub enum Severity {
     /// Informational — no action needed.
     Info,
@@ -47,34 +49,19 @@ pub enum Severity {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct SentinelSignal {
     #[builder(default = Uuid::new_v4())]
-    id: Uuid,
-    signal_type: SignalType,
-    severity: Severity,
-    source: SignalSource,
-    affected_contracts: Vec<String>,
+    pub id: Uuid,
+    pub signal_type: SignalType,
+    pub severity: Severity,
+    pub source: SignalSource,
+    pub affected_contracts: Vec<String>,
     #[builder(into)]
-    summary: String,
-    raw_data: serde_json::Value,
+    pub summary: String,
+    pub raw_data: serde_json::Value,
     #[builder(default = jiff::Timestamp::now())]
-    detected_at: jiff::Timestamp,
+    pub detected_at: jiff::Timestamp,
 }
 
 impl SentinelSignal {
-    /// Returns the signal identifier.
-    pub const fn id(&self) -> Uuid {
-        self.id
-    }
-
-    /// Returns the severity level.
-    pub const fn severity(&self) -> Severity {
-        self.severity
-    }
-
-    /// Returns the list of affected contract IDs.
-    pub fn affected_contracts(&self) -> &[String] {
-        &self.affected_contracts
-    }
-
     /// Returns `true` if this signal is critical and should block trading.
     pub fn should_block_trading(&self) -> bool {
         self.severity == Severity::Critical

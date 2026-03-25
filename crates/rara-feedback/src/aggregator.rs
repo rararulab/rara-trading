@@ -59,10 +59,10 @@ impl MetricsAggregator {
         let fills: Vec<_> = events
             .iter()
             .filter(|e| {
-                e.event_type() == "trading.order.filled"
-                    && e.strategy_id() == Some(strategy_id)
-                    && e.timestamp() >= window_start
-                    && e.timestamp() <= window_end
+                e.event_type == "trading.order.filled"
+                    && e.strategy_id.as_deref() == Some(strategy_id)
+                    && e.timestamp >= window_start
+                    && e.timestamp <= window_end
             })
             .collect();
 
@@ -80,7 +80,7 @@ impl MetricsAggregator {
         let pnls: Vec<Decimal> = fills
             .iter()
             .map(|e| {
-                e.payload()
+                e.payload
                     .get("realized_pnl")
                     .and_then(|v| v.as_str())
                     .and_then(|s| s.parse::<Decimal>().ok())

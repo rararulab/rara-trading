@@ -132,8 +132,8 @@ impl FeedbackBridge {
             .context(EventBusSnafu)?;
 
         let has_critical = sentinel_events.iter().any(|e| {
-            event_ids.contains(&e.event_id())
-                && e.payload()
+            event_ids.contains(&e.event_id)
+                && e.payload
                     .get("severity")
                     .and_then(|v| v.as_str())
                     == Some("Critical")
@@ -170,7 +170,7 @@ mod tests {
             .strategy_id(strategy_id.to_owned())
             .payload(json!({ "realized_pnl": realized_pnl }))
             .build();
-        let id = event.event_id();
+        let id = event.event_id;
         bus.publish(&event).unwrap();
         id
     }
@@ -182,7 +182,7 @@ mod tests {
             .correlation_id("test-corr")
             .payload(json!({ "severity": severity }))
             .build();
-        let id = event.event_id();
+        let id = event.event_id;
         bus.publish(&event).unwrap();
         id
     }
@@ -209,13 +209,13 @@ mod tests {
             .evaluate_strategy("strat-1", 1, start, end, vec![])
             .unwrap();
 
-        assert_eq!(report.decision(), FeedbackDecision::Promote);
+        assert_eq!(report.decision, FeedbackDecision::Promote);
 
         // Verify feedback event was published
         let feedback_events = bus.store().read_topic("feedback", 0, 10).unwrap();
         assert_eq!(feedback_events.len(), 1);
         assert_eq!(
-            feedback_events[0].event_type(),
+            feedback_events[0].event_type,
             "feedback.strategy.promote"
         );
     }
@@ -237,7 +237,7 @@ mod tests {
             .evaluate_strategy("strat-1", 1, start, end, vec![sentinel_id])
             .unwrap();
 
-        assert_eq!(report.decision(), FeedbackDecision::Demote);
+        assert_eq!(report.decision, FeedbackDecision::Demote);
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tests {
             .evaluate_strategy("strat-1", 1, start, end, vec![])
             .unwrap();
 
-        assert_eq!(report.decision(), FeedbackDecision::Hold);
+        assert_eq!(report.decision, FeedbackDecision::Hold);
     }
 
     #[test]
@@ -270,12 +270,12 @@ mod tests {
             .evaluate_strategy("strat-1", 1, start, end, vec![])
             .unwrap();
 
-        assert_eq!(report.decision(), FeedbackDecision::Retire);
+        assert_eq!(report.decision, FeedbackDecision::Retire);
 
         let feedback_events = bus.store().read_topic("feedback", 0, 10).unwrap();
         assert_eq!(feedback_events.len(), 1);
         assert_eq!(
-            feedback_events[0].event_type(),
+            feedback_events[0].event_type,
             "feedback.research.retrain.requested"
         );
     }

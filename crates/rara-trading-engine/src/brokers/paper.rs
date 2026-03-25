@@ -45,9 +45,9 @@ impl Broker for PaperBroker {
 
                 let report = ExecutionReport::builder()
                     .order_id(&order_id)
-                    .contract_id(action.contract_id())
-                    .side(action.side())
-                    .quantity(action.quantity())
+                    .contract_id(&action.contract_id)
+                    .side(action.side)
+                    .quantity(action.quantity)
                     .price(self.fill_price)
                     .status(OrderStatus::Filled)
                     .filled_at(jiff::Timestamp::now())
@@ -57,30 +57,30 @@ impl Broker for PaperBroker {
                 // Update or create position
                 let existing = positions
                     .iter_mut()
-                    .find(|p| p.contract_id == action.contract_id());
+                    .find(|p| p.contract_id == action.contract_id.as_str());
 
                 if let Some(pos) = existing {
-                    match (pos.side, action.side()) {
+                    match (pos.side, action.side) {
                         // Same side: increase quantity
                         (Side::Buy, Side::Buy) | (Side::Sell, Side::Sell) => {
-                            pos.quantity += action.quantity();
+                            pos.quantity += action.quantity;
                         }
                         // Opposite side: reduce or flip
                         _ => {
-                            if action.quantity() >= pos.quantity {
-                                pos.quantity = action.quantity() - pos.quantity;
-                                pos.side = action.side();
+                            if action.quantity >= pos.quantity {
+                                pos.quantity = action.quantity - pos.quantity;
+                                pos.side = action.side;
                             } else {
-                                pos.quantity -= action.quantity();
+                                pos.quantity -= action.quantity;
                             }
                         }
                     }
                 } else {
                     positions.push(
                         Position::builder()
-                            .contract_id(action.contract_id())
-                            .side(action.side())
-                            .quantity(action.quantity())
+                            .contract_id(&action.contract_id)
+                            .side(action.side)
+                            .quantity(action.quantity)
                             .avg_entry_price(self.fill_price)
                             .unrealized_pnl(Decimal::ZERO)
                             .build(),
@@ -89,7 +89,7 @@ impl Broker for PaperBroker {
 
                 OrderResult {
                     order_id,
-                    contract_id: action.contract_id().to_string(),
+                    contract_id: action.contract_id.clone(),
                     status: OrderStatus::Filled,
                 }
             })

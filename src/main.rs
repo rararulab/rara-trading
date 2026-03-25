@@ -262,14 +262,14 @@ async fn run_research_loop(
                 let status = if ir.accepted { "ACCEPTED" } else { "rejected" };
                 eprintln!(
                     "[iteration {i}/{iterations}] {status} — hypothesis: {}",
-                    ir.hypothesis.text()
+                    ir.hypothesis.text
                 );
                 println!(
                     "{}",
                     serde_json::json!({
                         "iteration": i,
                         "accepted": ir.accepted,
-                        "hypothesis": ir.hypothesis.text(),
+                        "hypothesis": ir.hypothesis.text,
                     })
                 );
             }
@@ -297,13 +297,13 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
         .into_iter()
         .map(|(idx, exp, fb)| {
             let hypothesis_text = trace
-                .get_hypothesis(exp.hypothesis_id())
+                .get_hypothesis(exp.hypothesis_id)
                 .ok()
                 .flatten()
-                .map_or_else(|| "unknown".to_owned(), |h| h.text().to_owned());
+                .map_or_else(|| "unknown".to_owned(), |h| h.text);
 
             let decision = fb.as_ref().map_or("no feedback", |f| {
-                if f.decision() {
+                if f.decision {
                     "accepted"
                 } else {
                     "rejected"
@@ -311,12 +311,13 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
             });
 
             let sharpe = exp
-                .backtest_result()
-                .map(rara_trading::domain::research::BacktestResult::sharpe_ratio);
+                .backtest_result
+                .as_ref()
+                .map(|result| result.sharpe_ratio);
 
             serde_json::json!({
                 "index": idx,
-                "experiment_id": exp.id().to_string(),
+                "experiment_id": exp.id.to_string(),
                 "hypothesis": hypothesis_text,
                 "decision": decision,
                 "sharpe": sharpe,
@@ -348,7 +349,7 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
         })?;
 
     let hypothesis = trace
-        .get_hypothesis(exp.hypothesis_id())
+        .get_hypothesis(exp.hypothesis_id)
         .context(TraceSnafu)?;
 
     let feedbacks = trace
@@ -357,12 +358,12 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
 
     let hyp_json = hypothesis.map(|h| {
         serde_json::json!({
-            "id": h.id().to_string(),
-            "text": h.text(),
-            "reason": h.reason(),
-            "observation": h.observation(),
-            "knowledge": h.knowledge(),
-            "parent": h.parent().map(|p| p.to_string()),
+            "id": h.id.to_string(),
+            "text": h.text,
+            "reason": h.reason,
+            "observation": h.observation,
+            "knowledge": h.knowledge,
+            "parent": h.parent.map(|p| p.to_string()),
         })
     });
 
@@ -370,24 +371,24 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
         .iter()
         .map(|fb| {
             serde_json::json!({
-                "experiment_id": fb.experiment_id().to_string(),
-                "decision": fb.decision(),
-                "reason": fb.reason(),
-                "observations": fb.observations(),
-                "hypothesis_evaluation": fb.hypothesis_evaluation(),
-                "new_hypothesis": fb.new_hypothesis(),
-                "code_change_summary": fb.code_change_summary(),
+                "experiment_id": fb.experiment_id.to_string(),
+                "decision": fb.decision,
+                "reason": fb.reason,
+                "observations": fb.observations,
+                "hypothesis_evaluation": fb.hypothesis_evaluation,
+                "new_hypothesis": fb.new_hypothesis.as_deref(),
+                "code_change_summary": fb.code_change_summary,
             })
         })
         .collect();
 
-    let backtest_json = exp.backtest_result().map(|br| {
+    let backtest_json = exp.backtest_result.as_ref().map(|br| {
         serde_json::json!({
-            "pnl": br.pnl().to_string(),
-            "sharpe_ratio": br.sharpe_ratio(),
-            "max_drawdown": br.max_drawdown().to_string(),
-            "win_rate": br.win_rate(),
-            "trade_count": br.trade_count(),
+            "pnl": br.pnl.to_string(),
+            "sharpe_ratio": br.sharpe_ratio,
+            "max_drawdown": br.max_drawdown.to_string(),
+            "win_rate": br.win_rate,
+            "trade_count": br.trade_count,
         })
     });
 
@@ -397,10 +398,10 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
             "ok": true,
             "action": "research.show",
             "experiment": {
-                "id": exp.id().to_string(),
-                "hypothesis_id": exp.hypothesis_id().to_string(),
-                "status": format!("{:?}", exp.status()),
-                "strategy_code": exp.strategy_code(),
+                "id": exp.id.to_string(),
+                "hypothesis_id": exp.hypothesis_id.to_string(),
+                "status": format!("{:?}", exp.status),
+                "strategy_code": exp.strategy_code,
                 "backtest_result": backtest_json,
             },
             "hypothesis": hyp_json,

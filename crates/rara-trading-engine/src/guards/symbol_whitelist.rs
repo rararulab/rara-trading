@@ -32,12 +32,12 @@ impl Guard for SymbolWhitelist {
     }
 
     async fn check(&self, commit: &TradingCommit, _account: &AccountInfo) -> GuardResult {
-        for action in commit.actions() {
-            if !self.allowed.contains(action.contract_id()) {
+        for action in &commit.actions {
+            if !self.allowed.contains(action.contract_id.as_str()) {
                 return GuardResult::Reject {
                     reason: format!(
                         "contract {} is not in the symbol whitelist",
-                        action.contract_id(),
+                        action.contract_id,
                     ),
                 };
             }

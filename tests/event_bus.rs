@@ -43,14 +43,14 @@ async fn end_to_end_publish_subscribe_catch_up() {
     let research_events = bus.store().read_topic("research", 0, 10).unwrap();
     assert_eq!(research_events.len(), 1);
     assert_eq!(
-        research_events[0].event_type(),
+        research_events[0].event_type,
         "research.hypothesis.created"
     );
 
     // 6. Verify read_topic("trading", 0, 10) -> 1 event
     let trading_events = bus.store().read_topic("trading", 0, 10).unwrap();
     assert_eq!(trading_events.len(), 1);
-    assert_eq!(trading_events[0].event_type(), "trading.order.placed");
+    assert_eq!(trading_events[0].event_type, "trading.order.placed");
 
     // 7. Verify consumer offset set/get works
     bus.store()
