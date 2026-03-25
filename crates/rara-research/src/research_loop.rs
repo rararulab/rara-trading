@@ -388,8 +388,9 @@ impl<B: Backtester> ResearchLoop<B> {
         strategy_artifact: &[u8],
         timeframe: Timeframe,
     ) -> Result<rara_domain::research::BacktestResult> {
+        let handle = self.runtime.load(strategy_artifact).context(RuntimeSnafu)?;
         self.backtester
-            .run(strategy_artifact, "default", timeframe)
+            .run(handle, "default", timeframe)
             .await
             .context(BacktestSnafu)
     }

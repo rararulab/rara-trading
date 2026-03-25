@@ -39,7 +39,7 @@ use rara_market_data::store::MarketStore;
 
 use crate::backtester::{BacktestError, Backtester};
 use crate::candle_instrument_data::CandleInstrumentData;
-use crate::strategy_executor::StrategyExecutor;
+use crate::strategy_executor::StrategyHandle;
 use crate::barter_strategy::{BacktestEngineState, BarterStrategy};
 
 /// Risk manager type parameterized over our engine state.
@@ -58,8 +58,6 @@ pub struct BarterBacktester {
     pub initial_capital: Decimal,
     /// Trading fees as a percentage (e.g., 0.1 for 0.1%).
     pub fees_percent: Decimal,
-    /// Strategy executor for loading compiled artifacts into executable handles.
-    pub executor: Arc<dyn StrategyExecutor>,
     /// Backtest window start date.
     pub backtest_start: NaiveDate,
     /// Backtest window end date.
@@ -71,7 +69,6 @@ impl fmt::Debug for BarterBacktester {
         f.debug_struct("BarterBacktester")
             .field("initial_capital", &self.initial_capital)
             .field("fees_percent", &self.fees_percent)
-            .field("executor", &"<dyn StrategyExecutor>")
             .field("backtest_start", &self.backtest_start)
             .field("backtest_end", &self.backtest_end)
             .finish_non_exhaustive()
@@ -159,21 +156,15 @@ fn build_instrument(contract_id: &str) -> Instrument<ExchangeId, Asset> {
 impl BarterBacktester {
     /// Shared backtest execution logic.
     ///
-    /// Loads the strategy via the executor, builds the barter engine with
-    /// `CandleInstrumentData`, and runs the backtest to extract metrics.
+    /// Builds the barter engine with `CandleInstrumentData` and the provided
+    /// strategy handle, then runs the backtest to extract metrics.
     async fn run_with_market_data(
         &self,
-        strategy_artifact: &[u8],
+        handle: Box<dyn StrategyHandle>,
         contract_id: &str,
         timeframe: Timeframe,
         market_data: MarketDataInMemory<DataKind>,
     ) -> Result<BacktestResult, BacktestError> {
-        // Load WASM strategy via executor
-        let handle = self.executor.load(strategy_artifact).map_err(|e| {
-            BacktestError::ExecutionFailed {
-                message: format!("failed to load strategy: {e}"),
-            }
-        })?;
         let strategy = BarterStrategy::new(handle, timeframe);
 
         let instrument = build_instrument(contract_id);
@@ -246,7 +237,7 @@ impl BarterBacktester {
 impl Backtester for BarterBacktester {
     async fn run(
         &self,
-        strategy_artifact: &[u8],
+        handle: Box<dyn StrategyHandle>,
         contract_id: &str,
         timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError> {
@@ -293,7 +284,7 @@ impl Backtester for BarterBacktester {
             .collect();
 
         let market_data = MarketDataInMemory::new(Arc::new(events));
-        self.run_with_market_data(strategy_artifact, contract_id, timeframe, market_data)
+        self.run_with_market_data(handle, contract_id, timeframe, market_data)
             .await
     }
 }

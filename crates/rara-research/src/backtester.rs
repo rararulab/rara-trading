@@ -6,6 +6,8 @@ use snafu::Snafu;
 use rara_domain::research::BacktestResult;
 use rara_domain::timeframe::Timeframe;
 
+use crate::strategy_executor::StrategyHandle;
+
 /// Errors from backtesting operations.
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -18,13 +20,13 @@ pub enum BacktestError {
     },
 }
 
-/// Trait for running backtests with compiled strategy artifacts.
+/// Trait for running backtests with a loaded strategy handle.
 #[async_trait]
 pub trait Backtester: Send + Sync {
-    /// Run a backtest with compiled strategy artifact, contract, and timeframe.
+    /// Run a backtest with a loaded strategy handle, contract, and timeframe.
     async fn run(
         &self,
-        strategy_artifact: &[u8],
+        handle: Box<dyn StrategyHandle>,
         contract_id: &str,
         timeframe: Timeframe,
     ) -> Result<BacktestResult, BacktestError>;

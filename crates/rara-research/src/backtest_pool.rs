@@ -6,6 +6,7 @@ use snafu::Snafu;
 use tokio::sync::Semaphore;
 
 use crate::backtester::{BacktestError, Backtester};
+use crate::strategy_executor::StrategyExecutor;
 use rara_domain::research::BacktestResult;
 use rara_domain::timeframe::Timeframe;
 
@@ -42,24 +43,32 @@ pub struct BacktestPool<B: Backtester> {
     concurrency: usize,
     /// Shared backtester implementation.
     backtester: Arc<B>,
+    /// Strategy executor for loading artifacts into handles.
+    executor: Arc<dyn StrategyExecutor>,
 }
 
 impl<B: Backtester + 'static> BacktestPool<B> {
-    /// Create a new pool with the given backtester and default concurrency
+    /// Create a new pool with the given backtester, executor, and default concurrency
     /// (`num_cpus` - 1, minimum 1).
-    pub fn new(backtester: Arc<B>) -> Self {
+    pub fn new(backtester: Arc<B>, executor: Arc<dyn StrategyExecutor>) -> Self {
         let concurrency = num_cpus::get().saturating_sub(1).max(1);
         Self {
             concurrency,
             backtester,
+            executor,
         }
     }
 
     /// Create a new pool with explicit concurrency limit.
-    pub fn with_concurrency(backtester: Arc<B>, concurrency: usize) -> Self {
+    pub fn with_concurrency(
+        backtester: Arc<B>,
+        executor: Arc<dyn StrategyExecutor>,
+        concurrency: usize,
+    ) -> Self {
         Self {
             concurrency: concurrency.max(1),
             backtester,
+            executor,
         }
     }
 
@@ -76,10 +85,20 @@ impl<B: Backtester + 'static> BacktestPool<B> {
         for task in tasks {
             let sem = semaphore.clone();
             let backtester = self.backtester.clone();
+            let executor = self.executor.clone();
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
+                let strategy_handle =
+                    executor.load(&task.strategy_artifact).map_err(|e| {
+                        PoolError::TaskFailed {
+                            task_id: task.id.clone(),
+                            source: BacktestError::ExecutionFailed {
+                                message: format!("failed to load strategy: {e}"),
+                            },
+                        }
+                    })?;
                 backtester
-                    .run(&task.strategy_artifact, &task.contract_id, task.timeframe)
+                    .run(strategy_handle, &task.contract_id, task.timeframe)
                     .await
                     .map_err(|source| PoolError::TaskFailed {
                         task_id: task.id,
@@ -109,8 +128,17 @@ impl<B: Backtester + 'static> BacktestPool<B> {
         &self,
         task: BacktestTask,
     ) -> Result<BacktestResult, PoolError> {
+        let strategy_handle =
+            self.executor.load(&task.strategy_artifact).map_err(|e| {
+                PoolError::TaskFailed {
+                    task_id: task.id.clone(),
+                    source: BacktestError::ExecutionFailed {
+                        message: format!("failed to load strategy: {e}"),
+                    },
+                }
+            })?;
         self.backtester
-            .run(&task.strategy_artifact, &task.contract_id, task.timeframe)
+            .run(strategy_handle, &task.contract_id, task.timeframe)
             .await
             .map_err(|source| PoolError::TaskFailed {
                 task_id: task.id,
@@ -126,7 +154,52 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal_macros::dec;
 
+    use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
+
+    use crate::strategy_executor::{self, StrategyHandle};
+
     use super::*;
+
+    /// Mock strategy handle for tests.
+    struct MockHandle;
+
+    impl StrategyHandle for MockHandle {
+        fn meta(&mut self) -> strategy_executor::Result<StrategyMeta> {
+            Ok(StrategyMeta {
+                name: "mock".to_string(),
+                version: 1,
+                api_version: 1,
+                description: "mock strategy".to_string(),
+            })
+        }
+
+        fn on_candles(&mut self, _candles: &[Candle]) -> strategy_executor::Result<Signal> {
+            Ok(Signal::Hold)
+        }
+
+        fn risk_levels(
+            &mut self,
+            _entry_price: f64,
+            _side: Side,
+        ) -> strategy_executor::Result<RiskLevels> {
+            Ok(RiskLevels {
+                stop_loss: 0.0,
+                take_profit: 0.0,
+            })
+        }
+    }
+
+    /// Mock executor that returns a `MockHandle`.
+    struct MockExecutor;
+
+    impl StrategyExecutor for MockExecutor {
+        fn load(
+            &self,
+            _artifact: &[u8],
+        ) -> strategy_executor::Result<Box<dyn StrategyHandle>> {
+            Ok(Box::new(MockHandle))
+        }
+    }
 
     struct CountingBacktester {
         current: AtomicU32,
@@ -146,7 +219,7 @@ mod tests {
     impl Backtester for CountingBacktester {
         async fn run(
             &self,
-            _strategy_artifact: &[u8],
+            _handle: Box<dyn StrategyHandle>,
             _contract_id: &str,
             _timeframe: Timeframe,
         ) -> Result<BacktestResult, BacktestError> {
@@ -175,7 +248,8 @@ mod tests {
     async fn batch_runs_in_parallel() {
         let max_concurrent = Arc::new(AtomicU32::new(0));
         let backtester = Arc::new(CountingBacktester::new(max_concurrent.clone()));
-        let pool = BacktestPool::with_concurrency(backtester, 4);
+        let executor: Arc<dyn StrategyExecutor> = Arc::new(MockExecutor);
+        let pool = BacktestPool::with_concurrency(backtester, executor, 4);
 
         let tasks: Vec<BacktestTask> = (0..8)
             .map(|i| BacktestTask {
@@ -203,7 +277,8 @@ mod tests {
     async fn single_run_works() {
         let max_concurrent = Arc::new(AtomicU32::new(0));
         let backtester = Arc::new(CountingBacktester::new(max_concurrent));
-        let pool = BacktestPool::with_concurrency(backtester, 2);
+        let executor: Arc<dyn StrategyExecutor> = Arc::new(MockExecutor);
+        let pool = BacktestPool::with_concurrency(backtester, executor, 2);
 
         let task = BacktestTask {
             id: "single".to_string(),
