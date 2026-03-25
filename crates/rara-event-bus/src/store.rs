@@ -149,6 +149,8 @@ impl EventStore {
 mod tests {
     use serde_json::json;
 
+    use rara_domain::event::EventType;
+
     use super::*;
 
     #[test]
@@ -156,14 +158,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = EventStore::open(dir.path()).unwrap();
         let event = Event::builder()
-            .event_type("test.ping")
+            .event_type(EventType::TradingOrderSubmitted)
             .source("test")
             .correlation_id("corr-1")
             .payload(json!({"msg": "hello"}))
             .build();
         let seq = store.append(&event).unwrap();
         let retrieved = store.get(seq).unwrap().unwrap();
-        assert_eq!(retrieved.event_type(), "test.ping");
+        assert_eq!(retrieved.event_type, EventType::TradingOrderSubmitted);
     }
 
     #[test]
@@ -173,19 +175,19 @@ mod tests {
 
         // Publish 2 trading events + 1 research event
         let trading1 = Event::builder()
-            .event_type("trading.order.placed")
+            .event_type(EventType::TradingOrderSubmitted)
             .source("test")
             .correlation_id("corr-1")
             .payload(json!({"pair": "BTC/USD"}))
             .build();
         let trading2 = Event::builder()
-            .event_type("trading.order.filled")
+            .event_type(EventType::TradingOrderFilled)
             .source("test")
             .correlation_id("corr-2")
             .payload(json!({"pair": "ETH/USD"}))
             .build();
         let research = Event::builder()
-            .event_type("research.hypothesis.created")
+            .event_type(EventType::ResearchHypothesisCreated)
             .source("test")
             .correlation_id("corr-3")
             .payload(json!({"topic": "momentum"}))

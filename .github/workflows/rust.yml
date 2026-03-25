@@ -90,11 +90,14 @@ jobs:
       - name: Format after substitution
         run: cargo fmt --all
 
+      - name: Install wasm target
+        run: rustup target add wasm32-wasip1
+
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
       - name: Run tests
-        run: cargo nextest run
+        run: cargo nextest run --workspace
 
   rust-success:
     name: Rust Success

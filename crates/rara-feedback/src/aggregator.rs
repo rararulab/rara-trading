@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
 
+use rara_domain::event::EventType;
 use rara_domain::feedback::StrategyMetrics;
 use rara_event_bus::bus::EventBus;
 use rara_event_bus::store::StoreError;
@@ -59,7 +60,7 @@ impl MetricsAggregator {
         let fills: Vec<_> = events
             .iter()
             .filter(|e| {
-                e.event_type == "trading.order.filled"
+                e.event_type == EventType::TradingOrderFilled
                     && e.strategy_id.as_deref() == Some(strategy_id)
                     && e.timestamp >= window_start
                     && e.timestamp <= window_end

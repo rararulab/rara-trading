@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use snafu::Snafu;
 
-use rara_domain::event::Event;
+use rara_domain::event::{Event, EventType};
 use rara_domain::trading::{Side, TradingCommit};
 
 /// Event payload for an order submission.
@@ -112,7 +112,7 @@ impl TradingEngine {
         // Publish submitted events
         for action in &commit.actions {
             let event = Event::builder()
-                .event_type("trading.order.submitted")
+                .event_type(EventType::TradingOrderSubmitted)
                 .source("trading-engine")
                 .correlation_id(&commit.hash)
                 .strategy_id(commit.strategy_id.clone())
@@ -143,9 +143,9 @@ impl TradingEngine {
         // Publish outcome events
         for result in &results {
             let event_type = match result.status {
-                OrderStatus::Filled => "trading.order.filled",
-                OrderStatus::Rejected => "trading.order.rejected",
-                _ => "trading.order.updated",
+                OrderStatus::Filled => EventType::TradingOrderFilled,
+                OrderStatus::Rejected => EventType::TradingOrderRejected,
+                _ => EventType::TradingOrderUpdated,
             };
 
             let event = Event::builder()
