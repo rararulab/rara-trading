@@ -2,8 +2,20 @@
 
 use async_trait::async_trait;
 use bon::Builder;
+use serde::Serialize;
 
 use crate::source::{DataSource, RawSignal, SourceError};
+
+/// Metadata extracted from a single RSS/Atom feed entry.
+#[derive(Debug, Serialize)]
+struct RssEntryMetadata {
+    /// Entry title.
+    title: String,
+    /// Entry permalink.
+    link: String,
+    /// Publication timestamp (RFC 3339).
+    published: String,
+}
 
 /// Data source that polls an RSS or Atom feed for news signals.
 #[derive(Builder)]
@@ -73,11 +85,12 @@ impl DataSource for RssDataSource {
                     .map(|dt| dt.to_rfc3339())
                     .unwrap_or_default();
 
-                let metadata = serde_json::json!({
-                    "title": title,
-                    "link": link,
-                    "published": published,
-                });
+                let metadata = serde_json::to_value(RssEntryMetadata {
+                    title,
+                    link,
+                    published,
+                })
+                .expect("RssEntryMetadata must serialize");
 
                 RawSignal {
                     source_name: self.name.clone(),

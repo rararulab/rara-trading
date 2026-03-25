@@ -5,9 +5,35 @@ use std::sync::Arc;
 
 use bon::Builder;
 use rust_decimal::Decimal;
+use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::event::Event;
+
+/// Event payload for hypothesis creation.
+#[derive(Debug, Serialize)]
+struct HypothesisCreatedPayload {
+    /// UUID of the created hypothesis.
+    hypothesis_id: String,
+}
+
+/// Event payload for experiment completion.
+#[derive(Debug, Serialize)]
+struct ExperimentCompletedPayload {
+    /// UUID of the completed experiment.
+    experiment_id: String,
+    /// Whether the experiment met acceptance criteria.
+    accepted: bool,
+}
+
+/// Event payload for a strategy candidate.
+#[derive(Debug, Serialize)]
+struct StrategyCandidatePayload {
+    /// UUID of the accepted experiment.
+    experiment_id: String,
+    /// UUID of the originating hypothesis.
+    hypothesis_id: String,
+}
 use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 use rara_event_bus::bus::EventBus;
 use rara_infra::llm::LlmClient;
@@ -169,7 +195,9 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 3. Publish hypothesis created event
         self.publish_event(
             "research.hypothesis.created",
-            &serde_json::json!({ "hypothesis_id": hypothesis.id.to_string() }),
+            &HypothesisCreatedPayload {
+                hypothesis_id: hypothesis.id.to_string(),
+            },
         )?;
 
         // 4. Generate strategy code
@@ -244,20 +272,20 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         // 12. Publish experiment completed event
         self.publish_event(
             "research.experiment.completed",
-            &serde_json::json!({
-                "experiment_id": experiment.id.to_string(),
-                "accepted": accepted,
-            }),
+            &ExperimentCompletedPayload {
+                experiment_id: experiment.id.to_string(),
+                accepted,
+            },
         )?;
 
         // 13. If accepted, publish candidate event and auto-promote
         let promoted = if accepted {
             self.publish_event(
                 "research.strategy.candidate",
-                &serde_json::json!({
-                    "experiment_id": experiment.id.to_string(),
-                    "hypothesis_id": hypothesis.id.to_string(),
-                }),
+                &StrategyCandidatePayload {
+                    experiment_id: experiment.id.to_string(),
+                    hypothesis_id: hypothesis.id.to_string(),
+                },
             )?;
 
             self.try_promote(
@@ -355,17 +383,17 @@ impl<L: LlmClient + Clone, B: Backtester> ResearchLoop<L, B> {
         Ok(Some(promoted_strategy))
     }
 
-    /// Helper to publish a domain event.
+    /// Helper to publish a domain event with a typed payload.
     fn publish_event(
         &self,
         event_type: &str,
-        payload: &serde_json::Value,
+        payload: &impl Serialize,
     ) -> Result<()> {
         let event = Event::builder()
             .event_type(event_type)
             .source("research_loop")
             .correlation_id(uuid::Uuid::new_v4().to_string())
-            .payload(payload.clone())
+            .payload(serde_json::to_value(payload).expect("event payload must serialize"))
             .build();
         self.event_bus.publish(&event).context(EventBusSnafu)?;
         Ok(())

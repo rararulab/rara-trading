@@ -3,9 +3,22 @@
 
 use std::str::FromStr;
 
+use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 
 use rara_domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
+
+/// Raw data captured during signal analysis, attached to the resulting
+/// [`SentinelSignal`].
+#[derive(Debug, Serialize)]
+struct AnalyzerRawData<'a> {
+    /// Name of the originating data source.
+    source_name: &'a str,
+    /// Original textual content that was analyzed.
+    content: &'a str,
+    /// Full LLM response text.
+    llm_response: &'a str,
+}
 use rara_infra::llm::LlmClient;
 use crate::source::RawSignal;
 
@@ -117,11 +130,14 @@ fn parse_response(
         .source(infer_source(&raw.source_name))
         .affected_contracts(affected_contracts)
         .summary(summary_str)
-        .raw_data(serde_json::json!({
-            "source_name": raw.source_name,
-            "content": raw.content,
-            "llm_response": response,
-        }))
+        .raw_data(
+            serde_json::to_value(AnalyzerRawData {
+                source_name: &raw.source_name,
+                content: &raw.content,
+                llm_response: response,
+            })
+            .expect("AnalyzerRawData must serialize"),
+        )
         .build();
 
     Ok(Some(signal))

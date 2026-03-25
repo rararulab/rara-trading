@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use rust_decimal_macros::dec;
+use serde::Serialize;
 use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
@@ -15,6 +16,157 @@ use rara_trading::error::{
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::paths;
 use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// CLI response types — compile-time typed JSON output
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    ok: bool,
+    error: String,
+}
+
+#[derive(Serialize)]
+struct ConfigSetResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    key: &'a str,
+    value: &'a str,
+}
+
+#[derive(Serialize)]
+struct ConfigGetResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    key: &'a str,
+    value: &'a str,
+}
+
+#[derive(Serialize)]
+struct ConfigListResponse {
+    ok: bool,
+    action: &'static str,
+    entries: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct HelloResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    greeting: &'a str,
+}
+
+#[derive(Serialize)]
+struct AgentResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    exit_code: Option<i32>,
+    timed_out: bool,
+    output: &'a str,
+}
+
+#[derive(Serialize)]
+struct IterationResponse<'a> {
+    iteration: u32,
+    accepted: bool,
+    hypothesis: &'a str,
+}
+
+#[derive(Serialize)]
+struct ResearchRunResponse {
+    ok: bool,
+    action: &'static str,
+    iterations: u32,
+}
+
+#[derive(Serialize)]
+struct ExperimentListItem {
+    index: u64,
+    experiment_id: String,
+    hypothesis: String,
+    decision: &'static str,
+    sharpe: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct ResearchListResponse {
+    ok: bool,
+    action: &'static str,
+    experiments: Vec<ExperimentListItem>,
+}
+
+#[derive(Serialize)]
+struct HypothesisDetail {
+    id: String,
+    text: String,
+    reason: String,
+    observation: String,
+    knowledge: String,
+    parent: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FeedbackDetail {
+    experiment_id: String,
+    decision: bool,
+    reason: String,
+    observations: String,
+    hypothesis_evaluation: String,
+    new_hypothesis: Option<String>,
+    code_change_summary: String,
+}
+
+#[derive(Serialize)]
+struct BacktestDetail {
+    pnl: String,
+    sharpe_ratio: f64,
+    max_drawdown: String,
+    win_rate: f64,
+    trade_count: u32,
+}
+
+#[derive(Serialize)]
+struct ExperimentDetail {
+    id: String,
+    hypothesis_id: String,
+    status: String,
+    strategy_code: String,
+    backtest_result: Option<BacktestDetail>,
+}
+
+#[derive(Serialize)]
+struct ResearchShowResponse {
+    ok: bool,
+    action: &'static str,
+    experiment: ExperimentDetail,
+    hypothesis: Option<HypothesisDetail>,
+    feedbacks: Vec<FeedbackDetail>,
+}
+
+#[derive(Serialize)]
+struct PromotedItem {
+    experiment_id: String,
+    hypothesis_id: String,
+    wasm_path: String,
+    source_path: Option<String>,
+    meta: PromotedMeta,
+}
+
+#[derive(Serialize)]
+struct PromotedMeta {
+    name: String,
+    version: u32,
+    api_version: u32,
+    description: String,
+}
+
+#[derive(Serialize)]
+struct ResearchPromotedResponse {
+    ok: bool,
+    action: &'static str,
+    strategies: Vec<PromotedItem>,
+}
 
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
@@ -40,12 +192,17 @@ async fn main() {
         eprintln!("Error: {e}");
         println!(
             "{}",
-            serde_json::json!({"ok": false, "error": e.to_string()})
+            serde_json::to_string(&ErrorResponse {
+                ok: false,
+                error: e.to_string(),
+            })
+            .expect("ErrorResponse must serialize")
         );
         std::process::exit(1);
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run() -> error::Result<()> {
     let cli = Cli::parse();
 
@@ -58,7 +215,13 @@ async fn run() -> error::Result<()> {
                 eprintln!("set {key} = {value}");
                 println!(
                     "{}",
-                    serde_json::json!({"ok": true, "action": "config_set", "key": key, "value": value})
+                    serde_json::to_string(&ConfigSetResponse {
+                        ok: true,
+                        action: "config_set",
+                        key: &key,
+                        value: &value,
+                    })
+                    .expect("ConfigSetResponse must serialize")
                 );
             }
             ConfigAction::Get { key } => {
@@ -67,7 +230,13 @@ async fn run() -> error::Result<()> {
                 let display_value = value.as_deref().unwrap_or("(not set)");
                 println!(
                     "{}",
-                    serde_json::json!({"ok": true, "action": "config_get", "key": key, "value": display_value})
+                    serde_json::to_string(&ConfigGetResponse {
+                        ok: true,
+                        action: "config_get",
+                        key: &key,
+                        value: display_value,
+                    })
+                    .expect("ConfigGetResponse must serialize")
                 );
             }
             ConfigAction::List => {
@@ -79,7 +248,12 @@ async fn run() -> error::Result<()> {
                     .collect();
                 println!(
                     "{}",
-                    serde_json::json!({"ok": true, "action": "config_list", "entries": map})
+                    serde_json::to_string(&ConfigListResponse {
+                        ok: true,
+                        action: "config_list",
+                        entries: map,
+                    })
+                    .expect("ConfigListResponse must serialize")
                 );
             }
         },
@@ -88,7 +262,12 @@ async fn run() -> error::Result<()> {
             eprintln!("{greeting}");
             println!(
                 "{}",
-                serde_json::json!({"ok": true, "action": "hello", "greeting": greeting})
+                serde_json::to_string(&HelloResponse {
+                    ok: true,
+                    action: "hello",
+                    greeting: &greeting,
+                })
+                .expect("HelloResponse must serialize")
             );
         }
         Command::Research { action } => {
@@ -124,13 +303,14 @@ async fn run() -> error::Result<()> {
 
             println!(
                 "{}",
-                serde_json::json!({
-                    "ok": result.success,
-                    "action": "agent_run",
-                    "exit_code": result.exit_code,
-                    "timed_out": result.timed_out,
-                    "output": result.output,
+                serde_json::to_string(&AgentResponse {
+                    ok: result.success,
+                    action: "agent_run",
+                    exit_code: result.exit_code,
+                    timed_out: result.timed_out,
+                    output: &result.output,
                 })
+                .expect("AgentResponse must serialize")
             );
         }
     }
@@ -263,11 +443,12 @@ async fn run_research_loop(
                 );
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "iteration": i,
-                        "accepted": ir.accepted,
-                        "hypothesis": ir.hypothesis.text,
+                    serde_json::to_string(&IterationResponse {
+                        iteration: i,
+                        accepted: ir.accepted,
+                        hypothesis: &ir.hypothesis.text,
                     })
+                    .expect("IterationResponse must serialize")
                 );
             }
             Err(e) => {
@@ -278,7 +459,12 @@ async fn run_research_loop(
 
     println!(
         "{}",
-        serde_json::json!({"ok": true, "action": "research.run", "iterations": iterations})
+        serde_json::to_string(&ResearchRunResponse {
+            ok: true,
+            action: "research.run",
+            iterations,
+        })
+        .expect("ResearchRunResponse must serialize")
     );
     Ok(())
 }
@@ -290,7 +476,7 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
 
     let entries = trace.list_recent(limit).context(TraceSnafu)?;
 
-    let items: Vec<serde_json::Value> = entries
+    let items: Vec<ExperimentListItem> = entries
         .into_iter()
         .map(|(idx, exp, fb)| {
             let hypothesis_text = trace
@@ -312,19 +498,24 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
                 .as_ref()
                 .map(|result| result.sharpe_ratio);
 
-            serde_json::json!({
-                "index": idx,
-                "experiment_id": exp.id.to_string(),
-                "hypothesis": hypothesis_text,
-                "decision": decision,
-                "sharpe": sharpe,
-            })
+            ExperimentListItem {
+                index: idx,
+                experiment_id: exp.id.to_string(),
+                hypothesis: hypothesis_text,
+                decision,
+                sharpe,
+            }
         })
         .collect();
 
     println!(
         "{}",
-        serde_json::json!({"ok": true, "action": "research.list", "experiments": items})
+        serde_json::to_string(&ResearchListResponse {
+            ok: true,
+            action: "research.list",
+            experiments: items,
+        })
+        .expect("ResearchListResponse must serialize")
     );
     Ok(())
 }
@@ -353,57 +544,52 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
         .get_feedback_for_experiment(exp_uuid)
         .context(TraceSnafu)?;
 
-    let hyp_json = hypothesis.map(|h| {
-        serde_json::json!({
-            "id": h.id.to_string(),
-            "text": h.text,
-            "reason": h.reason,
-            "observation": h.observation,
-            "knowledge": h.knowledge,
-            "parent": h.parent.map(|p| p.to_string()),
-        })
+    let hyp_detail = hypothesis.map(|h| HypothesisDetail {
+        id: h.id.to_string(),
+        text: h.text,
+        reason: h.reason,
+        observation: h.observation,
+        knowledge: h.knowledge,
+        parent: h.parent.map(|p| p.to_string()),
     });
 
-    let fb_json: Vec<serde_json::Value> = feedbacks
+    let fb_details: Vec<FeedbackDetail> = feedbacks
         .iter()
-        .map(|fb| {
-            serde_json::json!({
-                "experiment_id": fb.experiment_id.to_string(),
-                "decision": fb.decision,
-                "reason": fb.reason,
-                "observations": fb.observations,
-                "hypothesis_evaluation": fb.hypothesis_evaluation,
-                "new_hypothesis": fb.new_hypothesis.as_deref(),
-                "code_change_summary": fb.code_change_summary,
-            })
+        .map(|fb| FeedbackDetail {
+            experiment_id: fb.experiment_id.to_string(),
+            decision: fb.decision,
+            reason: fb.reason.clone(),
+            observations: fb.observations.clone(),
+            hypothesis_evaluation: fb.hypothesis_evaluation.clone(),
+            new_hypothesis: fb.new_hypothesis.clone(),
+            code_change_summary: fb.code_change_summary.clone(),
         })
         .collect();
 
-    let backtest_json = exp.backtest_result.as_ref().map(|br| {
-        serde_json::json!({
-            "pnl": br.pnl.to_string(),
-            "sharpe_ratio": br.sharpe_ratio,
-            "max_drawdown": br.max_drawdown.to_string(),
-            "win_rate": br.win_rate,
-            "trade_count": br.trade_count,
-        })
+    let backtest_detail = exp.backtest_result.as_ref().map(|br| BacktestDetail {
+        pnl: br.pnl.to_string(),
+        sharpe_ratio: br.sharpe_ratio,
+        max_drawdown: br.max_drawdown.to_string(),
+        win_rate: br.win_rate,
+        trade_count: br.trade_count,
     });
 
     println!(
         "{}",
-        serde_json::json!({
-            "ok": true,
-            "action": "research.show",
-            "experiment": {
-                "id": exp.id.to_string(),
-                "hypothesis_id": exp.hypothesis_id.to_string(),
-                "status": exp.status.to_string(),
-                "strategy_code": exp.strategy_code,
-                "backtest_result": backtest_json,
+        serde_json::to_string(&ResearchShowResponse {
+            ok: true,
+            action: "research.show",
+            experiment: ExperimentDetail {
+                id: exp.id.to_string(),
+                hypothesis_id: exp.hypothesis_id.to_string(),
+                status: exp.status.to_string(),
+                strategy_code: exp.strategy_code,
+                backtest_result: backtest_detail,
             },
-            "hypothesis": hyp_json,
-            "feedbacks": fb_json,
+            hypothesis: hyp_detail,
+            feedbacks: fb_details,
         })
+        .expect("ResearchShowResponse must serialize")
     );
     Ok(())
 }
@@ -414,27 +600,30 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
 
     let promoted = list_promoted_from_dir(&dir).context(PromoterSnafu)?;
 
-    let items: Vec<serde_json::Value> = promoted
+    let items: Vec<PromotedItem> = promoted
         .iter()
-        .map(|p| {
-            serde_json::json!({
-                "experiment_id": p.experiment_id().to_string(),
-                "hypothesis_id": p.hypothesis_id().to_string(),
-                "wasm_path": p.wasm_path().to_string_lossy(),
-                "source_path": p.source_path().map(|s| s.to_string_lossy().into_owned()),
-                "meta": {
-                    "name": p.meta().name,
-                    "version": p.meta().version,
-                    "api_version": p.meta().api_version,
-                    "description": p.meta().description,
-                },
-            })
+        .map(|p| PromotedItem {
+            experiment_id: p.experiment_id().to_string(),
+            hypothesis_id: p.hypothesis_id().to_string(),
+            wasm_path: p.wasm_path().to_string_lossy().into_owned(),
+            source_path: p.source_path().map(|s| s.to_string_lossy().into_owned()),
+            meta: PromotedMeta {
+                name: p.meta().name.clone(),
+                version: p.meta().version,
+                api_version: p.meta().api_version,
+                description: p.meta().description.clone(),
+            },
         })
         .collect();
 
     println!(
         "{}",
-        serde_json::json!({"ok": true, "action": "research.promoted", "strategies": items})
+        serde_json::to_string(&ResearchPromotedResponse {
+            ok: true,
+            action: "research.promoted",
+            strategies: items,
+        })
+        .expect("ResearchPromotedResponse must serialize")
     );
     Ok(())
 }
