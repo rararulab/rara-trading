@@ -114,3 +114,38 @@ pub struct HypothesisFeedback {
     #[builder(default = jiff::Timestamp::now())]
     pub created_at: jiff::Timestamp,
 }
+
+/// Lifecycle status of a research-generated strategy.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString,
+)]
+pub enum ResearchStrategyStatus {
+    /// Successfully compiled, awaiting backtest evaluation.
+    #[default]
+    Compiled,
+    /// Accepted after passing backtest criteria.
+    Accepted,
+    /// Promoted for paper/live trading.
+    Promoted,
+    /// No longer active.
+    Archived,
+}
+
+/// A strategy produced by the research loop.
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct ResearchStrategy {
+    /// Strategy identifier.
+    #[builder(default = Uuid::new_v4())]
+    pub id: Uuid,
+    /// Hypothesis that generated this strategy.
+    pub hypothesis_id: Uuid,
+    /// Generated source code.
+    #[builder(into)]
+    pub source_code: String,
+    /// Current lifecycle status.
+    #[builder(default)]
+    pub status: ResearchStrategyStatus,
+    /// Creation timestamp.
+    #[builder(default = jiff::Timestamp::now())]
+    pub created_at: jiff::Timestamp,
+}
