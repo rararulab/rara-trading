@@ -12,6 +12,7 @@ prost.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 snafu.workspace = true
+strum.workspace = true
 rara-server.workspace = true
 
 [lints]

@@ -4186,6 +4186,7 @@ dependencies = [
  "rara-server",
  "ratatui",
  "snafu",
+ "strum 0.27.2",
  "tokio",
  "tonic",
  "tracing",

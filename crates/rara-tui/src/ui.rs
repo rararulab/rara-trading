@@ -20,9 +20,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, TAB_NAMES, TAB_RESEARCH};
+use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, TAB_NAMES, TAB_RESEARCH, TRADING_TAB};
 use crate::tabs;
 use crate::tabs::research;
+use crate::tabs::trading;
 use crate::theme;
 
 /// Render the full dashboard to the terminal frame.
@@ -42,6 +43,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_tab_bar(frame, app, chunks[1]);
     render_content(frame, app, chunks[2]);
     render_footer(frame, app, chunks[3]);
+
+    // Render overlays on top of everything
+    if app.active_tab == TRADING_TAB && app.trading.show_order_detail {
+        trading::render_order_detail_overlay(frame, app);
+    }
 }
 
 /// Render the top status bar showing connection indicators and server info.
@@ -165,6 +171,8 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         tabs::overview::render(frame, app, area);
     } else if app.active_tab == TAB_RESEARCH {
         research::render(frame, &app.research, area);
+    } else if app.active_tab == TRADING_TAB {
+        trading::render(frame, app, area);
     } else if app.active_tab == EVENTS_TAB_INDEX {
         tabs::events::render(frame, &app.events_state, area);
     } else {
@@ -194,6 +202,9 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
         _ if app.active_tab == TAB_RESEARCH => {
             "q:Quit  1-5:Tab  j/k:Navigate  p:DAG  ?:Help".to_string()
+        }
+        _ if app.active_tab == TRADING_TAB => {
+            "q:Quit  1-5:Tab  j/k:Navigate  Enter:Detail  p:PnL range  ?:Help".to_string()
         }
         _ if app.active_tab == EVENTS_TAB_INDEX => {
             if app.events_state.search_active {
