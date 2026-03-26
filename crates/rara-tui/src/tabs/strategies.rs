@@ -232,7 +232,7 @@ fn lifecycle_style(status: &StrategyLifecycle) -> (&'static str, &'static str, S
                 .fg(theme::FOAM)
                 .add_modifier(Modifier::BOLD),
         ),
-        Active => ("\u{25cf}", "Active", Style::default().fg(theme::PINE)),
+        Active => ("\u{25cf}", "Active", Style::default().fg(theme::IRIS)),
         Demoted => ("\u{25cb}", "Demoted", Style::default().fg(theme::GOLD)),
         Retired => ("\u{25cb}", "Retired", Style::default().fg(theme::LOVE)),
         Archived => ("\u{25cb}", "Archived", Style::default().fg(theme::MUTED)),
