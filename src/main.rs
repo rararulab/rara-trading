@@ -32,6 +32,8 @@ use uuid::Uuid;
 struct ErrorResponse {
     ok: bool,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +74,8 @@ struct ValidateCheck {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -323,6 +327,7 @@ async fn main() {
             serde_json::to_string(&ErrorResponse {
                 ok: false,
                 error: e.to_string(),
+                suggestion: None,
             })
             .expect("ErrorResponse must serialize")
         );
@@ -1805,6 +1810,7 @@ fn run_setup_init(force: bool) -> error::Result<()> {
 }
 
 /// Validate all configuration files and connectivity.
+#[allow(clippy::too_many_lines)]
 async fn run_setup_validate() -> error::Result<()> {
     let mut checks = Vec::new();
     let mut has_errors = false;
@@ -1821,6 +1827,11 @@ async fn run_setup_validate() -> error::Result<()> {
             has_errors = true;
             Some(format!("not found at {}", config_path.display()))
         },
+        suggestion: if config_exists {
+            None
+        } else {
+            Some("run 'rara setup init' to generate config files".to_string())
+        },
     });
 
     // Check accounts.toml exists
@@ -1834,6 +1845,11 @@ async fn run_setup_validate() -> error::Result<()> {
         } else {
             has_errors = true;
             Some(format!("not found at {}", accounts_path.display()))
+        },
+        suggestion: if accounts_exists {
+            None
+        } else {
+            Some("run 'rara setup init' to generate config files".to_string())
         },
     });
 
@@ -1856,6 +1872,11 @@ async fn run_setup_validate() -> error::Result<()> {
             has_errors = true;
             Some(format!("duplicate IDs: {}", duplicates.join(", ")))
         },
+        suggestion: if no_dupes {
+            None
+        } else {
+            Some("fix accounts.toml or run 'rara setup account add' to reconfigure".to_string())
+        },
     });
 
     // Count enabled accounts
@@ -1864,6 +1885,7 @@ async fn run_setup_validate() -> error::Result<()> {
         name: "enabled_accounts".to_string(),
         ok: true,
         detail: Some(format!("{enabled_count} account(s) enabled")),
+        suggestion: None,
     });
 
     // Run startup validation (database + LLM connectivity)
@@ -1876,6 +1898,7 @@ async fn run_setup_validate() -> error::Result<()> {
                 name: "startup".to_string(),
                 ok: false,
                 detail: Some(e.to_string()),
+                suggestion: None,
             });
         }
         if startup_errors.is_empty() {
@@ -1883,6 +1906,7 @@ async fn run_setup_validate() -> error::Result<()> {
                 name: "startup".to_string(),
                 ok: true,
                 detail: None,
+                suggestion: None,
             });
         }
     }
@@ -1959,6 +1983,7 @@ fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                             serde_json::to_string(&ErrorResponse {
                                 ok: false,
                                 error: "--exchange is required for ccxt broker".to_string(),
+                                suggestion: Some("add --exchange binance (or bybit, okx)".to_string()),
                             })
                             .expect("ErrorResponse must serialize")
                         );
@@ -1978,8 +2003,9 @@ fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                         serde_json::to_string(&ErrorResponse {
                             ok: false,
                             error: format!(
-                                "unknown broker type \"{other}\", expected \"paper\" or \"ccxt\""
+                                "unknown broker type \"{other}\""
                             ),
+                            suggestion: Some("use --broker paper or --broker ccxt".to_string()),
                         })
                         .expect("ErrorResponse must serialize")
                     );
@@ -2039,6 +2065,7 @@ fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                     serde_json::to_string(&ErrorResponse {
                         ok: false,
                         error: "--yes flag is required to confirm removal".to_string(),
+                        suggestion: Some("add --yes to confirm removal".to_string()),
                     })
                     .expect("ErrorResponse must serialize")
                 );
@@ -2050,18 +2077,12 @@ fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
             cfg.accounts.retain(|a| a.id != id);
 
             if cfg.accounts.len() == original_len {
-                // ID not found — suggest similar IDs
-                let known: Vec<&str> = cfg.accounts.iter().map(|a| a.id.as_str()).collect();
-                let suggestion = if known.is_empty() {
-                    "no accounts configured".to_string()
-                } else {
-                    format!("known accounts: {}", known.join(", "))
-                };
                 println!(
                     "{}",
                     serde_json::to_string(&ErrorResponse {
                         ok: false,
-                        error: format!("account \"{id}\" not found; {suggestion}"),
+                        error: format!("account \"{id}\" not found"),
+                        suggestion: Some("run 'rara setup account list' to see available accounts".to_string()),
                     })
                     .expect("ErrorResponse must serialize")
                 );
