@@ -8,6 +8,10 @@ description = "Trading engine: brokers, guards, order execution"
 [dependencies]
 rara-domain.workspace = true
 rara-event-bus.workspace = true
+rara-market-data.workspace = true
+rara-research.workspace = true
+rara-strategy-api.workspace = true
+chrono.workspace = true
 async-trait.workspace = true
 bon.workspace = true
 serde.workspace = true
