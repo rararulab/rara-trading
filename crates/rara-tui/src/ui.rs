@@ -20,8 +20,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, ConnectionStatus, TAB_NAMES};
+use crate::app::{App, ConnectionStatus, TAB_NAMES, TAB_RESEARCH};
 use crate::tabs;
+use crate::tabs::research;
 use crate::theme;
 
 /// Render the full dashboard to the terminal frame.
@@ -123,9 +124,9 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(tabs, area);
 }
 
-/// Render the main content area, dispatching to the active tab.
+/// Render the main content area — dispatches to tab-specific renderers.
 fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // Show connection overlay when not connected
+    // Show connection overlay when not connected, regardless of tab
     match &app.connection_status {
         ConnectionStatus::Connecting => {
             let content = Paragraph::new(format!("Connecting to {}...", app.server_addr))
@@ -140,33 +141,36 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             return;
         }
         ConnectionStatus::Disconnected { retry_count } => {
-            let content = Paragraph::new(format!(
+            let text = format!(
                 "Connection lost. Reconnecting... (attempt {retry_count})\n\
                  Server: {}",
                 app.server_addr
-            ))
-            .style(theme::negative())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(theme::muted().fg(theme::OVERLAY))
-                    .style(ratatui::style::Style::default().bg(theme::BASE)),
             );
+            let content = Paragraph::new(text)
+                .style(theme::negative())
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(theme::muted().fg(theme::OVERLAY))
+                        .style(ratatui::style::Style::default().bg(theme::BASE)),
+                );
             frame.render_widget(content, area);
             return;
         }
         ConnectionStatus::Connected => {}
     }
 
-    // Dispatch to the active tab renderer
+    // Dispatch to tab-specific renderer
     if app.active_tab == 0 {
         tabs::overview::render(frame, app, area);
+    } else if app.active_tab == TAB_RESEARCH {
+        research::render(frame, &app.research, area);
     } else {
         let tab_name = TAB_NAMES
             .get(app.active_tab)
             .copied()
             .unwrap_or("Unknown");
-        let placeholder = Paragraph::new(format!(
+        let content = Paragraph::new(format!(
             "{tab_name}\n\nContent will be implemented in future issues."
         ))
         .style(theme::text())
@@ -176,7 +180,7 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .border_style(theme::muted().fg(theme::OVERLAY))
                 .style(ratatui::style::Style::default().bg(theme::BASE)),
         );
-        frame.render_widget(placeholder, area);
+        frame.render_widget(content, area);
     }
 }
 
@@ -185,6 +189,9 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let footer_text = match &app.connection_status {
         ConnectionStatus::Disconnected { retry_count } => {
             format!("Connection lost. Reconnecting... (attempt {retry_count})  │  q:Quit")
+        }
+        _ if app.active_tab == TAB_RESEARCH => {
+            "q:Quit  1-4:Tab  j/k:Navigate  p:DAG  ?:Help".to_string()
         }
         _ => "q:Quit  1-4:Tab  ?:Help".to_string(),
     };

@@ -20,7 +20,7 @@ use tracing::{info, warn};
 use rara_server::rara_proto::rara_service_client::RaraServiceClient;
 use rara_server::rara_proto::Empty;
 
-use crate::app::{App, ConnectionStatus};
+use crate::app::{App, ConnectionStatus, TAB_RESEARCH};
 use crate::error::{IoSnafu, Result};
 use crate::ui;
 
@@ -91,8 +91,18 @@ async fn event_loop(
     Ok(())
 }
 
-/// Handle a key press event.
+/// Handle a key press event, dispatching tab-specific keys as needed.
 const fn handle_key(app: &mut App, key: KeyCode) {
+    // Research tab DAG popup intercepts Esc to close instead of quitting
+    if app.active_tab == TAB_RESEARCH && app.research.show_dag {
+        match key {
+            KeyCode::Esc | KeyCode::Char('p') => app.research.close_dag(),
+            KeyCode::Char('q') => app.quit(),
+            _ => {}
+        }
+        return;
+    }
+
     match key {
         KeyCode::Char('q') | KeyCode::Esc => app.quit(),
         KeyCode::Char('1') => app.select_tab(0),
@@ -100,6 +110,16 @@ const fn handle_key(app: &mut App, key: KeyCode) {
         KeyCode::Char('3') => app.select_tab(2),
         KeyCode::Char('4') => app.select_tab(3),
         _ => {}
+    }
+
+    // Tab-specific keys
+    if app.active_tab == TAB_RESEARCH {
+        match key {
+            KeyCode::Char('j') | KeyCode::Down => app.research.select_next(),
+            KeyCode::Char('k') | KeyCode::Up => app.research.select_prev(),
+            KeyCode::Char('p') => app.research.toggle_dag(),
+            _ => {}
+        }
     }
 }
 
