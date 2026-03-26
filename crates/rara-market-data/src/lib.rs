@@ -5,3 +5,4 @@
 
 pub mod fetcher;
 pub mod store;
+pub mod stream;
