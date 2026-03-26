@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -13,18 +14,20 @@ use crate::health::{BrokerHealth, BrokerHealthInfo};
 use crate::uta::UnifiedTradingAccount;
 
 /// Summary of a registered account.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AccountSummary {
     /// Account identifier.
+    #[builder(into)]
     pub id: String,
     /// Human-readable label.
+    #[builder(into)]
     pub label: String,
     /// Current health snapshot.
     pub health: BrokerHealthInfo,
 }
 
 /// Aggregated equity across all accounts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AggregatedEquity {
     /// Sum of equity from all healthy accounts.
     pub total_equity: Decimal,
@@ -37,11 +40,13 @@ pub struct AggregatedEquity {
 }
 
 /// Single account equity entry within an aggregated view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AccountEquity {
     /// Account identifier.
+    #[builder(into)]
     pub id: String,
     /// Human-readable label.
+    #[builder(into)]
     pub label: String,
     /// Account equity (zero if offline).
     pub equity: Decimal,

@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
+use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::broker::BrokerError;
 use rara_domain::trading::git::{
@@ -14,6 +15,21 @@ use rara_domain::trading::git::{
     GitState, GitStatus, OperationSummary, OrderStatusUpdate, PushResult, RejectResult, SyncResult,
 };
 use rara_domain::trading::operation::{Operation, OperationResult, OperationStatus};
+
+/// Errors from `TradingGit` operations.
+#[derive(Debug, Snafu)]
+#[snafu(visibility(pub))]
+pub enum TradingGitError {
+    /// Push or reject called without a prior commit.
+    #[snafu(display("no pending commit — call commit() before push/reject"))]
+    NoPendingCommit,
+    /// Broker error during state snapshot.
+    #[snafu(display("broker error: {source}"))]
+    Broker { source: BrokerError },
+}
+
+/// Convenience alias for `TradingGit` results.
+pub type Result<T> = std::result::Result<T, TradingGitError>;
 
 /// Dispatches a single [`Operation`] to the broker and returns the result.
 #[async_trait]
@@ -26,7 +42,7 @@ pub trait OperationDispatcher: Send + Sync {
 #[async_trait]
 pub trait StateProvider: Send + Sync {
     /// Capture the current account state for recording in a commit.
-    async fn get_state(&self) -> Result<GitState, BrokerError>;
+    async fn get_state(&self) -> std::result::Result<GitState, BrokerError>;
 }
 
 /// An order still pending execution (submitted but not yet filled/cancelled).
@@ -127,57 +143,17 @@ impl TradingGit {
         &mut self,
         dispatcher: &dyn OperationDispatcher,
         state_provider: &dyn StateProvider,
-    ) -> Result<PushResult, BrokerError> {
-        let hash = self
-            .pending_hash
-            .take()
-            .expect("push called without a pending commit");
-        let message = self
-            .pending_message
-            .take()
-            .expect("push called without a pending message");
+    ) -> Result<PushResult> {
+        let (hash, message, operations) = self.take_pending()?;
 
-        let operations: Vec<Operation> = self.staging.drain(..).collect();
         let mut results = Vec::with_capacity(operations.len());
-
         for op in &operations {
             results.push(dispatcher.dispatch(op).await);
         }
 
-        let state_after = state_provider.get_state().await?;
+        let state_after = state_provider.get_state().await.context(BrokerSnafu)?;
 
-        let submitted: Vec<OperationResult> = results
-            .iter()
-            .filter(|r| r.success)
-            .cloned()
-            .collect();
-        let rejected: Vec<OperationResult> = results
-            .iter()
-            .filter(|r| !r.success)
-            .cloned()
-            .collect();
-
-        let commit = GitCommit {
-            hash: hash.clone(),
-            parent_hash: self.head.clone(),
-            message: message.clone(),
-            operations,
-            results,
-            state_after,
-            timestamp: jiff::Timestamp::now().to_string(),
-            round: self.current_round,
-        };
-
-        self.head = Some(hash.clone());
-        self.commits.push(commit);
-
-        Ok(PushResult {
-            hash,
-            message,
-            operation_count: submitted.len() + rejected.len(),
-            submitted,
-            rejected,
-        })
+        Ok(self.record_push(hash, message, operations, results, state_after))
     }
 
     /// Reject the pending commit without executing any operations.
@@ -188,55 +164,11 @@ impl TradingGit {
         &mut self,
         reason: &str,
         state_provider: &dyn StateProvider,
-    ) -> Result<RejectResult, BrokerError> {
-        let hash = self
-            .pending_hash
-            .take()
-            .expect("reject called without a pending commit");
-        let message = self
-            .pending_message
-            .take()
-            .expect("reject called without a pending message");
+    ) -> Result<RejectResult> {
+        let (hash, message, operations) = self.take_pending()?;
+        let state_after = state_provider.get_state().await.context(BrokerSnafu)?;
 
-        let operations: Vec<Operation> = self.staging.drain(..).collect();
-        let operation_count = operations.len();
-
-        // Build UserRejected results for each operation
-        let results: Vec<OperationResult> = operations
-            .iter()
-            .map(|op| OperationResult {
-                action: op.clone(),
-                success: false,
-                order_id: None,
-                status: OperationStatus::UserRejected,
-                filled_qty: None,
-                filled_price: None,
-                error: Some(reason.to_string()),
-            })
-            .collect();
-
-        let state_after = state_provider.get_state().await?;
-
-        let reject_message = format!("REJECTED: {message} — {reason}");
-        let commit = GitCommit {
-            hash: hash.clone(),
-            parent_hash: self.head.clone(),
-            message: reject_message.clone(),
-            operations,
-            results,
-            state_after,
-            timestamp: jiff::Timestamp::now().to_string(),
-            round: self.current_round,
-        };
-
-        self.head = Some(hash.clone());
-        self.commits.push(commit);
-
-        Ok(RejectResult {
-            hash,
-            message: reject_message,
-            operation_count,
-        })
+        Ok(self.record_reject(hash, &message, operations, reason, state_after))
     }
 
     /// Record order status updates as a sync commit.
@@ -246,7 +178,7 @@ impl TradingGit {
         &mut self,
         updates: Vec<OrderStatusUpdate>,
         state_provider: &dyn StateProvider,
-    ) -> Result<SyncResult, BrokerError> {
+    ) -> Result<SyncResult> {
         let updated_count = updates.len();
         let sync_ops = vec![Operation::SyncOrders];
         let message = format!("sync: {updated_count} order status update(s)");
@@ -256,13 +188,13 @@ impl TradingGit {
             action: Operation::SyncOrders,
             success: true,
             order_id: None,
-            status: OperationStatus::Filled,
+            status: OperationStatus::Submitted,
             filled_qty: None,
             filled_price: None,
             error: None,
         }];
 
-        let state_after = state_provider.get_state().await?;
+        let state_after = state_provider.get_state().await.context(BrokerSnafu)?;
 
         let commit = GitCommit {
             hash: hash.clone(),
@@ -283,6 +215,97 @@ impl TradingGit {
             updated_count,
             updates,
         })
+    }
+
+    /// Take the pending commit data (hash, message, operations) from staging.
+    ///
+    /// Returns an error if no pending commit exists.
+    pub fn take_pending(&mut self) -> Result<(CommitHash, String, Vec<Operation>)> {
+        let hash = self.pending_hash.take().context(NoPendingCommitSnafu)?;
+        let message = self.pending_message.take().context(NoPendingCommitSnafu)?;
+        let operations = self.staging.drain(..).collect();
+        Ok((hash, message, operations))
+    }
+
+    /// Record a completed push as an immutable commit.
+    pub fn record_push(
+        &mut self,
+        hash: CommitHash,
+        message: String,
+        operations: Vec<Operation>,
+        results: Vec<OperationResult>,
+        state_after: GitState,
+    ) -> PushResult {
+        let submitted: Vec<_> = results.iter().filter(|r| r.success).cloned().collect();
+        let rejected: Vec<_> = results.iter().filter(|r| !r.success).cloned().collect();
+        let operation_count = operations.len();
+
+        let commit = GitCommit {
+            hash: hash.clone(),
+            parent_hash: self.head.clone(),
+            message: message.clone(),
+            operations,
+            results,
+            state_after,
+            timestamp: jiff::Timestamp::now().to_string(),
+            round: self.current_round,
+        };
+
+        self.head = Some(hash.clone());
+        self.commits.push(commit);
+
+        PushResult {
+            hash,
+            message,
+            operation_count,
+            submitted,
+            rejected,
+        }
+    }
+
+    /// Record a rejected commit (all operations marked `UserRejected`).
+    pub fn record_reject(
+        &mut self,
+        hash: CommitHash,
+        message: &str,
+        operations: Vec<Operation>,
+        reason: &str,
+        state_after: GitState,
+    ) -> RejectResult {
+        let operation_count = operations.len();
+        let results: Vec<OperationResult> = operations
+            .iter()
+            .map(|op| OperationResult {
+                action: op.clone(),
+                success: false,
+                order_id: None,
+                status: OperationStatus::UserRejected,
+                filled_qty: None,
+                filled_price: None,
+                error: Some(reason.to_string()),
+            })
+            .collect();
+
+        let reject_message = format!("REJECTED: {message} — {reason}");
+        let commit = GitCommit {
+            hash: hash.clone(),
+            parent_hash: self.head.clone(),
+            message: reject_message.clone(),
+            operations,
+            results,
+            state_after,
+            timestamp: jiff::Timestamp::now().to_string(),
+            round: self.current_round,
+        };
+
+        self.head = Some(hash.clone());
+        self.commits.push(commit);
+
+        RejectResult {
+            hash,
+            message: reject_message,
+            operation_count,
+        }
     }
 
     /// Return the current staging area and commit state.
@@ -372,9 +395,8 @@ impl Default for TradingGit {
 fn generate_commit_hash(message: &str, content: &impl serde::Serialize) -> CommitHash {
     let mut hasher = Sha256::new();
     hasher.update(message.as_bytes());
-    if let Ok(json) = serde_json::to_string(content) {
-        hasher.update(json.as_bytes());
-    }
+    let json = serde_json::to_vec(content).expect("commit content must be serializable");
+    hasher.update(&json);
     // Include timestamp for uniqueness even with identical content
     hasher.update(jiff::Timestamp::now().to_string().as_bytes());
     let result = hasher.finalize();
@@ -401,7 +423,7 @@ fn build_operation_summaries(commit: &GitCommit) -> Vec<OperationSummary> {
                         .unwrap_or_default();
                     (
                         contract.symbol.clone(),
-                        format!("{order_type}"),
+                        order_type.to_string(),
                         format!("{side} {quantity}{price_info}"),
                     )
                 }
@@ -487,7 +509,7 @@ mod tests {
 
     #[async_trait]
     impl StateProvider for FixedState {
-        async fn get_state(&self) -> Result<GitState, BrokerError> {
+        async fn get_state(&self) -> std::result::Result<GitState, BrokerError> {
             Ok(self.0.clone())
         }
     }

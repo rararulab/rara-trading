@@ -3,6 +3,7 @@
 //! Tracks consecutive failures and maps them to health states using configurable
 //! thresholds. Supports manual disable/enable and exponential backoff for recovery.
 
+use bon::Builder;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
@@ -32,7 +33,7 @@ pub enum BrokerHealth {
 }
 
 /// Snapshot of a broker's health state for serialization and display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct BrokerHealthInfo {
     /// Current health status.
     pub status: BrokerHealth,
@@ -115,7 +116,7 @@ impl HealthTracker {
 
     /// Records a failed operation, incrementing the failure counter.
     pub fn record_failure(&mut self, error: &str) {
-        self.consecutive_failures += 1;
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
         self.last_error = Some(error.to_owned());
         self.last_failure_at = Some(jiff::Timestamp::now());
     }

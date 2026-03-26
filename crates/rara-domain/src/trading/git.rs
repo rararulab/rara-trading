@@ -1,15 +1,17 @@
 //! Pure domain types for the `TradingGit` commit history.
 
+use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+use super::Side;
 use super::operation::{Operation, OperationResult, OperationStatus};
 
 /// 8-character hex commit hash.
 pub type CommitHash = String;
 
 /// Account-level state snapshot captured after each commit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct GitState {
     /// Total portfolio equity.
     pub net_liquidation: Decimal,
@@ -24,30 +26,33 @@ pub struct GitState {
 }
 
 /// Position representation within a [`GitState`] snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct GitPosition {
     /// Contract identifier.
+    #[builder(into)]
     pub contract_id: String,
     /// Long or short.
-    pub side: String,
+    pub side: Side,
     /// Position size.
     pub quantity: Decimal,
     /// Average entry price.
     pub avg_cost: Decimal,
-    /// Current market price.
+    /// Current market price. May be approximate if the broker does not provide real-time quotes.
     pub market_price: Decimal,
     /// Unrealized P&L for this position.
     pub unrealized_pnl: Decimal,
 }
 
 /// An immutable git-style commit recording operations and their results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct GitCommit {
     /// Commit hash (8 hex chars).
+    #[builder(into)]
     pub hash: CommitHash,
     /// Parent commit hash (`None` for the first commit).
     pub parent_hash: Option<CommitHash>,
     /// Human-readable commit message.
+    #[builder(into)]
     pub message: String,
     /// Operations that were staged.
     pub operations: Vec<Operation>,
@@ -56,6 +61,7 @@ pub struct GitCommit {
     /// Account state snapshot taken after execution.
     pub state_after: GitState,
     /// ISO 8601 timestamp.
+    #[builder(into)]
     pub timestamp: String,
     /// Optional trading round number.
     pub round: Option<u32>,

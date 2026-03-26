@@ -3959,7 +3959,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "sha2",
  "strum 0.27.2",
  "uuid",
 ]

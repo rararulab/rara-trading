@@ -18,7 +18,9 @@ use rara_domain::trading::{OrderType, Side};
 
 use crate::broker::{AccountInfo, Broker, BrokerError, OrderStatus, Position};
 use crate::health::{BrokerHealth, BrokerHealthInfo, HealthTracker};
-use crate::trading_git::{OperationDispatcher, PendingOrder, StateProvider, TradingGit};
+use crate::trading_git::{
+    OperationDispatcher, PendingOrder, StateProvider, TradingGit, TradingGitError,
+};
 
 /// Unified Trading Account — the main entry point for the trading-as-git workflow.
 ///
@@ -124,29 +126,71 @@ impl UnifiedTradingAccount {
     }
 
     /// Push the pending commit — dispatches operations to the broker.
-    pub async fn push(&self) -> Result<PushResult, BrokerError> {
+    ///
+    /// Uses a split-lock pattern: the git mutex is only held briefly to take
+    /// pending data and record the commit, never during broker I/O.
+    pub async fn push(&self) -> Result<PushResult, TradingGitError> {
+        // Phase 1: take pending (short lock)
+        let (hash, message, operations) = self.git.lock().await.take_pending()?;
+
+        // Phase 2: dispatch without holding lock
         let dispatcher = BrokerDispatcher {
             broker: self.broker.as_ref(),
             health: &self.health,
         };
+        let mut results = Vec::with_capacity(operations.len());
+        for op in &operations {
+            results.push(dispatcher.dispatch(op).await);
+        }
+
+        // Phase 3: snapshot state without holding lock
         let state_provider = BrokerStateProvider {
             broker: self.broker.as_ref(),
             health: &self.health,
         };
-        self.git.lock().await.push(&dispatcher, &state_provider).await
+        let state_after = state_provider
+            .get_state()
+            .await
+            .map_err(|source| TradingGitError::Broker { source })?;
+
+        // Phase 4: record commit (short lock)
+        let push_result =
+            self.git
+                .lock()
+                .await
+                .record_push(hash, message, operations, results, state_after);
+        Ok(push_result)
     }
 
     /// Reject the pending commit without executing any operations.
-    pub async fn reject(&self, reason: &str) -> Result<RejectResult, BrokerError> {
+    ///
+    /// Uses a split-lock pattern: the git mutex is only held briefly to take
+    /// pending data and record the rejection, never during broker I/O.
+    pub async fn reject(&self, reason: &str) -> Result<RejectResult, TradingGitError> {
+        // Phase 1: take pending (short lock)
+        let (hash, message, operations) = self.git.lock().await.take_pending()?;
+
+        // Phase 2: snapshot state without holding lock
         let state_provider = BrokerStateProvider {
             broker: self.broker.as_ref(),
             health: &self.health,
         };
-        self.git.lock().await.reject(reason, &state_provider).await
+        let state_after = state_provider
+            .get_state()
+            .await
+            .map_err(|source| TradingGitError::Broker { source })?;
+
+        // Phase 3: record rejection (short lock)
+        let reject_result =
+            self.git
+                .lock()
+                .await
+                .record_reject(hash, &message, operations, reason, state_after);
+        Ok(reject_result)
     }
 
     /// Sync order statuses from the broker and record as a sync commit.
-    pub async fn sync(&self) -> Result<SyncResult, BrokerError> {
+    pub async fn sync(&self) -> Result<SyncResult, TradingGitError> {
         // Fetch current order statuses for all pending orders
         let pending = self.git.lock().await.pending_order_ids();
 
@@ -167,7 +211,8 @@ impl UnifiedTradingAccount {
         let orders = call_broker_with_health(self.broker.as_ref(), &self.health, |b| {
             Box::pin(async move { b.get_orders(&order_ids).await })
         })
-        .await?;
+        .await
+        .map_err(|source| TradingGitError::Broker { source })?;
 
         let updates: Vec<OrderStatusUpdate> = orders
             .iter()
@@ -373,7 +418,7 @@ impl StateProvider for BrokerStateProvider<'_> {
             .iter()
             .map(|p| GitPosition {
                 contract_id: p.contract_id.clone(),
-                side: p.side.to_string(),
+                side: p.side,
                 quantity: p.quantity,
                 avg_cost: p.avg_entry_price,
                 market_price: p.avg_entry_price, // paper broker doesn't track market price separately
@@ -387,6 +432,7 @@ impl StateProvider for BrokerStateProvider<'_> {
             net_liquidation: account.total_equity,
             total_cash_value: account.available_cash,
             unrealized_pnl: total_unrealized,
+            // TODO: AccountInfo does not carry realized_pnl — always zero until Broker trait is extended
             realized_pnl: Decimal::ZERO,
             positions,
         })

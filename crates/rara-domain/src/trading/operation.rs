@@ -1,5 +1,6 @@
 //! Rich operation types for the UTA trading-as-git workflow.
 
+use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
@@ -98,7 +99,7 @@ pub enum OperationStatus {
 }
 
 /// Result of dispatching a single operation to the broker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct OperationResult {
     /// Which action was attempted.
     pub action: Operation,
