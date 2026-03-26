@@ -86,6 +86,9 @@ struct ResearchRunResponse {
     ok: bool,
     action: &'static str,
     iterations: u32,
+    accepted: u32,
+    rejected: u32,
+    errors: u32,
 }
 
 #[derive(Serialize)]
@@ -664,7 +667,8 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
             iterations,
             contract,
             trace_dir,
-        } => run_research_loop(iterations, &contract, trace_dir).await,
+            quiet,
+        } => run_research_loop(iterations, &contract, trace_dir, quiet).await,
         ResearchAction::List { limit, trace_dir } => run_research_list(limit, trace_dir),
         ResearchAction::Show {
             experiment_id,
@@ -674,18 +678,13 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
     }
 }
 
-/// Run N iterations of the research loop.
-async fn run_research_loop(
-    iterations: u32,
-    contract: &str,
-    trace_dir: Option<String>,
-) -> error::Result<()> {
-    let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
+/// Build the `ResearchLoop` from config, trace path, and DB connection.
+async fn build_research_loop(trace_path: &Path) -> error::Result<ResearchLoop> {
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
     let prompts_dir =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/rara-research/src/prompts");
 
-    let trace = Trace::open(&trace_path).context(TraceSnafu)?;
+    let trace = Trace::open(trace_path).context(TraceSnafu)?;
     let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
     let compiler = StrategyCompiler::builder()
         .template_dir(template_dir)
@@ -729,7 +728,7 @@ async fn run_research_loop(
     let feedback_gen = FeedbackGenerator::new(Arc::clone(&llm), prompt_renderer);
     let hypothesis_gen = HypothesisGenerator::new(llm);
 
-    let research_loop = ResearchLoop::builder()
+    Ok(ResearchLoop::builder()
         .hypothesis_gen(hypothesis_gen)
         .strategy_manager(strategy_manager)
         .backtester(backtester)
@@ -738,18 +737,55 @@ async fn run_research_loop(
         .trace(trace)
         .event_bus(event_bus)
         .generated_dir(paths::strategies_generated_dir())
-        .build();
+        .build())
+}
+
+/// Run N iterations of the research loop.
+async fn run_research_loop(
+    iterations: u32,
+    contract: &str,
+    trace_dir: Option<String>,
+    quiet: bool,
+) -> error::Result<()> {
+    let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
+    let research_loop = build_research_loop(&trace_path).await?;
+
+    let mut accepted_count: u32 = 0;
+    let mut rejected_count: u32 = 0;
+    let mut error_count: u32 = 0;
 
     for i in 1..=iterations {
-        eprintln!("[iteration {i}/{iterations}] running...");
+        if !quiet {
+            eprintln!("[{i}/{iterations}] running...");
+        }
         let result = research_loop.run_iteration(contract).await;
         match result {
             Ok(ir) => {
-                let status = if ir.accepted { "ACCEPTED" } else { "rejected" };
-                eprintln!(
-                    "[iteration {i}/{iterations}] {status} — hypothesis: {}",
-                    ir.hypothesis.text
-                );
+                if ir.accepted {
+                    accepted_count += 1;
+                } else {
+                    rejected_count += 1;
+                }
+
+                if !quiet {
+                    // Truncate hypothesis to first 60 chars for readability
+                    let hyp_summary: String = ir.hypothesis.text.chars().take(60).collect();
+                    eprintln!("[{i}/{iterations}] Hypothesis: {hyp_summary}...");
+
+                    if let Some(ref bt) = ir.experiment.backtest_result {
+                        eprintln!(
+                            "       Backtest: sharpe={:.2} win={:.0}% trades={} pnl={}",
+                            bt.sharpe_ratio,
+                            bt.win_rate * 100.0,
+                            bt.trade_count,
+                            bt.pnl,
+                        );
+                    }
+
+                    let status = if ir.accepted { "ACCEPTED" } else { "rejected" };
+                    eprintln!("       Result: {status}");
+                }
+
                 println!(
                     "{}",
                     serde_json::to_string(&IterationResponse {
@@ -761,10 +797,16 @@ async fn run_research_loop(
                 );
             }
             Err(e) => {
-                eprintln!("[iteration {i}/{iterations}] ERROR: {e}");
+                error_count += 1;
+                if !quiet {
+                    eprintln!("[{i}/{iterations}] ERROR: {e}");
+                }
             }
         }
     }
+
+    eprintln!("=== Research Summary ===");
+    eprintln!("Total: {iterations} | Accepted: {accepted_count} | Rejected: {rejected_count} | Errors: {error_count}");
 
     println!(
         "{}",
@@ -772,6 +814,9 @@ async fn run_research_loop(
             ok: true,
             action: "research.run",
             iterations,
+            accepted: accepted_count,
+            rejected: rejected_count,
+            errors: error_count,
         })
         .expect("ResearchRunResponse must serialize")
     );
