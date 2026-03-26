@@ -159,6 +159,7 @@ impl Default for ServerConfig {
 
 /// Load config from TOML file, falling back to defaults.
 ///
+/// Environment variables take priority over config file values.
 /// The result is cached in a `OnceLock` — subsequent calls return the same
 /// value even after [`save`]. This is fine for CLI usage (one command per
 /// process) but callers using this as a library should be aware of the
@@ -166,7 +167,7 @@ impl Default for ServerConfig {
 pub fn load() -> &'static AppConfig {
     APP_CONFIG.get_or_init(|| {
         let path = crate::paths::config_file();
-        if path.exists() {
+        let mut cfg: AppConfig = if path.exists() {
             let settings = config::Config::builder()
                 .add_source(config::File::from(path.as_ref()))
                 .build()
@@ -174,8 +175,32 @@ pub fn load() -> &'static AppConfig {
             settings.try_deserialize().unwrap_or_default()
         } else {
             AppConfig::default()
-        }
+        };
+        apply_env_overrides(&mut cfg);
+        cfg
     })
+}
+
+/// Apply environment variable overrides to the configuration.
+/// Environment variables take priority over config file values.
+fn apply_env_overrides(cfg: &mut AppConfig) {
+    if let Ok(val) = std::env::var("RARA_DB_URL") {
+        cfg.database.url = val;
+    }
+    if let Ok(val) = std::env::var("RARA_LLM_BACKEND") {
+        cfg.agent.backend = val;
+    }
+    if let Ok(val) = std::env::var("RARA_SERVER_ADDR") {
+        cfg.server.listen_addr = val;
+    }
+    if let Ok(val) = std::env::var("RARA_SERVER_PORT")
+        && let Ok(port) = val.parse()
+    {
+        cfg.server.port = port;
+    }
+    if let Ok(val) = std::env::var("RARA_BROKER") {
+        cfg.trading.broker = val;
+    }
 }
 
 /// Save config to TOML file.

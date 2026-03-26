@@ -60,6 +60,9 @@ pub enum Command {
         #[arg(long, default_value = "0.0.0.0:50051")]
         grpc_addr: String,
     },
+
+    /// Validate configuration and check connectivity.
+    Validate,
 }
 
 /// Data management subcommands.

@@ -10,6 +10,7 @@ use snafu::ResultExt;
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
 use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
+use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
     IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
@@ -56,6 +57,13 @@ struct ConfigInitResponse<'a> {
     ok: bool,
     action: &'static str,
     path: &'a str,
+}
+
+#[derive(Serialize)]
+struct ValidateResponse {
+    ok: bool,
+    action: &'static str,
+    errors: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -339,6 +347,37 @@ async fn run() -> error::Result<()> {
             grpc_addr,
         } => {
             rara_trading::daemon::run(contracts, iterations, grpc_addr).await?;
+        }
+        Command::Validate => {
+            let cfg = app_config::load();
+            let errors = validation::validate_startup(cfg).await;
+            let error_strings: Vec<String> = errors.iter().map(ToString::to_string).collect();
+            if errors.is_empty() {
+                eprintln!("All checks passed");
+                println!(
+                    "{}",
+                    serde_json::to_string(&ValidateResponse {
+                        ok: true,
+                        action: "validate",
+                        errors: vec![],
+                    })
+                    .expect("ValidateResponse must serialize")
+                );
+            } else {
+                for e in &errors {
+                    eprintln!("FAIL: {e}");
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&ValidateResponse {
+                        ok: false,
+                        action: "validate",
+                        errors: error_strings,
+                    })
+                    .expect("ValidateResponse must serialize")
+                );
+                std::process::exit(1);
+            }
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
