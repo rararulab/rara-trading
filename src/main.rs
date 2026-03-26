@@ -1912,7 +1912,181 @@ async fn run_setup_validate() -> error::Result<()> {
     Ok(())
 }
 
-/// Handle account subcommands (stub — implemented in next commit).
-fn run_setup_account(_action: SetupAccountAction) -> error::Result<()> {
-    todo!("setup account CRUD — next commit")
+/// Handle account subcommands.
+#[allow(clippy::too_many_lines)]
+fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
+    use rara_trading_engine::account_config::{
+        AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
+    };
+
+    match action {
+        SetupAccountAction::Add {
+            id,
+            broker,
+            label,
+            contracts,
+            enabled,
+            fill_price,
+            exchange,
+            api_key,
+            secret,
+            passphrase,
+            sandbox,
+        } => {
+            let mut cfg = accounts_config::load_accounts();
+
+            // Idempotent: if account already exists, return created: false
+            if cfg.accounts.iter().any(|a| a.id == id) {
+                println!(
+                    "{}",
+                    serde_json::to_string(&SetupAccountAddResponse {
+                        ok: true,
+                        action: "account.add",
+                        id: &id,
+                        created: false,
+                    })
+                    .expect("SetupAccountAddResponse must serialize")
+                );
+                return Ok(());
+            }
+
+            let broker_config = match broker.as_str() {
+                "paper" => BrokerConfig::Paper(PaperBrokerConfig { fill_price }),
+                "ccxt" => {
+                    let Some(exchange) = exchange else {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&ErrorResponse {
+                                ok: false,
+                                error: "--exchange is required for ccxt broker".to_string(),
+                            })
+                            .expect("ErrorResponse must serialize")
+                        );
+                        std::process::exit(1);
+                    };
+                    BrokerConfig::Ccxt(CcxtBrokerConfig {
+                        exchange,
+                        sandbox,
+                        api_key: api_key.unwrap_or_default(),
+                        secret: secret.unwrap_or_default(),
+                        passphrase,
+                    })
+                }
+                other => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&ErrorResponse {
+                            ok: false,
+                            error: format!(
+                                "unknown broker type \"{other}\", expected \"paper\" or \"ccxt\""
+                            ),
+                        })
+                        .expect("ErrorResponse must serialize")
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            cfg.accounts.push(AccountConfig {
+                id: id.clone(),
+                label,
+                broker_config,
+                enabled,
+                contracts: contracts.unwrap_or_default(),
+            });
+
+            accounts_config::save_accounts(&cfg).context(IoSnafu)?;
+            eprintln!("account \"{id}\" added");
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountAddResponse {
+                    ok: true,
+                    action: "account.add",
+                    id: &id,
+                    created: true,
+                })
+                .expect("SetupAccountAddResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::List => {
+            let mut cfg = accounts_config::load_accounts();
+            for acc in &mut cfg.accounts {
+                acc.mask_secrets();
+            }
+            let accounts: Vec<serde_json::Value> = cfg
+                .accounts
+                .iter()
+                .map(|a| serde_json::to_value(a).expect("AccountConfig must serialize"))
+                .collect();
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountListResponse {
+                    ok: true,
+                    action: "account.list",
+                    accounts,
+                })
+                .expect("SetupAccountListResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::Remove { id, yes } => {
+            if !yes {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: "--yes flag is required to confirm removal".to_string(),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            }
+
+            let mut cfg = accounts_config::load_accounts();
+            let original_len = cfg.accounts.len();
+            cfg.accounts.retain(|a| a.id != id);
+
+            if cfg.accounts.len() == original_len {
+                // ID not found — suggest similar IDs
+                let known: Vec<&str> = cfg.accounts.iter().map(|a| a.id.as_str()).collect();
+                let suggestion = if known.is_empty() {
+                    "no accounts configured".to_string()
+                } else {
+                    format!("known accounts: {}", known.join(", "))
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: format!("account \"{id}\" not found; {suggestion}"),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            }
+
+            accounts_config::save_accounts(&cfg).context(IoSnafu)?;
+            eprintln!("account \"{id}\" removed");
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountRemoveResponse {
+                    ok: true,
+                    action: "account.remove",
+                    id: &id,
+                    removed: true,
+                })
+                .expect("SetupAccountRemoveResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::Test { id: _ } => {
+            todo!("setup account test — will be implemented in Task 6")
+        }
+    }
+
+    Ok(())
 }
