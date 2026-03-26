@@ -119,6 +119,12 @@ pub enum ResearchAction {
 /// Config management subcommands.
 #[derive(Subcommand)]
 pub enum ConfigAction {
+    /// Generate a config.toml template with all sections and comments
+    Init {
+        /// Overwrite existing config file if present
+        #[arg(long)]
+        force: bool,
+    },
     /// Set a config value
     Set {
         /// Config key (e.g. example.setting)
