@@ -72,10 +72,13 @@ pub enum Command {
     },
 
     /// Launch the TUI dashboard.
+    ///
+    /// When `--server` is provided, connects to an existing gRPC server.
+    /// When omitted, automatically spawns a server subprocess (standalone mode).
     Tui {
-        /// gRPC server address to connect to.
-        #[arg(long, default_value = "http://127.0.0.1:50051")]
-        server: String,
+        /// gRPC server address to connect to. Omit for standalone mode.
+        #[arg(long)]
+        server: Option<String>,
     },
 
     /// Feedback loop operations.
