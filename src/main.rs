@@ -1221,6 +1221,7 @@ async fn run_serve(port: u16) -> error::Result<()> {
     Ok(())
 }
 
+
 /// Execute the paper trading subcommand.
 async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {

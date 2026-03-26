@@ -84,6 +84,7 @@ pub enum Command {
         action: FeedbackAction,
     },
 
+
     /// Paper trading operations.
     Paper {
         #[command(subcommand)]
@@ -104,6 +105,7 @@ pub enum FeedbackAction {
         limit: usize,
     },
 }
+
 
 /// Paper trading subcommands.
 #[derive(Subcommand, Debug)]
