@@ -105,12 +105,13 @@ async fn event_loop(
             && key.kind == KeyEventKind::Press
         {
             // During startup, only allow quit
-            if app.phase != AppPhase::Ready {
-                if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
-                    app.quit();
+            match &app.phase {
+                AppPhase::StartingServer { .. } => {
+                    if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                        app.quit();
+                    }
                 }
-            } else {
-                handle_key(app, key.code);
+                AppPhase::Ready => handle_key(app, key.code),
             }
         }
 

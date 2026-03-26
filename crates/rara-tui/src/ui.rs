@@ -236,7 +236,7 @@ fn render_startup(frame: &mut Frame, app: &App) {
         crate::app::AppPhase::StartingServer { message, attempts } => {
             (message.as_str(), *attempts)
         }
-        _ => return,
+        crate::app::AppPhase::Ready => return,
     };
 
     // Spinner frames based on attempt count
