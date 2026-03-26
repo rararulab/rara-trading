@@ -63,6 +63,20 @@ pub enum Command {
 
     /// Validate configuration and check connectivity.
     Validate,
+
+    /// Start the gRPC server.
+    Serve {
+        /// Port to listen on.
+        #[arg(long, default_value = "50051")]
+        port: u16,
+    },
+
+    /// Launch the TUI dashboard.
+    Tui {
+        /// gRPC server address to connect to.
+        #[arg(long, default_value = "http://127.0.0.1:50051")]
+        server: String,
+    },
 }
 
 /// Data management subcommands.

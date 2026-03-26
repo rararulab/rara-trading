@@ -1,0 +1,137 @@
+//! gRPC service implementation for [`RaraService`].
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Instant;
+
+use tokio_stream::Stream;
+use tonic::{Request, Response, Status};
+use tracing::info;
+
+use rara_event_bus::bus::EventBus;
+
+use crate::rara_proto::rara_service_server::RaraService;
+use crate::rara_proto::{Empty, EventFilter, EventMessage, SystemStatus};
+
+/// Holds shared state needed by the gRPC handlers.
+pub struct RaraServiceImpl {
+    /// Application start time, used to compute uptime.
+    start_time: Instant,
+    /// Event bus for subscribing to real-time events.
+    event_bus: Option<Arc<EventBus>>,
+}
+
+impl RaraServiceImpl {
+    /// Create a new service instance with no event bus (scaffold mode).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            start_time: Instant::now(),
+            event_bus: None,
+        }
+    }
+
+    /// Create a new service instance connected to an event bus.
+    #[must_use]
+    pub fn with_event_bus(event_bus: Arc<EventBus>) -> Self {
+        Self {
+            start_time: Instant::now(),
+            event_bus: Some(event_bus),
+        }
+    }
+}
+
+impl Default for RaraServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[tonic::async_trait]
+impl RaraService for RaraServiceImpl {
+    async fn get_system_status(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<SystemStatus>, Status> {
+        let uptime = self.start_time.elapsed();
+        let hours = uptime.as_secs() / 3600;
+        let minutes = (uptime.as_secs() % 3600) / 60;
+        let seconds = uptime.as_secs() % 60;
+
+        let status = SystemStatus {
+            database_connected: false,
+            websocket_connected: false,
+            llm_available: false,
+            event_count: 0,
+            uptime: format!("{hours:02}:{minutes:02}:{seconds:02}"),
+            strategy_count: 0,
+        };
+
+        info!("GetSystemStatus called, uptime={}", status.uptime);
+        Ok(Response::new(status))
+    }
+
+    type StreamEventsStream =
+        Pin<Box<dyn Stream<Item = Result<EventMessage, Status>> + Send + 'static>>;
+
+    async fn stream_events(
+        &self,
+        request: Request<EventFilter>,
+    ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        let filter = request.into_inner();
+        let topic_filter = if filter.topic.is_empty() {
+            None
+        } else {
+            Some(filter.topic)
+        };
+
+        info!("StreamEvents called, topic_filter={topic_filter:?}");
+
+        let event_bus = self.event_bus.clone();
+
+        let stream = async_stream::try_stream! {
+            if let Some(bus) = event_bus {
+                let mut rx = bus.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(seq) => {
+                            if let Ok(Some(event)) = bus.store().get(seq) {
+                                let event_type_str = event.event_type.to_string();
+                                // Apply topic filter if provided
+                                if let Some(ref topic) = topic_filter
+                                    && !event_type_str.starts_with(topic.as_str())
+                                {
+                                    continue;
+                                }
+
+                                let payload_json = event.payload.to_string();
+
+                                yield EventMessage {
+                                    sequence: seq,
+                                    event_type: event_type_str,
+                                    timestamp: event.timestamp.to_string(),
+                                    source: event.source,
+                                    strategy_id: event
+                                        .strategy_id
+                                        .unwrap_or_default(),
+                                    payload_json,
+                                };
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("event stream lagged by {n} messages");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // No event bus — yield nothing, just keep the stream open
+                let () = std::future::pending().await;
+            }
+        };
+
+        Ok(Response::new(Box::pin(stream)))
+    }
+}

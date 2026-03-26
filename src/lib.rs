@@ -6,7 +6,9 @@ pub use rara_feedback as feedback;
 pub use rara_infra as infra;
 pub use rara_research as research;
 pub use rara_sentinel as sentinel;
+pub use rara_server as server;
 pub use rara_trading_engine as trading;
+pub use rara_tui as tui;
 
 pub mod app_config;
 pub mod cli;
