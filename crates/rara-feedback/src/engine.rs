@@ -77,6 +77,7 @@ impl FeedbackBridge {
     /// 3. Evaluate metrics + sentinel context → decision
     /// 4. Publish feedback event based on decision
     /// 5. Return the full strategy report
+    #[tracing::instrument(skip(self, sentinel_event_ids), fields(sentinel_count = sentinel_event_ids.len()))]
     pub fn evaluate_strategy(
         &self,
         strategy_id: &str,

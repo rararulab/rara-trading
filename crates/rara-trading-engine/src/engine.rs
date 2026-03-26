@@ -97,6 +97,7 @@ impl TradingEngine {
     }
 
     /// Execute a trading commit: run guards, push to broker, publish events.
+    #[tracing::instrument(skip(self, commit), fields(strategy_id = %commit.strategy_id, actions = commit.actions.len()))]
     pub async fn execute_commit(&self, commit: TradingCommit) -> Result<Vec<OrderResult>> {
         // Run guard pipeline
         let account = self

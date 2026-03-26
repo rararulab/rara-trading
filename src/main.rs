@@ -15,6 +15,7 @@ use rara_trading::error::{
     IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
+use rara_trading::logging::{self, LoggingConfig};
 use rara_trading::paths;
 use uuid::Uuid;
 
@@ -210,15 +211,12 @@ use rara_trading::research::wasm_strategy_manager::WasmStrategyManager;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
-        )
-        .init();
+    let logging_config = LoggingConfig::default();
+    // Hold the guard so file logs flush on shutdown
+    let _log_guard = logging::init_logging(&logging_config);
 
     if let Err(e) = run().await {
-        eprintln!("Error: {e}");
+        tracing::error!(error = %e, "application error");
         println!(
             "{}",
             serde_json::to_string(&ErrorResponse {
@@ -269,7 +267,7 @@ async fn run() -> error::Result<()> {
                 let mut cfg = app_config::load().clone();
                 set_config_field(&mut cfg, &key, &value)?;
                 app_config::save(&cfg).context(IoSnafu)?;
-                eprintln!("set {key} = {value}");
+                tracing::info!(key = %key, value = %value, "config updated");
                 println!(
                     "{}",
                     serde_json::to_string(&ConfigSetResponse {
@@ -316,7 +314,7 @@ async fn run() -> error::Result<()> {
         },
         Command::Hello { name } => {
             let greeting = format!("Hello, {name}!");
-            eprintln!("{greeting}");
+            tracing::info!(name = %name, "hello command executed");
             println!(
                 "{}",
                 serde_json::to_string(&HelloResponse {
@@ -630,7 +628,7 @@ async fn run_data_fetch(
         .await
         .context(DataFetchSnafu)?;
 
-    eprintln!("fetched {count} candles for {instrument_id} from {source}");
+    tracing::info!(count, instrument_id, source, "data fetch completed");
     println!(
         "{}",
         serde_json::to_string(&DataFetchResponse {
@@ -762,9 +760,7 @@ async fn run_research_loop(
     let mut error_count: u32 = 0;
 
     for i in 1..=iterations {
-        if !quiet {
-            eprintln!("[{i}/{iterations}] running...");
-        }
+        tracing::info!(iteration = i, total = iterations, "research iteration starting");
         let result = research_loop.run_iteration(contract).await;
         match result {
             Ok(ir) => {
@@ -774,8 +770,15 @@ async fn run_research_loop(
                     rejected_count += 1;
                 }
 
+                tracing::info!(
+                    iteration = i,
+                    total = iterations,
+                    accepted = ir.accepted,
+                    hypothesis = %ir.hypothesis.text,
+                    "research iteration completed"
+                );
+
                 if !quiet {
-                    // Truncate hypothesis to first 60 chars for readability
                     let hyp_summary: String = ir.hypothesis.text.chars().take(60).collect();
                     eprintln!("[{i}/{iterations}] Hypothesis: {hyp_summary}...");
 
@@ -805,6 +808,12 @@ async fn run_research_loop(
             }
             Err(e) => {
                 error_count += 1;
+                tracing::error!(
+                    iteration = i,
+                    total = iterations,
+                    error = %e,
+                    "research iteration failed"
+                );
                 if !quiet {
                     eprintln!("[{i}/{iterations}] ERROR: {e}");
                 }

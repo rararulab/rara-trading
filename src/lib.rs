@@ -13,4 +13,5 @@ pub mod cli;
 pub mod daemon;
 pub mod error;
 pub mod http;
+pub mod logging;
 pub mod paths;
