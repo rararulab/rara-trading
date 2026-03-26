@@ -170,6 +170,14 @@ impl FeedbackConsumer {
         self.accumulators.values().map(StrategyAccumulator::to_metrics).collect()
     }
 
+    /// Get current metrics for all tracked strategies, paired with their IDs.
+    pub fn all_metrics_with_ids(&self) -> Vec<(String, StrategyMetrics)> {
+        self.accumulators
+            .iter()
+            .map(|(id, acc)| (id.clone(), acc.to_metrics()))
+            .collect()
+    }
+
     /// Get metrics for a specific strategy, if any fills have been recorded.
     pub fn strategy_metrics(&self, strategy_id: &str) -> Option<StrategyMetrics> {
         self.accumulators.get(strategy_id).map(StrategyAccumulator::to_metrics)
