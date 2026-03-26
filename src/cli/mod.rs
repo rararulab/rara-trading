@@ -116,6 +116,9 @@ pub enum PaperAction {
         #[arg(long)]
         contracts: Option<String>,
     },
+
+    /// Show paper trading status (strategies, positions, `PnL`).
+    Status,
 }
 
 /// Data management subcommands.

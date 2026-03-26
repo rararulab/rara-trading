@@ -227,6 +227,24 @@ struct FeedbackReportResponse {
     evaluations: Vec<EvaluationEntry>,
 }
 
+/// Per-strategy aggregated status from event bus trading events.
+#[derive(Serialize)]
+struct StrategyStatus {
+    strategy: String,
+    trades: usize,
+    filled: usize,
+    rejected: usize,
+}
+
+/// Response payload for `paper status`.
+#[derive(Serialize)]
+struct PaperStatusResponse {
+    ok: bool,
+    action: &'static str,
+    strategies: Vec<StrategyStatus>,
+    total_trades: usize,
+}
+
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
 use rara_trading::research::strategy_executor::StrategyExecutor;
@@ -1226,7 +1244,95 @@ async fn run_serve(port: u16) -> error::Result<()> {
 async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {
         PaperAction::Start { contracts } => run_paper_start(contracts).await,
+        PaperAction::Status => run_paper_status(),
     }
+}
+
+/// Show paper trading status by reading trading events from the event bus.
+///
+/// Aggregates order-submitted, order-filled, and order-rejected events by
+/// strategy and prints a summary table to stderr plus JSON to stdout.
+fn run_paper_status() -> error::Result<()> {
+    use rara_domain::event::EventType;
+    use std::collections::BTreeMap;
+
+    let trace_path = paths::data_dir().join("trace");
+    let event_bus_path = trace_path.join("events");
+
+    if !event_bus_path.exists() {
+        eprintln!("No event bus data found. Has paper trading been run?");
+        println!(
+            "{}",
+            serde_json::to_string(&PaperStatusResponse {
+                ok: true,
+                action: "paper.status",
+                strategies: vec![],
+                total_trades: 0,
+            })
+            .expect("PaperStatusResponse must serialize")
+        );
+        return Ok(());
+    }
+
+    let event_bus = EventBus::open(&event_bus_path).context(EventBusSnafu)?;
+    let events = event_bus.store().read_topic("trading", 0, 100_000).context(EventBusSnafu)?;
+
+    // Aggregate by strategy_id
+    let mut stats: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+    for event in &events {
+        let strategy = event
+            .strategy_id
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_string();
+        let entry = stats.entry(strategy).or_insert((0, 0, 0));
+        match event.event_type {
+            EventType::TradingOrderSubmitted => entry.0 += 1,
+            EventType::TradingOrderFilled => entry.1 += 1,
+            EventType::TradingOrderRejected => entry.2 += 1,
+            _ => {}
+        }
+    }
+
+    let strategies: Vec<StrategyStatus> = stats
+        .into_iter()
+        .map(|(name, (trades, filled, rejected))| StrategyStatus {
+            strategy: name,
+            trades,
+            filled,
+            rejected,
+        })
+        .collect();
+
+    let total_trades: usize = strategies.iter().map(|s| s.trades).sum();
+
+    // Human-readable table to stderr
+    eprintln!(
+        "{:<20} {:>8} {:>8} {:>8}",
+        "Strategy", "Trades", "Filled", "Rejected"
+    );
+    eprintln!("{}", "-".repeat(48));
+    for s in &strategies {
+        eprintln!(
+            "{:<20} {:>8} {:>8} {:>8}",
+            s.strategy, s.trades, s.filled, s.rejected
+        );
+    }
+    if strategies.is_empty() {
+        eprintln!("(no trading events recorded)");
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string(&PaperStatusResponse {
+            ok: true,
+            action: "paper.status",
+            strategies,
+            total_trades,
+        })
+        .expect("PaperStatusResponse must serialize")
+    );
+    Ok(())
 }
 
 /// Load promoted WASM strategies for the given contracts.
