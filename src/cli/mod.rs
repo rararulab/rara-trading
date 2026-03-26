@@ -49,10 +49,9 @@ pub enum Command {
 
     /// Run the full trading loop: research, paper trading, feedback, and gRPC
     /// server as concurrent tasks in a single process.
+    ///
+    /// Accounts and contracts are loaded from `accounts.toml`.
     Run {
-        /// Contracts to trade (comma-separated).
-        #[arg(long, default_value = "BTC-USDT")]
-        contracts: String,
         /// Number of research iterations per cycle.
         #[arg(long, default_value = "10")]
         iterations: u32,
@@ -123,11 +122,9 @@ pub enum FeedbackAction {
 #[derive(Subcommand, Debug)]
 pub enum PaperAction {
     /// Start paper trading with promoted strategies.
-    Start {
-        /// Override contracts to trade (comma-separated, e.g. "BTCUSDT,ETHUSDT").
-        #[arg(long)]
-        contracts: Option<String>,
-    },
+    ///
+    /// Accounts and contracts are loaded from `accounts.toml`.
+    Start,
 
     /// Show paper trading status (strategies, positions, `PnL`).
     Status,

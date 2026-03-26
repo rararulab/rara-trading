@@ -419,11 +419,10 @@ async fn run() -> error::Result<()> {
             run_data(action).await?;
         }
         Command::Run {
-            contracts,
             iterations,
             grpc_addr,
         } => {
-            rara_trading::daemon::run(contracts, iterations, grpc_addr).await?;
+            rara_trading::daemon::run(iterations, grpc_addr).await?;
         }
         Command::Setup { action } => {
             run_setup(action).await?;
@@ -1249,7 +1248,7 @@ async fn run_serve(port: u16) -> error::Result<()> {
 /// Execute the paper trading subcommand.
 async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {
-        PaperAction::Start { contracts } => run_paper_start(contracts).await,
+        PaperAction::Start => run_paper_start().await,
         PaperAction::Status => run_paper_status(),
         PaperAction::Stop => {
             run_paper_stop();
@@ -1427,9 +1426,8 @@ fn load_strategies_for_contracts(
 /// Ctrl+C is received, then gracefully shuts down all tasks and prints a
 /// session summary.
 #[allow(clippy::too_many_lines)]
-async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()> {
+async fn run_paper_start() -> error::Result<()> {
     use futures_util::StreamExt;
-    use rara_trading::trading::brokers::paper::PaperBroker;
     use rara_trading::trading::engine::TradingEngine;
     use rara_trading::trading::guard_pipeline::GuardPipeline;
     use rara_trading::trading::signal_loop::run_signal_loop;
@@ -1437,19 +1435,26 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
     use rara_market_data::stream::binance_ws::BinanceWsClient;
 
     let cfg = app_config::load();
-    // Contracts are now configured per-account in accounts.toml;
-    // the --contracts CLI flag can still override for ad-hoc runs.
-    let contracts: Vec<String> = contracts_override.map_or_else(
-        || {
-            let accts = rara_trading::accounts_config::load_accounts();
-            accts
-                .accounts
-                .into_iter()
-                .flat_map(|a| a.contracts)
-                .collect::<Vec<_>>()
-        },
-        |c| c.split(',').map(|s| s.trim().to_string()).collect(),
-    );
+
+    // Load accounts from config; use AccountManager to create brokers
+    let accounts_cfg = accounts_config::load_accounts();
+    let account_manager = rara_trading_engine::account_manager::AccountManager::from_config(
+        &accounts_cfg.accounts,
+    )
+    .expect("failed to initialize accounts from config");
+
+    if account_manager.size() == 0 {
+        eprintln!("No enabled accounts found in accounts.toml. Run 'rara setup account add' first.");
+        return Ok(());
+    }
+
+    // Collect contracts from all enabled accounts
+    let contracts: Vec<String> = accounts_cfg
+        .accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .flat_map(|a| a.contracts.clone())
+        .collect();
 
     let position_size =
         rust_decimal::Decimal::try_from(cfg.trading.max_position_size).unwrap_or(dec!(1));
@@ -1467,11 +1472,16 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
         contracts.len()
     );
 
-    // Open event bus + build trading engine
+    // Open event bus + build trading engine using the first account's broker
+    // TODO: support multi-account engine routing once TradingEngine supports it
     let trace_path = paths::data_dir().join("trace");
     let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
-    let broker: Box<dyn rara_trading::trading::broker::Broker> =
-        Box::new(PaperBroker::new(dec!(0)));
+    let first_account = accounts_cfg
+        .accounts
+        .iter()
+        .find(|a| a.enabled)
+        .expect("at least one enabled account verified above");
+    let broker = first_account.broker_config.create_broker();
     let guard_pipeline = GuardPipeline::new(vec![]);
     let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
 
