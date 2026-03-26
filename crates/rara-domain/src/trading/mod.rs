@@ -1,5 +1,8 @@
 //! Trading action and commitment types.
 
+pub mod git;
+pub mod operation;
+
 use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

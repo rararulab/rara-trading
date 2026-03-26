@@ -112,6 +112,7 @@ impl Broker for PaperBroker {
             .total_equity(Decimal::new(100_000, 0))
             .available_cash(Decimal::new(100_000, 0))
             .positions(positions)
+            .realized_pnl(Decimal::ZERO)
             .build())
     }
 }

@@ -6,7 +6,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
-use rara_domain::trading::{Side, StagedAction};
+use rara_domain::contract::Contract;
+use rara_domain::trading::{OrderType, Side, StagedAction};
 
 /// Result of submitting an order to a broker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,7 +21,7 @@ pub struct OrderResult {
 }
 
 /// Lifecycle status of an order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
     /// Order accepted and pending execution.
     Submitted,
@@ -78,6 +79,31 @@ pub struct AccountInfo {
     pub available_cash: Decimal,
     /// Currently held positions.
     pub positions: Vec<Position>,
+    /// Realized profit/loss across closed positions.
+    pub realized_pnl: Decimal,
+}
+
+/// A currently open (unfilled) order.
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct OpenOrder {
+    /// Broker-assigned order identifier.
+    #[builder(into)]
+    pub order_id: String,
+    /// Contract this order targets.
+    #[builder(into)]
+    pub contract_id: String,
+    /// Trade direction.
+    pub side: Side,
+    /// Order type.
+    pub order_type: OrderType,
+    /// Total requested quantity.
+    pub quantity: Decimal,
+    /// Limit price (for limit orders).
+    pub limit_price: Option<Decimal>,
+    /// Current order status.
+    pub status: OrderStatus,
+    /// Average fill price so far.
+    pub avg_fill_price: Option<Decimal>,
 }
 
 /// Errors that can occur during broker operations.
@@ -136,4 +162,67 @@ pub trait Broker: Send + Sync {
 
     /// Return account-level information.
     async fn account_info(&self) -> Result<AccountInfo, BrokerError>;
+
+    /// Place a single order. Default: delegates to `push` with one action.
+    async fn place_order(
+        &self,
+        contract: &Contract,
+        side: Side,
+        order_type: OrderType,
+        quantity: Decimal,
+        limit_price: Option<Decimal>,
+    ) -> Result<OrderResult, BrokerError> {
+        let action = StagedAction::builder()
+            .action_type(rara_domain::trading::ActionType::PlaceOrder)
+            .contract_id(contract.id())
+            .side(side)
+            .quantity(quantity)
+            .order_type(order_type)
+            .maybe_limit_price(limit_price)
+            .build();
+        let mut results = self.push(&[action]).await?;
+        results.pop().ok_or_else(|| BrokerError::Exchange {
+            message: "broker returned no results".into(),
+        })
+    }
+
+    /// Cancel an open order.
+    async fn cancel_order(&self, _order_id: &str) -> Result<OrderResult, BrokerError> {
+        Err(BrokerError::UnsupportedAction {
+            message: "cancel_order not supported by this broker".into(),
+        })
+    }
+
+    /// Modify an existing order.
+    async fn modify_order(
+        &self,
+        _order_id: &str,
+        _quantity: Option<Decimal>,
+        _price: Option<Decimal>,
+    ) -> Result<OrderResult, BrokerError> {
+        Err(BrokerError::UnsupportedAction {
+            message: "modify_order not supported by this broker".into(),
+        })
+    }
+
+    /// Close a position.
+    async fn close_position(
+        &self,
+        contract: &Contract,
+        _quantity: Option<Decimal>,
+    ) -> Result<OrderResult, BrokerError> {
+        Err(BrokerError::UnsupportedAction {
+            message: format!(
+                "close_position not supported by this broker for {}",
+                contract.id()
+            ),
+        })
+    }
+
+    /// Query status of specific orders by ID.
+    async fn get_orders(&self, _order_ids: &[String]) -> Result<Vec<OpenOrder>, BrokerError> {
+        Err(BrokerError::UnsupportedAction {
+            message: "get_orders not supported by this broker".into(),
+        })
+    }
 }
