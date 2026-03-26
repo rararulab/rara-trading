@@ -6,4 +6,6 @@ pub mod brokers;
 pub mod engine;
 pub mod guard_pipeline;
 pub mod guards;
+pub mod health;
 pub mod signal_loop;
+pub mod trading_git;

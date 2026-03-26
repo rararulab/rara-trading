@@ -10,7 +10,7 @@ use crate::contract::Contract;
 /// A single trading operation in the UTA stage->commit->push workflow.
 ///
 /// Each variant carries only the data relevant to that action,
-/// mirroring OpenAlice's discriminated-union `Operation` type.
+/// mirroring `OpenAlice`'s discriminated-union `Operation` type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Operation {

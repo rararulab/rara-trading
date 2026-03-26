@@ -17,6 +17,7 @@ bon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 snafu.workspace = true
+strum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 rust_decimal.workspace = true
@@ -24,6 +25,8 @@ uuid.workspace = true
 jiff.workspace = true
 ccxt-rust = { version = "0.1", features = ["rest"] }
 smol_str = "0.3"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile.workspace = true

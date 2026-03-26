@@ -179,7 +179,7 @@ pub trait Broker: Send + Sync {
             .maybe_limit_price(limit_price)
             .build();
         let mut results = self.push(&[action]).await?;
-        results.pop().ok_or(BrokerError::Exchange {
+        results.pop().ok_or_else(|| BrokerError::Exchange {
             message: "broker returned no results".into(),
         })
     }

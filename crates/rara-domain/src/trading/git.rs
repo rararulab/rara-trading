@@ -1,4 +1,4 @@
-//! Pure domain types for the TradingGit commit history.
+//! Pure domain types for the `TradingGit` commit history.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -111,7 +111,7 @@ pub struct RejectResult {
     pub operation_count: usize,
 }
 
-/// Current state of the TradingGit staging area.
+/// Current state of the `TradingGit` staging area.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitStatus {
     /// Currently staged operations.
@@ -156,7 +156,7 @@ pub struct CommitLogEntry {
     pub operations: Vec<OperationSummary>,
 }
 
-/// Serializable export of the full TradingGit state.
+/// Serializable export of the full `TradingGit` state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitExportState {
     /// All commits in chronological order.
