@@ -11,12 +11,12 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction};
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, StrategyAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
-    GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
-    TuiSnafu,
+    GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, RegistrySnafu,
+    TraceSnafu, TuiSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::logging::{self, LoggingConfig};
@@ -447,6 +447,9 @@ async fn run() -> error::Result<()> {
         }
         Command::Paper { action } => {
             run_paper(action).await?;
+        }
+        Command::Strategy { action } => {
+            run_strategy(action).await?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -1613,4 +1616,144 @@ fn list_promoted_from_dir(
     }
 
     Ok(promoted)
+}
+
+// ---------------------------------------------------------------------------
+// Strategy registry commands
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct StrategyListResponse {
+    ok: bool,
+    action: &'static str,
+    strategies: Vec<StrategyListItem>,
+}
+
+#[derive(Serialize)]
+struct StrategyListItem {
+    name: String,
+    version: String,
+    tag: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+struct StrategyFetchResponse {
+    ok: bool,
+    action: &'static str,
+    name: String,
+    version: String,
+    api_version: u32,
+    wasm_path: String,
+}
+
+#[derive(Serialize)]
+struct StrategyInstalledResponse {
+    ok: bool,
+    action: &'static str,
+    strategies: Vec<StrategyInstalledItem>,
+}
+
+#[derive(Serialize)]
+struct StrategyInstalledItem {
+    name: String,
+    version: String,
+    api_version: u32,
+    wasm_path: String,
+}
+
+async fn run_strategy(action: StrategyAction) -> error::Result<()> {
+    match action {
+        StrategyAction::List { repo } => run_strategy_list(&repo).await,
+        StrategyAction::Fetch { name, repo } => run_strategy_fetch(&name, &repo).await,
+        StrategyAction::Installed => run_strategy_installed(),
+    }
+}
+
+async fn run_strategy_list(repo: &str) -> error::Result<()> {
+    let registry = rara_trading::research::strategy_registry::StrategyRegistry::builder()
+        .repo(repo.to_string())
+        .promoted_dir(paths::strategies_promoted_dir())
+        .build();
+
+    let entries = registry.list_available().await.context(RegistrySnafu)?;
+
+    let items: Vec<StrategyListItem> = entries
+        .iter()
+        .map(|e| StrategyListItem {
+            name: e.name.clone(),
+            version: e.version.clone(),
+            tag: e.tag.clone(),
+            size: e.size,
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::to_string(&StrategyListResponse {
+            ok: true,
+            action: "strategy.list",
+            strategies: items,
+        })
+        .expect("StrategyListResponse must serialize")
+    );
+
+    Ok(())
+}
+
+async fn run_strategy_fetch(name: &str, repo: &str) -> error::Result<()> {
+    let promoted_dir = paths::strategies_promoted_dir();
+    std::fs::create_dir_all(&promoted_dir).context(IoSnafu)?;
+
+    let registry = rara_trading::research::strategy_registry::StrategyRegistry::builder()
+        .repo(repo.to_string())
+        .promoted_dir(promoted_dir)
+        .build();
+
+    let fetched = registry.fetch(name).await.context(RegistrySnafu)?;
+
+    println!(
+        "{}",
+        serde_json::to_string(&StrategyFetchResponse {
+            ok: true,
+            action: "strategy.fetch",
+            name: fetched.meta.name,
+            version: format!("v{}", fetched.meta.version),
+            api_version: fetched.meta.api_version,
+            wasm_path: fetched.wasm_path.display().to_string(),
+        })
+        .expect("StrategyFetchResponse must serialize")
+    );
+
+    Ok(())
+}
+
+fn run_strategy_installed() -> error::Result<()> {
+    let registry = rara_trading::research::strategy_registry::StrategyRegistry::builder()
+        .promoted_dir(paths::strategies_promoted_dir())
+        .build();
+
+    let installed = registry.list_installed().context(RegistrySnafu)?;
+
+    let items: Vec<StrategyInstalledItem> = installed
+        .iter()
+        .map(|s| StrategyInstalledItem {
+            name: s.meta.name.clone(),
+            version: format!("v{}", s.meta.version),
+            api_version: s.meta.api_version,
+            wasm_path: s.wasm_path.display().to_string(),
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::to_string(&StrategyInstalledResponse {
+            ok: true,
+            action: "strategy.installed",
+            strategies: items,
+        })
+        .expect("StrategyInstalledResponse must serialize")
+    );
+
+    Ok(())
 }

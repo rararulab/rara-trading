@@ -18,3 +18,4 @@ pub mod wasm_strategy_manager;
 pub mod trace;
 pub mod wasm_executor;
 pub mod barter_strategy;
+pub mod strategy_registry;

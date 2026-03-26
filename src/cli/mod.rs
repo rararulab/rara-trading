@@ -90,6 +90,12 @@ pub enum Command {
         #[command(subcommand)]
         action: PaperAction,
     },
+
+    /// Manage strategies from the rara-strategies registry.
+    Strategy {
+        #[command(subcommand)]
+        action: StrategyAction,
+    },
 }
 
 /// Feedback loop subcommands.
@@ -193,6 +199,29 @@ pub enum ResearchAction {
         #[arg(long)]
         promoted_dir: Option<String>,
     },
+}
+
+/// Strategy registry subcommands.
+#[derive(Subcommand, Debug)]
+pub enum StrategyAction {
+    /// List available strategies from the rara-strategies GitHub registry.
+    List {
+        /// GitHub repository in "owner/repo" format.
+        #[arg(long, default_value = "rararulab/rara-strategies")]
+        repo: String,
+    },
+
+    /// Fetch a strategy from the registry, validate it, and install locally.
+    Fetch {
+        /// Strategy name to fetch (e.g. "btc-momentum").
+        name: String,
+        /// GitHub repository in "owner/repo" format.
+        #[arg(long, default_value = "rararulab/rara-strategies")]
+        repo: String,
+    },
+
+    /// List locally installed strategies fetched from the registry.
+    Installed,
 }
 
 /// Config management subcommands.
