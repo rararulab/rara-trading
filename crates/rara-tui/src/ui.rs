@@ -20,9 +20,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, TAB_NAMES, TAB_RESEARCH, TRADING_TAB};
+use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_NAMES, TAB_RESEARCH, TRADING_TAB};
 use crate::tabs;
 use crate::tabs::research;
+use crate::tabs::strategies as strategies_tab;
 use crate::tabs::trading;
 use crate::theme;
 
@@ -137,29 +138,18 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ConnectionStatus::Connecting => {
             let content = Paragraph::new(format!("Connecting to {}...", app.server_addr))
                 .style(theme::warning())
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(theme::muted().fg(theme::OVERLAY))
-                        .style(ratatui::style::Style::default().bg(theme::BASE)),
-                );
+                .block(content_block());
             frame.render_widget(content, area);
             return;
         }
         ConnectionStatus::Disconnected { retry_count } => {
-            let text = format!(
+            let content = Paragraph::new(format!(
                 "Connection lost. Reconnecting... (attempt {retry_count})\n\
                  Server: {}",
                 app.server_addr
-            );
-            let content = Paragraph::new(text)
-                .style(theme::negative())
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(theme::muted().fg(theme::OVERLAY))
-                        .style(ratatui::style::Style::default().bg(theme::BASE)),
-                );
+            ))
+            .style(theme::negative())
+            .block(content_block());
             frame.render_widget(content, area);
             return;
         }
@@ -173,6 +163,8 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         research::render(frame, &app.research, area);
     } else if app.active_tab == TRADING_TAB {
         trading::render(frame, app, area);
+    } else if app.active_tab == STRATEGIES_TAB {
+        strategies_tab::render(frame, &app.strategies_state, area);
     } else if app.active_tab == EVENTS_TAB_INDEX {
         tabs::events::render(frame, &app.events_state, area);
     } else {
@@ -184,14 +176,17 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "{tab_name}\n\nContent will be implemented in future issues."
         ))
         .style(theme::text())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme::muted().fg(theme::OVERLAY))
-                .style(ratatui::style::Style::default().bg(theme::BASE)),
-        );
+        .block(content_block());
         frame.render_widget(content, area);
     }
+}
+
+/// Shared content area block style.
+fn content_block() -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::muted().fg(theme::OVERLAY))
+        .style(ratatui::style::Style::default().bg(theme::BASE))
 }
 
 /// Render the footer with keyboard shortcuts.
@@ -205,6 +200,9 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
         _ if app.active_tab == TRADING_TAB => {
             "q:Quit  1-5:Tab  j/k:Navigate  Enter:Detail  p:PnL range  ?:Help".to_string()
+        }
+        _ if app.active_tab == STRATEGIES_TAB => {
+            "q:Quit  1-5:Tab  j/k:Navigate  Enter:Detail  d:DAG  ?:Help".to_string()
         }
         _ if app.active_tab == EVENTS_TAB_INDEX => {
             if app.events_state.search_active {

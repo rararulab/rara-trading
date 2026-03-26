@@ -20,7 +20,7 @@ use tracing::{info, warn};
 use rara_server::rara_proto::rara_service_client::RaraServiceClient;
 use rara_server::rara_proto::Empty;
 
-use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, TAB_RESEARCH, TRADING_TAB};
+use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_RESEARCH, TRADING_TAB};
 use crate::error::{IoSnafu, Result};
 use crate::tabs;
 use crate::ui;
@@ -130,6 +130,7 @@ fn handle_key(app: &mut App, key: KeyCode) {
         _ if app.active_tab == TRADING_TAB => handle_trading_key(app, key),
         _ if app.active_tab == EVENTS_TAB_INDEX => handle_events_key(app, key),
         _ if app.active_tab == TAB_RESEARCH => handle_research_key(app, key),
+        _ if app.active_tab == STRATEGIES_TAB => handle_strategies_key(app, key),
         _ => {}
     }
 }
@@ -238,6 +239,17 @@ fn handle_research_key(app: &mut App, key: KeyCode) {
         KeyCode::Char('j') | KeyCode::Down => app.research.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.research.select_prev(),
         KeyCode::Char('p') => app.research.toggle_dag(),
+        _ => {}
+    }
+}
+
+/// Handle key presses specific to the Strategies tab.
+fn handle_strategies_key(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Char('j') | KeyCode::Down => app.strategies_state.select_next(),
+        KeyCode::Char('k') | KeyCode::Up => app.strategies_state.select_previous(),
+        KeyCode::Enter => app.strategies_state.toggle_detail(),
+        KeyCode::Char('d') => app.strategies_state.toggle_dag(),
         _ => {}
     }
 }
