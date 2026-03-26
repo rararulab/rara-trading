@@ -488,6 +488,7 @@ impl Broker for CcxtBroker {
             .total_equity(total_equity)
             .available_cash(available_cash)
             .positions(positions)
+            .realized_pnl(Decimal::ZERO)
             .build())
     }
 }

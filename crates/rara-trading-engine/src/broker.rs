@@ -79,6 +79,8 @@ pub struct AccountInfo {
     pub available_cash: Decimal,
     /// Currently held positions.
     pub positions: Vec<Position>,
+    /// Realized profit/loss across closed positions.
+    pub realized_pnl: Decimal,
 }
 
 /// A currently open (unfilled) order.

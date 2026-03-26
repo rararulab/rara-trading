@@ -60,6 +60,7 @@ mod tests {
             .total_equity(Decimal::new(100_000, 0))
             .available_cash(Decimal::new(50_000, 0))
             .positions(vec![])
+            .realized_pnl(Decimal::ZERO)
             .build()
     }
 

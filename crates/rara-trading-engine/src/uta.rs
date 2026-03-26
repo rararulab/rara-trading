@@ -416,13 +416,25 @@ impl StateProvider for BrokerStateProvider<'_> {
         let positions = account
             .positions
             .iter()
-            .map(|p| GitPosition {
-                contract_id: p.contract_id.clone(),
-                side: p.side,
-                quantity: p.quantity,
-                avg_cost: p.avg_entry_price,
-                market_price: p.avg_entry_price, // paper broker doesn't track market price separately
-                unrealized_pnl: p.unrealized_pnl,
+            .map(|p| {
+                // Derive market_price from unrealized PnL when quantity is non-zero
+                let market_price = if p.quantity.is_zero() {
+                    p.avg_entry_price
+                } else {
+                    match p.side {
+                        Side::Buy => p.avg_entry_price + p.unrealized_pnl / p.quantity,
+                        Side::Sell => p.avg_entry_price - p.unrealized_pnl / p.quantity,
+                    }
+                };
+
+                GitPosition {
+                    contract_id: p.contract_id.clone(),
+                    side: p.side,
+                    quantity: p.quantity,
+                    avg_cost: p.avg_entry_price,
+                    market_price,
+                    unrealized_pnl: p.unrealized_pnl,
+                }
             })
             .collect();
 
@@ -432,8 +444,7 @@ impl StateProvider for BrokerStateProvider<'_> {
             net_liquidation: account.total_equity,
             total_cash_value: account.available_cash,
             unrealized_pnl: total_unrealized,
-            // TODO: AccountInfo does not carry realized_pnl — always zero until Broker trait is extended
-            realized_pnl: Decimal::ZERO,
+            realized_pnl: account.realized_pnl,
             positions,
         })
     }
