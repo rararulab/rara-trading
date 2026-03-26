@@ -52,6 +52,13 @@ struct ConfigListResponse {
 }
 
 #[derive(Serialize)]
+struct ConfigInitResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    path: &'a str,
+}
+
+#[derive(Serialize)]
 struct HelloResponse<'a> {
     ok: bool,
     action: &'static str,
@@ -227,6 +234,34 @@ async fn run() -> error::Result<()> {
 
     match cli.command {
         Command::Config { action } => match action {
+            ConfigAction::Init { force } => {
+                let path = paths::config_file();
+                if path.exists() && !force {
+                    return ConfigSnafu {
+                        message: format!(
+                            "config file already exists at {}. Use --force to overwrite.",
+                            path.display()
+                        ),
+                    }
+                    .fail();
+                }
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).context(IoSnafu)?;
+                }
+                let template = app_config::generate_template();
+                std::fs::write(&path, &template).context(IoSnafu)?;
+                let path_str = path.display().to_string();
+                eprintln!("config template written to {path_str}");
+                println!(
+                    "{}",
+                    serde_json::to_string(&ConfigInitResponse {
+                        ok: true,
+                        action: "config_init",
+                        path: &path_str,
+                    })
+                    .expect("ConfigInitResponse must serialize")
+                );
+            }
             ConfigAction::Set { key, value } => {
                 let mut cfg = app_config::load().clone();
                 set_config_field(&mut cfg, &key, &value)?;
@@ -342,15 +377,63 @@ async fn run() -> error::Result<()> {
 
 /// Set a config field by dotted key path.
 fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) -> error::Result<()> {
+    let parse_err = |key: &str, value: &str| error::AppError::Config {
+        message: format!("invalid value for {key}: {value}"),
+    };
     match key {
+        // agent
         "agent.backend" => cfg.agent.backend = value.to_string(),
         "agent.command" => cfg.agent.command = Some(value.to_string()),
         "agent.idle_timeout_secs" => {
-            cfg.agent.idle_timeout_secs = value.parse().map_err(|_| {
-                error::AppError::Config {
-                    message: format!("invalid integer for {key}: {value}"),
-                }
-            })?;
+            cfg.agent.idle_timeout_secs = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        // database
+        "database.url" => cfg.database.url = value.to_string(),
+        // trading
+        "trading.broker" => cfg.trading.broker = value.to_string(),
+        "trading.max_position_size" => {
+            cfg.trading.max_position_size = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "trading.max_drawdown_pct" => {
+            cfg.trading.max_drawdown_pct = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "trading.max_concurrent_positions" => {
+            cfg.trading.max_concurrent_positions =
+                value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        // research
+        "research.iterations" => {
+            cfg.research.iterations = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "research.max_compile_retries" => {
+            cfg.research.max_compile_retries = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        // feedback
+        "feedback.min_sharpe_for_promotion" => {
+            cfg.feedback.min_sharpe_for_promotion =
+                value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "feedback.min_win_rate" => {
+            cfg.feedback.min_win_rate = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "feedback.min_trades" => {
+            cfg.feedback.min_trades = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "feedback.max_drawdown_for_retirement" => {
+            cfg.feedback.max_drawdown_for_retirement =
+                value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        // sentinel
+        "sentinel.enabled" => {
+            cfg.sentinel.enabled = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        "sentinel.check_interval_secs" => {
+            cfg.sentinel.check_interval_secs = value.parse().map_err(|_| parse_err(key, value))?;
+        }
+        // server
+        "server.listen_addr" => cfg.server.listen_addr = value.to_string(),
+        "server.port" => {
+            cfg.server.port = value.parse().map_err(|_| parse_err(key, value))?;
         }
         _ => return ConfigSnafu { message: format!("unknown config key: {key}") }.fail(),
     }
@@ -360,9 +443,41 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) -> 
 /// Get a config field by dotted key path.
 fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> error::Result<Option<String>> {
     match key {
+        // agent
         "agent.backend" => Ok(Some(cfg.agent.backend.clone())),
         "agent.command" => Ok(cfg.agent.command.clone()),
         "agent.idle_timeout_secs" => Ok(Some(cfg.agent.idle_timeout_secs.to_string())),
+        // database
+        "database.url" => Ok(Some(cfg.database.url.clone())),
+        // trading
+        "trading.broker" => Ok(Some(cfg.trading.broker.clone())),
+        "trading.contracts" => Ok(Some(cfg.trading.contracts.join(","))),
+        "trading.max_position_size" => Ok(Some(cfg.trading.max_position_size.to_string())),
+        "trading.max_drawdown_pct" => Ok(Some(cfg.trading.max_drawdown_pct.to_string())),
+        "trading.max_concurrent_positions" => {
+            Ok(Some(cfg.trading.max_concurrent_positions.to_string()))
+        }
+        // research
+        "research.iterations" => Ok(Some(cfg.research.iterations.to_string())),
+        "research.timeframes" => Ok(Some(cfg.research.timeframes.join(","))),
+        "research.max_compile_retries" => Ok(Some(cfg.research.max_compile_retries.to_string())),
+        // feedback
+        "feedback.min_sharpe_for_promotion" => {
+            Ok(Some(cfg.feedback.min_sharpe_for_promotion.to_string()))
+        }
+        "feedback.min_win_rate" => Ok(Some(cfg.feedback.min_win_rate.to_string())),
+        "feedback.min_trades" => Ok(Some(cfg.feedback.min_trades.to_string())),
+        "feedback.max_drawdown_for_retirement" => {
+            Ok(Some(cfg.feedback.max_drawdown_for_retirement.to_string()))
+        }
+        // sentinel
+        "sentinel.enabled" => Ok(Some(cfg.sentinel.enabled.to_string())),
+        "sentinel.check_interval_secs" => {
+            Ok(Some(cfg.sentinel.check_interval_secs.to_string()))
+        }
+        // server
+        "server.listen_addr" => Ok(Some(cfg.server.listen_addr.clone())),
+        "server.port" => Ok(Some(cfg.server.port.to_string())),
         _ => ConfigSnafu { message: format!("unknown config key: {key}") }.fail(),
     }
 }
@@ -370,9 +485,10 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> error::Result<Opt
 /// Flatten config into key-value pairs for listing.
 fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
     vec![
-        ("agent.backend".to_string(), cfg.agent.backend.clone()),
+        // agent
+        ("agent.backend".into(), cfg.agent.backend.clone()),
         (
-            "agent.command".to_string(),
+            "agent.command".into(),
             cfg.agent
                 .command
                 .as_deref()
@@ -380,9 +496,71 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
                 .to_string(),
         ),
         (
-            "agent.idle_timeout_secs".to_string(),
+            "agent.idle_timeout_secs".into(),
             cfg.agent.idle_timeout_secs.to_string(),
         ),
+        // database
+        ("database.url".into(), cfg.database.url.clone()),
+        // trading
+        ("trading.broker".into(), cfg.trading.broker.clone()),
+        (
+            "trading.contracts".into(),
+            cfg.trading.contracts.join(","),
+        ),
+        (
+            "trading.max_position_size".into(),
+            cfg.trading.max_position_size.to_string(),
+        ),
+        (
+            "trading.max_drawdown_pct".into(),
+            cfg.trading.max_drawdown_pct.to_string(),
+        ),
+        (
+            "trading.max_concurrent_positions".into(),
+            cfg.trading.max_concurrent_positions.to_string(),
+        ),
+        // research
+        (
+            "research.iterations".into(),
+            cfg.research.iterations.to_string(),
+        ),
+        (
+            "research.timeframes".into(),
+            cfg.research.timeframes.join(","),
+        ),
+        (
+            "research.max_compile_retries".into(),
+            cfg.research.max_compile_retries.to_string(),
+        ),
+        // feedback
+        (
+            "feedback.min_sharpe_for_promotion".into(),
+            cfg.feedback.min_sharpe_for_promotion.to_string(),
+        ),
+        (
+            "feedback.min_win_rate".into(),
+            cfg.feedback.min_win_rate.to_string(),
+        ),
+        (
+            "feedback.min_trades".into(),
+            cfg.feedback.min_trades.to_string(),
+        ),
+        (
+            "feedback.max_drawdown_for_retirement".into(),
+            cfg.feedback.max_drawdown_for_retirement.to_string(),
+        ),
+        // sentinel
+        (
+            "sentinel.enabled".into(),
+            cfg.sentinel.enabled.to_string(),
+        ),
+        (
+            "sentinel.check_interval_secs".into(),
+            cfg.sentinel.check_interval_secs.to_string(),
+        ),
+        // server
+        ("server.listen_addr".into(), cfg.server.listen_addr.clone()),
+        ("server.port".into(), cfg.server.port.to_string()),
     ]
 }
 
