@@ -374,6 +374,20 @@ impl StrategiesState {
     }
 }
 
+/// Phase of the TUI application lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppPhase {
+    /// Waiting for the gRPC server to become ready.
+    StartingServer {
+        /// Status message to display.
+        message: String,
+        /// Number of connection attempts so far.
+        attempts: u32,
+    },
+    /// Server is ready; show the main dashboard.
+    Ready,
+}
+
 /// Root application state driving the TUI.
 pub struct App {
     /// Index of the currently active tab.
@@ -404,6 +418,8 @@ pub struct App {
     pub trading: TradingState,
     /// State for the Strategies tab.
     pub strategies_state: StrategiesState,
+    /// Current lifecycle phase of the TUI application.
+    pub phase: AppPhase,
 }
 
 impl App {
@@ -427,6 +443,10 @@ impl App {
             events_state: EventsState::default(),
             trading: TradingState::default(),
             strategies_state: StrategiesState::from_installed(promoted_dir),
+            phase: AppPhase::StartingServer {
+                message: "Starting gRPC server...".to_string(),
+                attempts: 0,
+            },
         }
     }
 

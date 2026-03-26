@@ -18,4 +18,5 @@ pub mod error;
 pub mod http;
 pub mod logging;
 pub mod paths;
+pub mod setup_wizard;
 pub mod validation;

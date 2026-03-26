@@ -424,8 +424,15 @@ async fn run() -> error::Result<()> {
         } => {
             rara_trading::daemon::run(iterations, grpc_addr).await?;
         }
-        Command::Setup { action } => {
-            run_setup(action).await?;
+        Command::Setup { interactive, action } => {
+            if interactive {
+                rara_trading::setup_wizard::run(run_setup_init, run_setup_validate).await?;
+            } else if let Some(action) = action {
+                run_setup(action).await?;
+            } else {
+                eprintln!("usage: rara setup <init|account|validate> or rara setup -i");
+                std::process::exit(1);
+            }
         }
         Command::Serve { port } => {
             run_serve(port).await?;

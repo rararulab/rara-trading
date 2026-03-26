@@ -27,8 +27,20 @@ use crate::tabs::strategies as strategies_tab;
 use crate::tabs::trading;
 use crate::theme;
 
+/// Braille spinner animation frames for the startup screen.
+const SPINNER_FRAMES: &[&str] = &[
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}",
+    "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
+];
+
 /// Render the full dashboard to the terminal frame.
 pub fn render(frame: &mut Frame, app: &App) {
+    if !matches!(app.phase, crate::app::AppPhase::Ready) {
+        render_startup(frame, app);
+        return;
+    }
+
     let area = frame.area();
 
     // Global layout: status bar (1) + tabs (1) + content (fill) + footer (1)
@@ -217,4 +229,48 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let footer = Paragraph::new(footer_text).style(theme::footer());
     frame.render_widget(footer, area);
+}
+
+/// Render the server startup screen with a spinner and status message.
+fn render_startup(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+
+    // Fill background
+    let bg = Block::default().style(ratatui::style::Style::default().bg(theme::BASE));
+    frame.render_widget(bg, area);
+
+    let (message, attempts) = match &app.phase {
+        crate::app::AppPhase::StartingServer { message, attempts } => {
+            (message.as_str(), *attempts)
+        }
+        crate::app::AppPhase::Ready => return,
+    };
+
+    let spinner = SPINNER_FRAMES[(attempts as usize) % SPINNER_FRAMES.len()];
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  rara-trading", theme::emphasis()),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(format!("  {spinner} "), theme::warning()),
+            Span::styled(message, theme::text()),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                format!("  Connection attempts: {attempts}"),
+                theme::muted(),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  q: Quit", theme::muted()),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, area);
 }

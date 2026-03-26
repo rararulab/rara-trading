@@ -21,7 +21,7 @@ use tracing::{info, warn};
 use rara_server::rara_proto::rara_service_client::RaraServiceClient;
 use rara_server::rara_proto::Empty;
 
-use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_RESEARCH, TRADING_TAB};
+use crate::app::{App, AppPhase, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_RESEARCH, TRADING_TAB};
 use crate::error::{IoSnafu, Result};
 use crate::server_process::ServerProcess;
 use crate::tabs;
@@ -32,6 +32,9 @@ const TICK_RATE: Duration = Duration::from_millis(1000);
 
 /// Duration for crossterm event polling.
 const POLL_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Maximum connection attempts before giving up during startup.
+const MAX_STARTUP_ATTEMPTS: u32 = 60;
 
 /// Run the TUI event loop.
 ///
@@ -65,11 +68,7 @@ pub async fn run(server_addr: Option<&str>, promoted_dir: PathBuf) -> Result<()>
 
     let mut app = App::new(effective_addr.clone(), promoted_dir);
 
-    // Try initial connection
-    let mut client = try_connect(&effective_addr).await;
-    if client.is_some() {
-        app.connection_status = ConnectionStatus::Connected;
-    }
+    let mut client: Option<RaraServiceClient<Channel>> = None;
 
     let mut last_poll = std::time::Instant::now();
 
@@ -89,6 +88,10 @@ pub async fn run(server_addr: Option<&str>, promoted_dir: PathBuf) -> Result<()>
 }
 
 /// Core event loop: poll input, tick status, render.
+///
+/// During the startup phase, only quit keys are accepted and the loop
+/// periodically attempts to connect to the gRPC server with a health check.
+/// Once the server is confirmed ready, transitions to the normal dashboard phase.
 async fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -104,10 +107,71 @@ async fn event_loop(
             && let Event::Key(key) = event::read().context(IoSnafu)?
             && key.kind == KeyEventKind::Press
         {
-            handle_key(app, key.code);
+            // During startup, only allow quit
+            match &app.phase {
+                AppPhase::StartingServer { .. } => {
+                    if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                        app.quit();
+                    }
+                }
+                AppPhase::Ready => handle_key(app, key.code),
+            }
         }
 
-        // Periodic status poll
+        // Startup phase: try to connect to gRPC server
+        if let AppPhase::StartingServer { attempts, .. } = &app.phase {
+            let attempts = *attempts;
+
+            // Give up after MAX_STARTUP_ATTEMPTS (~30s at 500ms intervals)
+            if attempts >= MAX_STARTUP_ATTEMPTS {
+                warn!("gRPC server did not become ready after {attempts} attempts, giving up");
+                app.phase = AppPhase::StartingServer {
+                    message: format!(
+                        "Server failed to start after {MAX_STARTUP_ATTEMPTS} attempts. Press q to quit."
+                    ),
+                    attempts,
+                };
+                // Render one final frame, then just handle quit keys
+                terminal.draw(|frame| ui::render(frame, app)).context(IoSnafu)?;
+                loop {
+                    if event::poll(POLL_TIMEOUT).context(IoSnafu)?
+                        && let Event::Key(key) = event::read().context(IoSnafu)?
+                        && key.kind == KeyEventKind::Press
+                        && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                    {
+                        app.quit();
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            if last_poll.elapsed() >= Duration::from_millis(500) {
+                *last_poll = std::time::Instant::now();
+                if let Some(mut c) = try_connect(&app.server_addr).await {
+                    // Verify server is actually responding with a health check
+                    if c.get_system_status(Empty {}).await.is_ok() {
+                        info!("gRPC server is ready");
+                        app.connection_status = ConnectionStatus::Connected;
+                        app.phase = AppPhase::Ready;
+                        *client = Some(c);
+                    } else {
+                        app.phase = AppPhase::StartingServer {
+                            message: "Server connected, waiting for ready...".to_string(),
+                            attempts: attempts + 1,
+                        };
+                    }
+                } else {
+                    app.phase = AppPhase::StartingServer {
+                        message: "Connecting to gRPC server...".to_string(),
+                        attempts: attempts + 1,
+                    };
+                }
+            }
+            continue;
+        }
+
+        // Normal phase: periodic status poll
         if last_poll.elapsed() >= TICK_RATE {
             *last_poll = std::time::Instant::now();
             poll_status(app, client).await?;
