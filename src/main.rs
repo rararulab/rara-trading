@@ -11,7 +11,8 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, StrategyAction};
+use rara_trading::accounts_config;
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, SetupAction, SetupAccountAction, StrategyAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
@@ -57,17 +58,50 @@ struct ConfigListResponse {
 }
 
 #[derive(Serialize)]
-struct ConfigInitResponse<'a> {
+struct SetupInitResponse {
     ok: bool,
     action: &'static str,
-    path: &'a str,
+    created: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Serialize)]
-struct ValidateResponse {
+struct ValidateCheck {
+    name: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SetupValidateResponse {
     ok: bool,
     action: &'static str,
-    errors: Vec<String>,
+    checks: Vec<ValidateCheck>,
+}
+
+#[derive(Serialize)]
+struct SetupAccountAddResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    created: bool,
+}
+
+#[derive(Serialize)]
+struct SetupAccountListResponse {
+    ok: bool,
+    action: &'static str,
+    accounts: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct SetupAccountRemoveResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    removed: bool,
 }
 
 #[derive(Serialize)]
@@ -302,34 +336,6 @@ async fn run() -> error::Result<()> {
 
     match cli.command {
         Command::Config { action } => match action {
-            ConfigAction::Init { force } => {
-                let path = paths::config_file();
-                if path.exists() && !force {
-                    return ConfigSnafu {
-                        message: format!(
-                            "config file already exists at {}. Use --force to overwrite.",
-                            path.display()
-                        ),
-                    }
-                    .fail();
-                }
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).context(IoSnafu)?;
-                }
-                let template = app_config::generate_template();
-                std::fs::write(&path, &template).context(IoSnafu)?;
-                let path_str = path.display().to_string();
-                eprintln!("config template written to {path_str}");
-                println!(
-                    "{}",
-                    serde_json::to_string(&ConfigInitResponse {
-                        ok: true,
-                        action: "config_init",
-                        path: &path_str,
-                    })
-                    .expect("ConfigInitResponse must serialize")
-                );
-            }
             ConfigAction::Set { key, value } => {
                 let mut cfg = app_config::load().clone();
                 set_config_field(&mut cfg, &key, &value)?;
@@ -405,36 +411,8 @@ async fn run() -> error::Result<()> {
         } => {
             rara_trading::daemon::run(contracts, iterations, grpc_addr).await?;
         }
-        Command::Validate => {
-            let cfg = app_config::load();
-            let errors = validation::validate_startup(cfg).await;
-            let error_strings: Vec<String> = errors.iter().map(ToString::to_string).collect();
-            if errors.is_empty() {
-                eprintln!("All checks passed");
-                println!(
-                    "{}",
-                    serde_json::to_string(&ValidateResponse {
-                        ok: true,
-                        action: "validate",
-                        errors: vec![],
-                    })
-                    .expect("ValidateResponse must serialize")
-                );
-            } else {
-                for e in &errors {
-                    eprintln!("FAIL: {e}");
-                }
-                println!(
-                    "{}",
-                    serde_json::to_string(&ValidateResponse {
-                        ok: false,
-                        action: "validate",
-                        errors: error_strings,
-                    })
-                    .expect("ValidateResponse must serialize")
-                );
-                std::process::exit(1);
-            }
+        Command::Setup { action } => {
+            run_setup(action).await?;
         }
         Command::Serve { port } => {
             run_serve(port).await?;
@@ -1759,4 +1737,182 @@ fn run_strategy_installed() -> error::Result<()> {
     );
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Setup command handlers
+// ---------------------------------------------------------------------------
+
+async fn run_setup(action: SetupAction) -> error::Result<()> {
+    match action {
+        SetupAction::Init { force } => run_setup_init(force)?,
+        SetupAction::Validate => run_setup_validate().await?,
+        SetupAction::Account { action } => run_setup_account(*action)?,
+    }
+    Ok(())
+}
+
+/// Generate config.toml and accounts.toml templates.
+fn run_setup_init(force: bool) -> error::Result<()> {
+    let config_path = paths::config_file();
+    let accounts_path = paths::accounts_file();
+
+    let mut created = Vec::new();
+
+    // Ensure parent directories exist
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).context(IoSnafu)?;
+    }
+    if let Some(parent) = accounts_path.parent() {
+        std::fs::create_dir_all(parent).context(IoSnafu)?;
+    }
+
+    let config_exists = config_path.exists();
+    let accounts_exists = accounts_path.exists();
+
+    if !config_exists || force {
+        let template = app_config::generate_template();
+        std::fs::write(&config_path, &template).context(IoSnafu)?;
+        eprintln!("wrote {}", config_path.display());
+        created.push("config.toml".to_string());
+    }
+
+    if !accounts_exists || force {
+        let template = accounts_config::generate_accounts_template();
+        std::fs::write(&accounts_path, &template).context(IoSnafu)?;
+        eprintln!("wrote {}", accounts_path.display());
+        created.push("accounts.toml".to_string());
+    }
+
+    let reason = if created.is_empty() {
+        Some("files already exist".to_string())
+    } else {
+        None
+    };
+
+    println!(
+        "{}",
+        serde_json::to_string(&SetupInitResponse {
+            ok: true,
+            action: "init",
+            created,
+            reason,
+        })
+        .expect("SetupInitResponse must serialize")
+    );
+
+    Ok(())
+}
+
+/// Validate all configuration files and connectivity.
+async fn run_setup_validate() -> error::Result<()> {
+    let mut checks = Vec::new();
+    let mut has_errors = false;
+
+    // Check config.toml exists
+    let config_path = paths::config_file();
+    let config_exists = config_path.exists();
+    checks.push(ValidateCheck {
+        name: "config.toml".to_string(),
+        ok: config_exists,
+        detail: if config_exists {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("not found at {}", config_path.display()))
+        },
+    });
+
+    // Check accounts.toml exists
+    let accounts_path = paths::accounts_file();
+    let accounts_exists = accounts_path.exists();
+    checks.push(ValidateCheck {
+        name: "accounts.toml".to_string(),
+        ok: accounts_exists,
+        detail: if accounts_exists {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("not found at {}", accounts_path.display()))
+        },
+    });
+
+    // Check for duplicate account IDs
+    let accounts_cfg = accounts_config::load_accounts();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+    for acc in &accounts_cfg.accounts {
+        if !seen_ids.insert(&acc.id) {
+            duplicates.push(acc.id.clone());
+        }
+    }
+    let no_dupes = duplicates.is_empty();
+    checks.push(ValidateCheck {
+        name: "unique_account_ids".to_string(),
+        ok: no_dupes,
+        detail: if no_dupes {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("duplicate IDs: {}", duplicates.join(", ")))
+        },
+    });
+
+    // Count enabled accounts
+    let enabled_count = accounts_cfg.accounts.iter().filter(|a| a.enabled).count();
+    checks.push(ValidateCheck {
+        name: "enabled_accounts".to_string(),
+        ok: true,
+        detail: Some(format!("{enabled_count} account(s) enabled")),
+    });
+
+    // Run startup validation (database + LLM connectivity)
+    if config_exists {
+        let cfg = app_config::load();
+        let startup_errors = validation::validate_startup(cfg).await;
+        for e in &startup_errors {
+            has_errors = true;
+            checks.push(ValidateCheck {
+                name: "startup".to_string(),
+                ok: false,
+                detail: Some(e.to_string()),
+            });
+        }
+        if startup_errors.is_empty() {
+            checks.push(ValidateCheck {
+                name: "startup".to_string(),
+                ok: true,
+                detail: None,
+            });
+        }
+    }
+
+    for check in &checks {
+        if check.ok {
+            eprintln!("OK: {}", check.name);
+        } else {
+            eprintln!("FAIL: {} — {}", check.name, check.detail.as_deref().unwrap_or(""));
+        }
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string(&SetupValidateResponse {
+            ok: !has_errors,
+            action: "validate",
+            checks,
+        })
+        .expect("SetupValidateResponse must serialize")
+    );
+
+    if has_errors {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Handle account subcommands (stub — implemented in next commit).
+fn run_setup_account(_action: SetupAccountAction) -> error::Result<()> {
+    todo!("setup account CRUD — next commit")
 }
