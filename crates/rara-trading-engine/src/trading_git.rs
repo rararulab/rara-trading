@@ -179,8 +179,17 @@ impl TradingGit {
         updates: Vec<OrderStatusUpdate>,
         state_provider: &dyn StateProvider,
     ) -> Result<SyncResult> {
+        let state_after = state_provider.get_state().await.context(BrokerSnafu)?;
+        Ok(self.record_sync(updates, state_after))
+    }
+
+    /// Record a sync commit with pre-fetched state (split-lock friendly).
+    pub fn record_sync(
+        &mut self,
+        updates: Vec<OrderStatusUpdate>,
+        state_after: GitState,
+    ) -> SyncResult {
         let updated_count = updates.len();
-        let sync_ops = vec![Operation::SyncOrders];
         let message = format!("sync: {updated_count} order status update(s)");
         let hash = generate_commit_hash(&message, &updates);
 
@@ -194,13 +203,11 @@ impl TradingGit {
             error: None,
         }];
 
-        let state_after = state_provider.get_state().await.context(BrokerSnafu)?;
-
         let commit = GitCommit {
             hash: hash.clone(),
             parent_hash: self.head.clone(),
-            message: message.clone(),
-            operations: sync_ops,
+            message,
+            operations: vec![Operation::SyncOrders],
             results,
             state_after,
             timestamp: jiff::Timestamp::now().to_string(),
@@ -210,11 +217,11 @@ impl TradingGit {
         self.head = Some(hash.clone());
         self.commits.push(commit);
 
-        Ok(SyncResult {
+        SyncResult {
             hash,
             updated_count,
             updates,
-        })
+        }
     }
 
     /// Take the pending commit data (hash, message, operations) from staging.

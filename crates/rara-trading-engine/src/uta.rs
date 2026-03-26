@@ -190,61 +190,62 @@ impl UnifiedTradingAccount {
     }
 
     /// Sync order statuses from the broker and record as a sync commit.
+    ///
+    /// Uses a split-lock pattern: the git mutex is only held briefly to read
+    /// pending orders and record the sync commit, never during broker I/O.
     pub async fn sync(&self) -> Result<SyncResult, TradingGitError> {
-        // Fetch current order statuses for all pending orders
+        // Phase 1: read pending orders (short lock)
         let pending = self.git.lock().await.pending_order_ids();
 
-        if pending.is_empty() {
-            let state_provider = BrokerStateProvider {
-                broker: self.broker.as_ref(),
-                health: &self.health,
-            };
-            return self
-                .git
-                .lock()
-                .await
-                .sync(Vec::new(), &state_provider)
-                .await;
-        }
-
-        let order_ids: Vec<String> = pending.iter().map(|p| p.order_id.clone()).collect();
-        let orders = call_broker_with_health(self.broker.as_ref(), &self.health, |b| {
-            Box::pin(async move { b.get_orders(&order_ids).await })
-        })
-        .await
-        .map_err(|source| TradingGitError::Broker { source })?;
-
-        let updates: Vec<OrderStatusUpdate> = orders
-            .iter()
-            .filter_map(|o| {
-                let symbol = pending
-                    .iter()
-                    .find(|p| p.order_id == o.order_id)
-                    .map_or_else(|| "unknown".to_string(), |p| p.symbol.clone());
-
-                let current_status = match o.status {
-                    OrderStatus::Filled => OperationStatus::Filled,
-                    OrderStatus::Cancelled => OperationStatus::Cancelled,
-                    OrderStatus::Rejected => OperationStatus::Rejected,
-                    OrderStatus::Submitted => return None, // no change
-                };
-
-                Some(OrderStatusUpdate {
-                    order_id: o.order_id.clone(),
-                    symbol,
-                    previous_status: OperationStatus::Submitted,
-                    current_status,
-                    filled_price: o.avg_fill_price,
-                    filled_qty: Some(o.quantity),
-                })
+        // Phase 2: fetch order statuses + state snapshot without holding lock
+        let updates = if pending.is_empty() {
+            Vec::new()
+        } else {
+            let order_ids: Vec<String> = pending.iter().map(|p| p.order_id.clone()).collect();
+            let orders = call_broker_with_health(self.broker.as_ref(), &self.health, |b| {
+                Box::pin(async move { b.get_orders(&order_ids).await })
             })
-            .collect();
+            .await
+            .map_err(|source| TradingGitError::Broker { source })?;
+
+            orders
+                .iter()
+                .filter_map(|o| {
+                    let symbol = pending
+                        .iter()
+                        .find(|p| p.order_id == o.order_id)
+                        .map_or_else(|| "unknown".to_string(), |p| p.symbol.clone());
+
+                    let current_status = match o.status {
+                        OrderStatus::Filled => OperationStatus::Filled,
+                        OrderStatus::Cancelled => OperationStatus::Cancelled,
+                        OrderStatus::Rejected => OperationStatus::Rejected,
+                        OrderStatus::Submitted => return None,
+                    };
+
+                    Some(OrderStatusUpdate {
+                        order_id: o.order_id.clone(),
+                        symbol,
+                        previous_status: OperationStatus::Submitted,
+                        current_status,
+                        filled_price: o.avg_fill_price,
+                        filled_qty: Some(o.quantity),
+                    })
+                })
+                .collect()
+        };
 
         let state_provider = BrokerStateProvider {
             broker: self.broker.as_ref(),
             health: &self.health,
         };
-        self.git.lock().await.sync(updates, &state_provider).await
+        let state_after = state_provider
+            .get_state()
+            .await
+            .map_err(|source| TradingGitError::Broker { source })?;
+
+        // Phase 3: record sync commit (short lock)
+        Ok(self.git.lock().await.record_sync(updates, state_after))
     }
 
     // ── Queries ────────────────────────────────────────────────────────
