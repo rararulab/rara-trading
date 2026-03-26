@@ -21,7 +21,7 @@ pub struct OrderResult {
 }
 
 /// Lifecycle status of an order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
     /// Order accepted and pending execution.
     Submitted,
