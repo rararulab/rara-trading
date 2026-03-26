@@ -1,5 +1,6 @@
 //! Trading engine module — broker abstraction, guards, and orchestration.
 
+pub mod account_manager;
 pub mod binding;
 pub mod broker;
 pub mod brokers;
