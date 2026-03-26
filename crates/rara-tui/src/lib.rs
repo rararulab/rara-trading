@@ -6,5 +6,6 @@
 pub mod app;
 pub mod error;
 pub mod event_loop;
+pub mod tabs;
 pub mod theme;
 pub mod ui;
