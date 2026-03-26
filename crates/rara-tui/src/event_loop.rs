@@ -20,7 +20,7 @@ use tracing::{info, warn};
 use rara_server::rara_proto::rara_service_client::RaraServiceClient;
 use rara_server::rara_proto::Empty;
 
-use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, TAB_RESEARCH};
+use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, TAB_RESEARCH, TRADING_TAB};
 use crate::error::{IoSnafu, Result};
 use crate::tabs;
 use crate::ui;
@@ -104,6 +104,16 @@ fn handle_key(app: &mut App, key: KeyCode) {
         return;
     }
 
+    // When order detail overlay is shown, Esc/Enter closes it
+    if app.active_tab == TRADING_TAB && app.trading.show_order_detail {
+        match key {
+            KeyCode::Esc | KeyCode::Enter => app.trading.show_order_detail = false,
+            KeyCode::Char('q') => app.quit(),
+            _ => {}
+        }
+        return;
+    }
+
     // When search is active on the events tab, capture all input for search
     if app.active_tab == EVENTS_TAB_INDEX && app.events_state.search_active {
         handle_events_search_key(app, key);
@@ -117,8 +127,20 @@ fn handle_key(app: &mut App, key: KeyCode) {
         KeyCode::Char('3') => app.select_tab(2),
         KeyCode::Char('4') => app.select_tab(3),
         KeyCode::Char('5') => app.select_tab(4),
+        _ if app.active_tab == TRADING_TAB => handle_trading_key(app, key),
         _ if app.active_tab == EVENTS_TAB_INDEX => handle_events_key(app, key),
         _ if app.active_tab == TAB_RESEARCH => handle_research_key(app, key),
+        _ => {}
+    }
+}
+
+/// Handle key presses specific to the Trading tab.
+fn handle_trading_key(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Char('j') | KeyCode::Down => app.trading.select_next_order(),
+        KeyCode::Char('k') | KeyCode::Up => app.trading.select_prev_order(),
+        KeyCode::Enter => app.trading.toggle_order_detail(),
+        KeyCode::Char('p') => app.trading.cycle_pnl_range(),
         _ => {}
     }
 }

@@ -1,6 +1,7 @@
 //! Application state for the TUI dashboard.
 
 use rara_server::rara_proto::SystemStatus;
+use strum::{Display, EnumString};
 
 use crate::tabs::research::ResearchState;
 
@@ -15,23 +16,6 @@ pub struct StrategyStatus {
     pub pnl: f64,
     /// Annualized Sharpe ratio.
     pub sharpe: f64,
-}
-
-/// Snapshot of an open position.
-#[derive(Debug, Clone)]
-pub struct PositionInfo {
-    /// Trading pair symbol (e.g. "BTCUSDT").
-    pub symbol: String,
-    /// Position direction: "Long" or "Short".
-    pub side: String,
-    /// Position size.
-    pub quantity: f64,
-    /// Average entry price.
-    pub entry_price: f64,
-    /// Latest market price.
-    pub current_price: f64,
-    /// Unrealized profit-and-loss.
-    pub pnl: f64,
 }
 
 /// A single event for the recent-events feed.
@@ -151,6 +135,160 @@ impl Default for EventsState {
 /// Index of the Research tab.
 pub const TAB_RESEARCH: usize = 1;
 
+/// Index of the Trading tab.
+pub const TRADING_TAB: usize = 2;
+
+/// Account-level summary displayed in the trading tab header.
+#[derive(Debug, Clone)]
+pub struct AccountState {
+    /// Total portfolio equity.
+    pub equity: f64,
+    /// Available cash balance.
+    pub cash: f64,
+    /// Unrealized profit/loss across all open positions.
+    pub unrealized_pnl: f64,
+    /// Portfolio change percentage for the current day.
+    pub day_change_pct: f64,
+}
+
+impl Default for AccountState {
+    fn default() -> Self {
+        Self {
+            equity: 0.0,
+            cash: 0.0,
+            unrealized_pnl: 0.0,
+            day_change_pct: 0.0,
+        }
+    }
+}
+
+/// A single open position in the portfolio.
+#[derive(Debug, Clone)]
+pub struct PositionInfo {
+    /// Trading instrument symbol (e.g. "BTCUSDT").
+    pub symbol: String,
+    /// Position direction ("Buy" or "Sell").
+    pub side: String,
+    /// Number of units held.
+    pub quantity: f64,
+    /// Average entry price.
+    pub entry_price: f64,
+    /// Current market price.
+    pub current_price: f64,
+    /// Unrealized profit/loss for this position.
+    pub pnl: f64,
+    /// Name of the strategy that opened this position.
+    pub strategy: String,
+}
+
+/// A single order entry in the order log.
+#[derive(Debug, Clone)]
+pub struct OrderEntry {
+    /// Timestamp when the order was placed (HH:MM:SS format).
+    pub time: String,
+    /// Trading instrument symbol.
+    pub symbol: String,
+    /// Order direction ("Buy" or "Sell").
+    pub side: String,
+    /// Order quantity.
+    pub quantity: f64,
+    /// Order price.
+    pub price: f64,
+    /// Order status: "Filled", "Rejected", or "Submitted".
+    pub status: String,
+    /// Name of the strategy that generated the order.
+    pub strategy: String,
+    /// Guard check result: "Pass" or rejection reason (e.g. "`MaxPos`").
+    pub guard_result: String,
+}
+
+/// Time range for the `PnL` sparkline chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, EnumString)]
+pub enum PnlRange {
+    /// Last 1 hour.
+    #[strum(serialize = "1h")]
+    Hour1,
+    /// Last 4 hours.
+    #[strum(serialize = "4h")]
+    Hour4,
+    /// Last 1 day.
+    #[strum(serialize = "1d")]
+    Day1,
+    /// All available data.
+    #[strum(serialize = "all")]
+    All,
+}
+
+impl PnlRange {
+    /// Cycle to the next time range: 1h -> 4h -> 1d -> all -> 1h.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Hour1 => Self::Hour4,
+            Self::Hour4 => Self::Day1,
+            Self::Day1 => Self::All,
+            Self::All => Self::Hour1,
+        }
+    }
+}
+
+/// State for the Trading tab.
+#[derive(Debug, Clone)]
+pub struct TradingState {
+    /// Account-level summary.
+    pub account: AccountState,
+    /// Currently open positions.
+    pub positions: Vec<PositionInfo>,
+    /// Order log entries (most recent first).
+    pub orders: Vec<OrderEntry>,
+    /// `PnL` data points for the sparkline chart.
+    pub pnl_data: Vec<u64>,
+    /// Currently selected time range for the `PnL` sparkline.
+    pub pnl_range: PnlRange,
+    /// Index of the currently selected order in the orders list.
+    pub selected_order: usize,
+    /// Whether the order detail overlay is shown.
+    pub show_order_detail: bool,
+}
+
+impl Default for TradingState {
+    fn default() -> Self {
+        Self {
+            account: AccountState::default(),
+            positions: Vec::new(),
+            orders: Vec::new(),
+            pnl_data: Vec::new(),
+            pnl_range: PnlRange::Hour1,
+            selected_order: 0,
+            show_order_detail: false,
+        }
+    }
+}
+
+impl TradingState {
+    /// Move selection down in the orders list.
+    pub fn select_next_order(&mut self) {
+        if !self.orders.is_empty() {
+            self.selected_order = (self.selected_order + 1).min(self.orders.len() - 1);
+        }
+    }
+
+    /// Move selection up in the orders list.
+    pub const fn select_prev_order(&mut self) {
+        self.selected_order = self.selected_order.saturating_sub(1);
+    }
+
+    /// Cycle the `PnL` sparkline time range.
+    pub const fn cycle_pnl_range(&mut self) {
+        self.pnl_range = self.pnl_range.next();
+    }
+
+    /// Toggle the order detail overlay.
+    pub const fn toggle_order_detail(&mut self) {
+        self.show_order_detail = !self.show_order_detail;
+    }
+}
+
 /// Root application state driving the TUI.
 pub struct App {
     /// Index of the currently active tab.
@@ -177,6 +315,8 @@ pub struct App {
     pub research: ResearchState,
     /// State for the Events tab.
     pub events_state: EventsState,
+    /// State for the Trading tab.
+    pub trading: TradingState,
 }
 
 impl App {
@@ -196,6 +336,7 @@ impl App {
             research_progress: None,
             research: ResearchState::empty(),
             events_state: EventsState::default(),
+            trading: TradingState::default(),
         }
     }
 
