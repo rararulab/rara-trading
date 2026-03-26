@@ -76,6 +76,7 @@ chrono.workspace = true
 clap.workspace = true
 config.workspace = true
 futures-util.workspace = true
+dialoguer = "0.11"
 dirs = "6"
 rara-agent.workspace = true
 rara-domain.workspace = true

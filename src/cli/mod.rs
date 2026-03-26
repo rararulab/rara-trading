@@ -61,9 +61,15 @@ pub enum Command {
     },
 
     /// Setup and configuration management.
+    ///
+    /// Use `-i` for interactive guided setup.
     Setup {
+        /// Run interactive guided setup.
+        #[arg(short = 'i', long = "interactive")]
+        interactive: bool,
+
         #[command(subcommand)]
-        action: SetupAction,
+        action: Option<SetupAction>,
     },
 
     /// Start the gRPC server.

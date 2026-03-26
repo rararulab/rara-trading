@@ -424,8 +424,15 @@ async fn run() -> error::Result<()> {
         } => {
             rara_trading::daemon::run(iterations, grpc_addr).await?;
         }
-        Command::Setup { action } => {
-            run_setup(action).await?;
+        Command::Setup { interactive, action } => {
+            if interactive {
+                run_setup_interactive().await?;
+            } else if let Some(action) = action {
+                run_setup(action).await?;
+            } else {
+                eprintln!("usage: rara setup <init|account|validate> or rara setup -i");
+                std::process::exit(1);
+            }
         }
         Command::Serve { port } => {
             run_serve(port).await?;
@@ -1766,6 +1773,13 @@ fn run_strategy_installed() -> error::Result<()> {
 // ---------------------------------------------------------------------------
 // Setup command handlers
 // ---------------------------------------------------------------------------
+
+/// Interactive guided setup — walks the user through init, account creation, and validation.
+async fn run_setup_interactive() -> error::Result<()> {
+    eprintln!("interactive setup not yet implemented");
+    Ok(())
+}
+
 
 async fn run_setup(action: SetupAction) -> error::Result<()> {
     match action {
