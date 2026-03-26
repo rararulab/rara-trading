@@ -2,6 +2,8 @@
 
 use rara_server::rara_proto::SystemStatus;
 
+use crate::tabs::research::ResearchState;
+
 /// Live status of a running strategy.
 #[derive(Debug, Clone)]
 pub struct StrategyStatus {
@@ -77,6 +79,9 @@ pub enum ConnectionStatus {
 /// Tab identifiers for the main navigation.
 pub const TAB_NAMES: &[&str] = &["Overview", "Research", "Trading", "Strategies"];
 
+/// Index of the Research tab.
+pub const TAB_RESEARCH: usize = 1;
+
 /// Root application state driving the TUI.
 pub struct App {
     /// Index of the currently active tab.
@@ -99,6 +104,8 @@ pub struct App {
     pub alerts: Vec<String>,
     /// Current research pipeline progress, if any.
     pub research_progress: Option<ResearchProgress>,
+    /// State for the Research tab.
+    pub research: ResearchState,
 }
 
 impl App {
@@ -116,6 +123,7 @@ impl App {
             recent_events: Vec::new(),
             alerts: Vec::new(),
             research_progress: None,
+            research: ResearchState::empty(),
         }
     }
 
