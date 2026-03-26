@@ -86,6 +86,9 @@ pub enum ResearchAction {
         /// Path to trace storage directory.
         #[arg(long)]
         trace_dir: Option<String>,
+        /// Only output final summary, suppress per-iteration progress.
+        #[arg(long)]
+        quiet: bool,
     },
 
     /// List experiment history from the trace.
