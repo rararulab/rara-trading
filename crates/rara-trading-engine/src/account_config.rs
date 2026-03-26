@@ -1,6 +1,11 @@
 //! Declarative account configuration for `accounts.toml`.
 
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+
+use crate::broker::Broker;
+use crate::brokers::ccxt::CcxtBroker;
+use crate::brokers::paper::PaperBroker;
 
 /// Root structure for `accounts.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -53,6 +58,32 @@ pub enum BrokerConfig {
     Paper(PaperBrokerConfig),
     /// CCXT-based exchange (Binance, Bybit, OKX).
     Ccxt(CcxtBrokerConfig),
+}
+
+impl BrokerConfig {
+    /// Create a boxed broker instance from this config.
+    pub fn create_broker(&self) -> Box<dyn Broker> {
+        match self {
+            Self::Paper(cfg) => {
+                let price = cfg
+                    .fill_price
+                    .map(|p| Decimal::try_from(p).unwrap_or_default())
+                    .unwrap_or_default();
+                Box::new(PaperBroker::new(price))
+            }
+            Self::Ccxt(cfg) => {
+                let base = CcxtBroker::builder()
+                    .exchange_id(&cfg.exchange)
+                    .api_key(&cfg.api_key)
+                    .secret(&cfg.secret)
+                    .sandbox(cfg.sandbox);
+                match cfg.passphrase {
+                    Some(ref pass) => Box::new(base.passphrase(pass).build()),
+                    None => Box::new(base.build()),
+                }
+            }
+        }
+    }
 }
 
 /// Paper broker configuration.

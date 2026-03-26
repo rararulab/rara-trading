@@ -109,6 +109,15 @@ struct SetupAccountRemoveResponse<'a> {
 }
 
 #[derive(Serialize)]
+struct SetupAccountTestResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    equity: String,
+    available_cash: String,
+}
+
+#[derive(Serialize)]
 struct HelloResponse<'a> {
     ok: bool,
     action: &'static str,
@@ -1752,7 +1761,7 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
     match action {
         SetupAction::Init { force } => run_setup_init(force)?,
         SetupAction::Validate => run_setup_validate().await?,
-        SetupAction::Account { action } => run_setup_account(*action)?,
+        SetupAction::Account { action } => run_setup_account(*action).await?,
     }
     Ok(())
 }
@@ -1938,7 +1947,7 @@ async fn run_setup_validate() -> error::Result<()> {
 
 /// Handle account subcommands.
 #[allow(clippy::too_many_lines)]
-fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
+async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
     use rara_trading_engine::account_config::{
         AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
     };
@@ -2104,8 +2113,53 @@ fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
             );
         }
 
-        SetupAccountAction::Test { id: _ } => {
-            todo!("setup account test — will be implemented in Task 6")
+        SetupAccountAction::Test { id } => {
+            let cfg = accounts_config::load_accounts();
+            let Some(acc) = cfg.accounts.iter().find(|a| a.id == id) else {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: format!("account \"{id}\" not found"),
+                        suggestion: Some(
+                            "run 'rara setup account list' to see available accounts".to_string(),
+                        ),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            };
+
+            let broker = acc.broker_config.create_broker();
+            match broker.account_info().await {
+                Ok(info) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&SetupAccountTestResponse {
+                            ok: true,
+                            action: "account.test",
+                            id: &id,
+                            equity: info.total_equity.to_string(),
+                            available_cash: info.available_cash.to_string(),
+                        })
+                        .expect("SetupAccountTestResponse must serialize")
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&ErrorResponse {
+                            ok: false,
+                            error: format!("connectivity test failed: {e}"),
+                            suggestion: Some(
+                                "check API credentials and network connectivity".to_string(),
+                            ),
+                        })
+                        .expect("ErrorResponse must serialize")
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
     }
 
