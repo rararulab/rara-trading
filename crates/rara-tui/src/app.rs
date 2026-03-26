@@ -289,6 +289,116 @@ impl TradingState {
     }
 }
 
+/// Index of the Strategies tab in the tab bar.
+pub const STRATEGIES_TAB: usize = 3;
+
+/// Lifecycle status of a strategy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrategyLifecycle {
+    /// Strategy has been promoted to live trading.
+    Promoted,
+    /// Strategy is actively being evaluated.
+    Active,
+    /// Strategy was demoted from live trading.
+    Demoted,
+    /// Strategy has been retired permanently.
+    Retired,
+    /// Strategy is archived for historical reference.
+    Archived,
+}
+
+/// A single strategy entry displayed in the strategy list table.
+#[derive(Debug, Clone)]
+pub struct StrategyEntry {
+    /// Display name of the strategy.
+    pub name: String,
+    /// Version number of the strategy.
+    pub version: u32,
+    /// Current lifecycle status.
+    pub status: StrategyLifecycle,
+    /// Sharpe ratio from the most recent evaluation.
+    pub sharpe: f64,
+    /// Maximum drawdown percentage (negative value).
+    pub max_drawdown: f64,
+    /// Total number of trades executed.
+    pub trade_count: u32,
+    /// Date of the last evaluation, if any.
+    pub last_eval: Option<String>,
+    /// The original hypothesis that spawned this strategy.
+    pub origin_hypothesis: String,
+    /// Date the strategy was created.
+    pub created_at: String,
+    /// Date the strategy was promoted to live, if ever.
+    pub promoted_at: Option<String>,
+}
+
+/// A single evaluation record in the evaluation timeline.
+#[derive(Debug, Clone)]
+pub struct EvaluationEntry {
+    /// Timestamp of the evaluation.
+    pub time: String,
+    /// Number of trades in the evaluation window.
+    pub trades: u32,
+    /// Sharpe ratio for this evaluation period.
+    pub sharpe: f64,
+    /// Drawdown percentage during this evaluation period.
+    pub drawdown: f64,
+    /// Decision made (Promote, Demote, Retire, Hold).
+    pub decision: String,
+    /// Human-readable reason for the decision.
+    pub reason: String,
+}
+
+/// State for the Strategies tab, managing list selection and detail expansion.
+pub struct StrategiesState {
+    /// All strategy entries to display.
+    pub strategies: Vec<StrategyEntry>,
+    /// Index of the currently selected strategy in the list.
+    pub selected_index: usize,
+    /// Evaluation history for the selected strategy.
+    pub evaluations: Vec<EvaluationEntry>,
+    /// Whether the full hypothesis text is shown in the detail panel.
+    pub show_detail: bool,
+    /// Whether the DAG popup is visible.
+    pub show_dag: bool,
+}
+
+impl StrategiesState {
+    /// Create a new strategies state populated with sample data.
+    #[must_use]
+    pub fn new_with_samples() -> Self {
+        Self {
+            strategies: sample_strategies(),
+            selected_index: 0,
+            evaluations: sample_evaluations(),
+            show_detail: false,
+            show_dag: false,
+        }
+    }
+
+    /// Move selection up by one row, clamping at the top.
+    pub const fn select_previous(&mut self) {
+        self.selected_index = self.selected_index.saturating_sub(1);
+    }
+
+    /// Move selection down by one row, clamping at the bottom.
+    pub fn select_next(&mut self) {
+        if !self.strategies.is_empty() {
+            self.selected_index = (self.selected_index + 1).min(self.strategies.len() - 1);
+        }
+    }
+
+    /// Toggle the detail expansion for the selected strategy.
+    pub const fn toggle_detail(&mut self) {
+        self.show_detail = !self.show_detail;
+    }
+
+    /// Toggle the DAG popup.
+    pub const fn toggle_dag(&mut self) {
+        self.show_dag = !self.show_dag;
+    }
+}
+
 /// Root application state driving the TUI.
 pub struct App {
     /// Index of the currently active tab.
@@ -317,6 +427,8 @@ pub struct App {
     pub events_state: EventsState,
     /// State for the Trading tab.
     pub trading: TradingState,
+    /// State for the Strategies tab.
+    pub strategies_state: StrategiesState,
 }
 
 impl App {
@@ -337,6 +449,7 @@ impl App {
             research: ResearchState::empty(),
             events_state: EventsState::default(),
             trading: TradingState::default(),
+            strategies_state: StrategiesState::new_with_samples(),
         }
     }
 
@@ -351,4 +464,108 @@ impl App {
     pub const fn quit(&mut self) {
         self.running = false;
     }
+}
+
+/// Generate sample strategy entries for development/demo purposes.
+fn sample_strategies() -> Vec<StrategyEntry> {
+    vec![
+        StrategyEntry {
+            name: "MeanRev-BTC-4h".to_string(),
+            version: 3,
+            status: StrategyLifecycle::Promoted,
+            sharpe: 1.42,
+            max_drawdown: -8.3,
+            trade_count: 142,
+            last_eval: Some("2026-03-25".to_string()),
+            origin_hypothesis: "BTC mean reversion on 4h RSI oversold conditions with volume confirmation shows consistent alpha in ranging markets".to_string(),
+            created_at: "2026-01-15".to_string(),
+            promoted_at: Some("2026-02-10".to_string()),
+        },
+        StrategyEntry {
+            name: "Momentum-ETH-1h".to_string(),
+            version: 2,
+            status: StrategyLifecycle::Active,
+            sharpe: 1.18,
+            max_drawdown: -11.2,
+            trade_count: 89,
+            last_eval: Some("2026-03-24".to_string()),
+            origin_hypothesis: "ETH momentum breakout on 1h timeframe using VWAP crossover".to_string(),
+            created_at: "2026-02-01".to_string(),
+            promoted_at: None,
+        },
+        StrategyEntry {
+            name: "StatArb-SOL".to_string(),
+            version: 1,
+            status: StrategyLifecycle::Demoted,
+            sharpe: 0.91,
+            max_drawdown: -15.7,
+            trade_count: 67,
+            last_eval: Some("2026-03-20".to_string()),
+            origin_hypothesis: "SOL statistical arbitrage against BTC using cointegration z-score".to_string(),
+            created_at: "2026-01-20".to_string(),
+            promoted_at: Some("2026-02-15".to_string()),
+        },
+        StrategyEntry {
+            name: "GridBot-BNB".to_string(),
+            version: 4,
+            status: StrategyLifecycle::Retired,
+            sharpe: 0.45,
+            max_drawdown: -22.1,
+            trade_count: 312,
+            last_eval: Some("2026-03-10".to_string()),
+            origin_hypothesis: "BNB grid trading in stable range-bound periods".to_string(),
+            created_at: "2025-11-05".to_string(),
+            promoted_at: Some("2025-12-01".to_string()),
+        },
+        StrategyEntry {
+            name: "DCA-Weekly".to_string(),
+            version: 1,
+            status: StrategyLifecycle::Archived,
+            sharpe: 0.62,
+            max_drawdown: -18.4,
+            trade_count: 52,
+            last_eval: None,
+            origin_hypothesis: "Weekly dollar cost averaging with volatility-adjusted sizing".to_string(),
+            created_at: "2025-09-01".to_string(),
+            promoted_at: None,
+        },
+    ]
+}
+
+/// Generate sample evaluation entries for development/demo purposes.
+fn sample_evaluations() -> Vec<EvaluationEntry> {
+    vec![
+        EvaluationEntry {
+            time: "2026-03-25".to_string(),
+            trades: 42,
+            sharpe: 1.42,
+            drawdown: -8.3,
+            decision: "Promote".to_string(),
+            reason: "Consistent alpha over 30-day window".to_string(),
+        },
+        EvaluationEntry {
+            time: "2026-03-18".to_string(),
+            trades: 38,
+            sharpe: 1.31,
+            drawdown: -9.1,
+            decision: "Hold".to_string(),
+            reason: "Needs more data for confidence".to_string(),
+        },
+        EvaluationEntry {
+            time: "2026-03-11".to_string(),
+            trades: 35,
+            sharpe: 1.15,
+            drawdown: -10.2,
+            decision: "Hold".to_string(),
+            reason: "Market regime shift detected".to_string(),
+        },
+        EvaluationEntry {
+            time: "2026-03-04".to_string(),
+            trades: 27,
+            sharpe: 0.88,
+            drawdown: -12.5,
+            decision: "Demote".to_string(),
+            reason: "Drawdown exceeds threshold".to_string(),
+        },
+    ]
 }
