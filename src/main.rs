@@ -333,6 +333,13 @@ async fn run() -> error::Result<()> {
         Command::Data { action } => {
             run_data(action).await?;
         }
+        Command::Run {
+            contracts,
+            iterations,
+            grpc_addr,
+        } => {
+            rara_trading::daemon::run(contracts, iterations, grpc_addr).await?;
+        }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
             let mut agent_cfg = cfg.agent.clone();

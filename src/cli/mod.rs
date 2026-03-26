@@ -46,6 +46,20 @@ pub enum Command {
         #[command(subcommand)]
         action: DataAction,
     },
+
+    /// Run the full trading loop: research, paper trading, feedback, and gRPC
+    /// server as concurrent tasks in a single process.
+    Run {
+        /// Contracts to trade (comma-separated).
+        #[arg(long, default_value = "BTC-USDT")]
+        contracts: String,
+        /// Number of research iterations per cycle.
+        #[arg(long, default_value = "10")]
+        iterations: u32,
+        /// gRPC server listen address.
+        #[arg(long, default_value = "0.0.0.0:50051")]
+        grpc_addr: String,
+    },
 }
 
 /// Data management subcommands.
