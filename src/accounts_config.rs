@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rara_trading_engine::account_config::AccountsConfig;
+use rara_trading_engine::account_config::{AccountsConfig, BrokerConfig};
 
 /// Load accounts from the default path with environment variable overrides.
 pub fn load_accounts() -> AccountsConfig {
@@ -12,24 +12,62 @@ pub fn load_accounts() -> AccountsConfig {
 /// Load accounts from a specific path.
 ///
 /// Falls back to empty config if the file does not exist.
-/// Environment variables with prefix `RARA_ACCOUNTS` override file values.
+/// After loading, environment variables override sensitive fields per account:
+/// - `RARA_ACCOUNT_{ID}_API_KEY`
+/// - `RARA_ACCOUNT_{ID}_SECRET`
+/// - `RARA_ACCOUNT_{ID}_PASSPHRASE`
+///
+/// where `{ID}` is the account id uppercased with hyphens replaced by underscores.
 pub fn load_accounts_from_path(path: &Path) -> AccountsConfig {
     // Parse TOML directly for correct serde handling of adjacently tagged
     // enums (BrokerConfig). The config crate's intermediate representation
     // loses the tag discrimination needed by `#[serde(tag, content)]`.
-    if path.exists()
+    let mut cfg = if path.exists()
         && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(cfg) = toml::from_str::<AccountsConfig>(&contents)
+        && let Ok(parsed) = toml::from_str::<AccountsConfig>(&contents)
     {
-        return cfg;
-    }
+        parsed
+    } else {
+        AccountsConfig::default()
+    };
 
-    // Fall back to config crate for env-only loading
-    config::Config::builder()
-        .add_source(config::Environment::with_prefix("RARA_ACCOUNTS").separator("_"))
-        .build()
-        .and_then(config::Config::try_deserialize)
-        .unwrap_or_default()
+    apply_env_overrides(&mut cfg);
+    cfg
+}
+
+/// Overlay environment variables onto CCXT account secrets.
+///
+/// Uses the pattern `RARA_ACCOUNT_{ID}_{FIELD}` where ID is the account id
+/// uppercased with hyphens replaced by underscores. This is more user-friendly
+/// than index-based env vars since account order may change.
+fn apply_env_overrides(cfg: &mut AccountsConfig) {
+    apply_env_overrides_with(cfg, std::env::var);
+}
+
+/// Apply overrides using a custom variable lookup function.
+///
+/// Extracted so tests can supply a mock lookup without mutating real env vars.
+fn apply_env_overrides_with(
+    cfg: &mut AccountsConfig,
+    lookup: impl Fn(String) -> Result<String, std::env::VarError>,
+) {
+    for account in &mut cfg.accounts {
+        let prefix = format!(
+            "RARA_ACCOUNT_{}_",
+            account.id.to_uppercase().replace('-', "_")
+        );
+        if let BrokerConfig::Ccxt(ref mut ccxt) = account.broker_config {
+            if let Ok(val) = lookup(format!("{prefix}API_KEY")) {
+                ccxt.api_key = val;
+            }
+            if let Ok(val) = lookup(format!("{prefix}SECRET")) {
+                ccxt.secret = val;
+            }
+            if let Ok(val) = lookup(format!("{prefix}PASSPHRASE")) {
+                ccxt.passphrase = Some(val);
+            }
+        }
+    }
 }
 
 /// Save accounts config to the default path.
@@ -53,8 +91,10 @@ pub fn generate_accounts_template() -> String {
 #
 # Each [[accounts]] block defines a trading account.
 # Sensitive fields (api_key, secret) can be overridden via environment variables:
-#   RARA_ACCOUNTS_0_BROKER_CONFIG_API_KEY=...
-#   RARA_ACCOUNTS_0_BROKER_CONFIG_SECRET=...
+#   RARA_ACCOUNT_BINANCE_MAIN_API_KEY=...
+#   RARA_ACCOUNT_BINANCE_MAIN_SECRET=...
+#   RARA_ACCOUNT_OKX_MAIN_PASSPHRASE=...
+# (account id uppercased, hyphens → underscores)
 
 # ─── Example: Paper Trading Account ────────────────────────────
 [[accounts]]
@@ -133,9 +173,55 @@ mod tests {
     }
 
     #[test]
-    fn generate_template_is_valid_toml() {
+    fn generate_template_parses_as_valid_config() {
         let template = generate_accounts_template();
-        assert!(template.contains("[[accounts]]"));
-        assert!(template.contains("broker"));
+        let parsed: AccountsConfig = toml::from_str(&template).unwrap();
+        assert!(!parsed.accounts.is_empty());
+    }
+
+    #[test]
+    fn env_vars_override_ccxt_secrets() {
+        use std::collections::HashMap;
+
+        use rara_trading_engine::account_config::{AccountConfig, CcxtBrokerConfig};
+
+        let env: HashMap<String, String> = [
+            ("RARA_ACCOUNT_BINANCE_MAIN_API_KEY", "env-key"),
+            ("RARA_ACCOUNT_BINANCE_MAIN_SECRET", "env-secret"),
+            ("RARA_ACCOUNT_BINANCE_MAIN_PASSPHRASE", "env-pass"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+        let mut cfg = AccountsConfig {
+            accounts: vec![AccountConfig {
+                id: "binance-main".to_string(),
+                label: None,
+                broker_config: BrokerConfig::Ccxt(CcxtBrokerConfig {
+                    exchange: "binance".to_string(),
+                    sandbox: false,
+                    api_key: "file-key".to_string(),
+                    secret: "file-secret".to_string(),
+                    passphrase: None,
+                }),
+                enabled: true,
+                contracts: vec![],
+            }],
+        };
+
+        apply_env_overrides_with(&mut cfg, |key| {
+            env.get(&key)
+                .cloned()
+                .ok_or(std::env::VarError::NotPresent)
+        });
+
+        if let BrokerConfig::Ccxt(ref ccxt) = cfg.accounts[0].broker_config {
+            assert_eq!(ccxt.api_key, "env-key");
+            assert_eq!(ccxt.secret, "env-secret");
+            assert_eq!(ccxt.passphrase.as_deref(), Some("env-pass"));
+        } else {
+            panic!("expected ccxt broker config");
+        }
     }
 }
