@@ -93,12 +93,17 @@ async-trait.workspace = true
 jiff.workspace = true
 predicates = "3"
 rara-domain.workspace = true
+rara-event-bus.workspace = true
 rara-market-data.workspace = true
 rara-research.workspace = true
+rara-trading-engine.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros = "1"
+serde_json.workspace = true
+sled.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+uuid.workspace = true
 
 [lints]
 workspace = true

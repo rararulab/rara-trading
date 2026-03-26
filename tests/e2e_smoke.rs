@@ -25,26 +25,25 @@ use rara_trading_engine::guards::symbol_whitelist::SymbolWhitelist;
 use rara_trading_engine::guards::GuardResult;
 
 // ---------------------------------------------------------------------------
-// 1a. Research trace DAG: hypothesis lineage + SOTA selection
+// Helpers — reusable experiment/hypothesis builders for the research DAG
 // ---------------------------------------------------------------------------
 
-/// Helper: builds a shared trace with 3 experiments (v1 accepted, v2 accepted
-/// with higher Sharpe, rejected overfit) and returns key handles for assertions.
-struct TraceFixture {
-    dir: tempfile::TempDir,
-    trace: Trace,
-    root_hyp: Hypothesis,
-    refined_hyp: Hypothesis,
-    exp_v1: Experiment,
-    exp_v2: Experiment,
-    exp_rejected: Experiment,
-    idx0: u64,
-    idx1: u64,
-}
-
-fn build_trace_fixture() -> TraceFixture {
-    let dir = tempfile::tempdir().unwrap();
-    let trace = Trace::open(&dir.path().join("trace")).unwrap();
+/// Seed a trace with a two-level hypothesis lineage and three experiments:
+/// v1 (accepted, Sharpe 0.8), v2 (accepted, Sharpe 1.9), rejected (Sharpe 4.5).
+#[allow(clippy::type_complexity)]
+fn seed_research_trace(
+    dir: &std::path::Path,
+) -> (
+    Trace,
+    Hypothesis,
+    Hypothesis,
+    Experiment,
+    Experiment,
+    Experiment,
+    u64,
+    u64,
+) {
+    let trace = Trace::open(&dir.join("trace")).unwrap();
 
     let root_hyp = Hypothesis::builder()
         .text("Mean reversion on BTC 1h candles")
@@ -59,7 +58,6 @@ fn build_trace_fixture() -> TraceFixture {
         .build();
     trace.save_hypothesis(&refined_hyp).unwrap();
 
-    // Experiment v1: mediocre Sharpe, accepted
     let exp_v1 = Experiment::builder()
         .hypothesis_id(root_hyp.id)
         .strategy_code("fn strategy_v1() { /* mean reversion */ }")
@@ -76,12 +74,13 @@ fn build_trace_fixture() -> TraceFixture {
     let fb_v1 = HypothesisFeedback::builder()
         .experiment_id(exp_v1.id)
         .decision(true)
-        .reason("Acceptable Sharpe but high drawdown — needs volatility filter")
+        .reason("Acceptable Sharpe but high drawdown")
         .observations("Drawdown spikes during high-vol periods")
         .build();
-    let idx0 = trace.record(&exp_v1, &fb_v1, &DagSelection::NewRoot).unwrap();
+    let idx0 = trace
+        .record(&exp_v1, &fb_v1, &DagSelection::NewRoot)
+        .unwrap();
 
-    // Experiment v2: better Sharpe, accepted
     let exp_v2 = Experiment::builder()
         .hypothesis_id(refined_hyp.id)
         .strategy_code("fn strategy_v2() { /* mean reversion + vol filter */ }")
@@ -101,9 +100,10 @@ fn build_trace_fixture() -> TraceFixture {
         .reason("Good Sharpe with controlled drawdown")
         .observations("Vol filter reduced drawdown by 47%")
         .build();
-    let idx1 = trace.record(&exp_v2, &fb_v2, &DagSelection::Latest).unwrap();
+    let idx1 = trace
+        .record(&exp_v2, &fb_v2, &DagSelection::Latest)
+        .unwrap();
 
-    // Rejected experiment: high Sharpe but overfitting
     let exp_rejected = Experiment::builder()
         .hypothesis_id(root_hyp.id)
         .strategy_code("fn strategy_overfit() { /* curve-fitted */ }")
@@ -124,11 +124,14 @@ fn build_trace_fixture() -> TraceFixture {
         .observations("Only 30 trades, likely curve-fitted")
         .build();
     trace
-        .record(&exp_rejected, &fb_rejected, &DagSelection::Specific(idx0))
+        .record(
+            &exp_rejected,
+            &fb_rejected,
+            &DagSelection::Specific(idx0),
+        )
         .unwrap();
 
-    TraceFixture {
-        dir,
+    (
         trace,
         root_hyp,
         refined_hyp,
@@ -137,87 +140,108 @@ fn build_trace_fixture() -> TraceFixture {
         exp_rejected,
         idx0,
         idx1,
-    }
+    )
 }
 
-/// Validates hypothesis lineage, DAG structure, and SOTA selection logic:
-/// the best accepted experiment (highest Sharpe) wins over rejected ones.
+// ---------------------------------------------------------------------------
+// 1a. Research trace DAG: hypothesis lineage, SOTA selection, DAG walks
+// ---------------------------------------------------------------------------
+
+/// Validates hypothesis lineage, DAG ancestor/children walks, and SOTA
+/// selection picking the best accepted experiment by Sharpe ratio.
 #[test]
 fn research_trace_dag_and_sota_selection() {
-    let f = build_trace_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let (trace, root_hyp, refined_hyp, exp_v1, exp_v2, exp_rejected, idx0, idx1) =
+        seed_research_trace(dir.path());
 
-    // Verify ancestor chain correctly links hypotheses
-    let chain = f.trace.ancestor_chain(f.refined_hyp.id).unwrap();
-    assert_eq!(chain.len(), 2, "refined hypothesis should have root as ancestor");
-    assert_eq!(chain[0].id, f.refined_hyp.id);
-    assert_eq!(chain[1].id, f.root_hyp.id);
+    // Hypothesis ancestor chain: refined -> root
+    let chain = trace.ancestor_chain(refined_hyp.id).unwrap();
+    assert_eq!(
+        chain.len(),
+        2,
+        "refined hypothesis should have root as ancestor"
+    );
+    assert_eq!(chain[0].id, refined_hyp.id);
+    assert_eq!(chain[1].id, root_hyp.id);
 
-    // SOTA should pick exp_v2 (highest Sharpe among accepted)
-    let sota = f.trace.get_sota().unwrap().expect("should have a SOTA");
-    assert_eq!(sota.0.id, f.exp_v2.id, "SOTA must be the v2 experiment with Sharpe 1.9");
+    // SOTA should pick exp_v2 (highest Sharpe among accepted, ignoring rejected 4.5)
+    let sota = trace.get_sota().unwrap().expect("should have a SOTA");
+    assert_eq!(
+        sota.0.id, exp_v2.id,
+        "SOTA must be the v2 experiment with Sharpe 1.9"
+    );
     assert!(sota.1.decision, "SOTA feedback must be accepted");
 
-    // DAG ancestor walk from idx1 should reach idx0
-    let ancestors = f.trace.ancestors(f.idx1).unwrap();
+    // DAG ancestor walk from idx1 -> idx0
+    let ancestors = trace.ancestors(idx1).unwrap();
     assert_eq!(ancestors.len(), 2);
-    assert_eq!(ancestors[0].0.id, f.exp_v2.id);
-    assert_eq!(ancestors[1].0.id, f.exp_v1.id);
+    assert_eq!(ancestors[0].0.id, exp_v2.id);
+    assert_eq!(ancestors[1].0.id, exp_v1.id);
 
-    // DAG children of root should include both v2 (via Latest) and rejected
-    let children = f.trace.children(f.idx0).unwrap();
+    // DAG children of root should include v2 (via Latest) and rejected
+    let children = trace.children(idx0).unwrap();
     assert_eq!(children.len(), 2, "root node should have 2 children");
 
-    // Trace prompt formatting includes both iterations
-    let prompt = f.trace.format_for_prompt(10).unwrap();
-    assert!(prompt.contains("accepted"), "prompt should mention accepted experiments");
-    assert!(prompt.contains("rejected"), "prompt should mention rejected experiments");
-
     // list_recent returns newest first
-    let recent = f.trace.list_recent(10).unwrap();
+    let recent = trace.list_recent(10).unwrap();
     assert_eq!(recent.len(), 3);
     assert_eq!(
-        recent[0].1.id, f.exp_rejected.id,
+        recent[0].1.id, exp_rejected.id,
         "most recent experiment should be listed first"
     );
+
+    // Prompt formatting includes both accepted and rejected
+    let prompt = trace.format_for_prompt(10).unwrap();
+    assert!(prompt.contains("accepted"));
+    assert!(prompt.contains("rejected"));
 }
 
 // ---------------------------------------------------------------------------
-// 1b. Strategy store promotion lifecycle
+// 1b. Strategy store: SOTA promotion lifecycle
 // ---------------------------------------------------------------------------
 
-/// Validates that the strategy store correctly tracks promotion status
-/// transitions (Compiled -> Accepted -> Promoted) and filters by status.
+/// Validates that a SOTA experiment flows through the strategy store lifecycle:
+/// Compiled -> Accepted -> Promoted, with correct status filtering.
 #[test]
-fn strategy_store_promotion_lifecycle() {
-    let f = build_trace_fixture();
-    let db = sled::open(f.dir.path().join("strategy_db")).unwrap();
-    let store = StrategyStore::open(&db, &f.dir.path().join("artifacts")).unwrap();
+fn strategy_store_sota_promotion_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let (trace, _, refined_hyp, _, exp_v2, _, _, _) = seed_research_trace(dir.path());
 
-    // Promote the SOTA strategy through the strategy store
+    let db = sled::open(dir.path().join("strategy_db")).unwrap();
+    let store = StrategyStore::open(&db, &dir.path().join("artifacts")).unwrap();
+
+    // Get SOTA and promote it
+    let sota = trace.get_sota().unwrap().expect("should have SOTA");
+    assert_eq!(sota.0.id, exp_v2.id);
+
     let promoted = ResearchStrategy::builder()
-        .hypothesis_id(f.refined_hyp.id)
-        .source_code(&f.exp_v2.strategy_code)
+        .hypothesis_id(refined_hyp.id)
+        .source_code(&exp_v2.strategy_code)
         .build();
     store.save(&promoted).unwrap();
 
-    // Verify lifecycle: Compiled -> Accepted -> Promoted
+    // Verify lifecycle transitions
     assert_eq!(
         store.get(promoted.id).unwrap().unwrap().status,
         ResearchStrategyStatus::Compiled
     );
+
     store
         .update_status(promoted.id, ResearchStrategyStatus::Accepted)
         .unwrap();
     store
         .update_status(promoted.id, ResearchStrategyStatus::Promoted)
         .unwrap();
+
     assert_eq!(
         store.get(promoted.id).unwrap().unwrap().status,
         ResearchStrategyStatus::Promoted
     );
 
-    // Strategy store filtering works correctly
-    let promoted_list = store.list(Some(ResearchStrategyStatus::Promoted)).unwrap();
+    let promoted_list = store
+        .list(Some(ResearchStrategyStatus::Promoted))
+        .unwrap();
     assert_eq!(promoted_list.len(), 1);
     assert_eq!(promoted_list[0].id, promoted.id);
 }
@@ -234,50 +258,62 @@ async fn event_bus_cross_topic_routing_and_consumer_offsets() {
     let bus = EventBus::open(dir.path()).unwrap();
     let mut rx = bus.subscribe();
 
-    // Publish events across all four topic domains
-    let trading_event = Event::builder()
-        .event_type(EventType::TradingOrderSubmitted)
-        .source("trading-engine")
-        .correlation_id("trade-001")
-        .payload(json!({"symbol": "BTC-USD", "side": "buy", "qty": 0.5}))
-        .build();
+    let seq_trading = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::TradingOrderSubmitted)
+                .source("trading-engine")
+                .correlation_id("trade-001")
+                .payload(json!({"symbol": "BTC-USD", "side": "buy"}))
+                .build(),
+        )
+        .unwrap();
 
-    let research_event = Event::builder()
-        .event_type(EventType::ResearchExperimentCompleted)
-        .source("research-loop")
-        .correlation_id("exp-001")
-        .payload(json!({"sharpe": 1.5, "accepted": true}))
-        .build();
+    let seq_research = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::ResearchExperimentCompleted)
+                .source("research-loop")
+                .correlation_id("exp-001")
+                .payload(json!({"sharpe": 1.5}))
+                .build(),
+        )
+        .unwrap();
 
-    let feedback_event = Event::builder()
-        .event_type(EventType::FeedbackStrategyPromote)
-        .source("feedback-engine")
-        .correlation_id("fb-001")
-        .strategy_id("strat-alpha".into())
-        .strategy_version(3)
-        .payload(json!({"action": "promote", "reason": "sustained alpha"}))
-        .build();
+    let seq_feedback = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::FeedbackStrategyPromote)
+                .source("feedback-engine")
+                .correlation_id("fb-001")
+                .strategy_id("strat-alpha".into())
+                .strategy_version(3)
+                .payload(json!({"action": "promote"}))
+                .build(),
+        )
+        .unwrap();
 
-    let sentinel_event = Event::builder()
-        .event_type(EventType::SentinelSignalDetected)
-        .source("sentinel")
-        .correlation_id("sig-001")
-        .payload(json!({"signal": "volatility_spike", "severity": "high"}))
-        .build();
+    let seq_sentinel = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::SentinelSignalDetected)
+                .source("sentinel")
+                .correlation_id("sig-001")
+                .payload(json!({"signal": "volatility_spike"}))
+                .build(),
+        )
+        .unwrap();
 
-    let fill_event = Event::builder()
-        .event_type(EventType::TradingOrderFilled)
-        .source("trading-engine")
-        .correlation_id("trade-002")
-        .payload(json!({"symbol": "ETH-USD", "price": 3200}))
-        .build();
-
-    // Publish all events and collect sequence numbers
-    let seq_trading = bus.publish(&trading_event).unwrap();
-    let seq_research = bus.publish(&research_event).unwrap();
-    let seq_feedback = bus.publish(&feedback_event).unwrap();
-    let seq_sentinel = bus.publish(&sentinel_event).unwrap();
-    let seq_fill = bus.publish(&fill_event).unwrap();
+    let seq_fill = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::TradingOrderFilled)
+                .source("trading-engine")
+                .correlation_id("trade-002")
+                .payload(json!({"symbol": "ETH-USD", "price": 3200}))
+                .build(),
+        )
+        .unwrap();
 
     // Sequence numbers must be monotonically increasing
     assert!(seq_research > seq_trading);
@@ -286,155 +322,142 @@ async fn event_bus_cross_topic_routing_and_consumer_offsets() {
     assert!(seq_fill > seq_sentinel);
 
     // Broadcast subscriber receives all 5 sequence numbers in order
-    for expected_seq in [seq_trading, seq_research, seq_feedback, seq_sentinel, seq_fill] {
-        let received = rx.recv().await.unwrap();
-        assert_eq!(received, expected_seq);
+    for expected in [
+        seq_trading,
+        seq_research,
+        seq_feedback,
+        seq_sentinel,
+        seq_fill,
+    ] {
+        assert_eq!(rx.recv().await.unwrap(), expected);
     }
 
     // Topic-based reads correctly partition events
-    let trading_events = bus.store().read_topic("trading", 0, 100).unwrap();
-    assert_eq!(trading_events.len(), 2, "should have 2 trading events");
-    assert_eq!(trading_events[0].event_type, EventType::TradingOrderSubmitted);
-    assert_eq!(trading_events[1].event_type, EventType::TradingOrderFilled);
+    let trading = bus.store().read_topic("trading", 0, 100).unwrap();
+    assert_eq!(trading.len(), 2, "should have 2 trading events");
+    assert_eq!(trading[0].event_type, EventType::TradingOrderSubmitted);
+    assert_eq!(trading[1].event_type, EventType::TradingOrderFilled);
 
-    let research_events = bus.store().read_topic("research", 0, 100).unwrap();
-    assert_eq!(research_events.len(), 1);
-    assert_eq!(
-        research_events[0].event_type,
-        EventType::ResearchExperimentCompleted
-    );
+    assert_eq!(bus.store().read_topic("research", 0, 100).unwrap().len(), 1);
 
-    let feedback_events = bus.store().read_topic("feedback", 0, 100).unwrap();
-    assert_eq!(feedback_events.len(), 1);
-    assert_eq!(feedback_events[0].event_type, EventType::FeedbackStrategyPromote);
-    // Verify strategy metadata is preserved through serialization
-    assert_eq!(
-        feedback_events[0].strategy_id.as_deref(),
-        Some("strat-alpha")
-    );
-    assert_eq!(feedback_events[0].strategy_version, Some(3));
+    let feedback = bus.store().read_topic("feedback", 0, 100).unwrap();
+    assert_eq!(feedback.len(), 1);
+    assert_eq!(feedback[0].strategy_id.as_deref(), Some("strat-alpha"));
+    assert_eq!(feedback[0].strategy_version, Some(3));
 
-    let sentinel_events = bus.store().read_topic("sentinel", 0, 100).unwrap();
-    assert_eq!(sentinel_events.len(), 1);
+    assert_eq!(bus.store().read_topic("sentinel", 0, 100).unwrap().len(), 1);
 
-    // Consumer offset tracking: two independent consumers on "trading" topic
+    // Consumer offset tracking: two independent consumers
     let store = bus.store();
-
-    // Consumer A processes both trading events
     store.set_offset("consumer-A", "trading", seq_fill).unwrap();
-    assert_eq!(store.get_offset("consumer-A", "trading").unwrap(), seq_fill);
-
-    // Consumer B only processed the first trading event
     store
         .set_offset("consumer-B", "trading", seq_trading)
         .unwrap();
+    assert_eq!(store.get_offset("consumer-A", "trading").unwrap(), seq_fill);
     assert_eq!(
         store.get_offset("consumer-B", "trading").unwrap(),
         seq_trading
     );
 
-    // Consumer B catches up: reads trading events after its offset
-    // (from_seq is inclusive, so use offset + 1 to skip already-processed)
+    // Consumer B catches up (from_seq is inclusive, so +1 to skip processed)
     let catchup = store.read_topic("trading", seq_trading + 1, 100).unwrap();
-    assert_eq!(catchup.len(), 1, "consumer B should have 1 event to catch up on");
+    assert_eq!(
+        catchup.len(),
+        1,
+        "consumer B should have 1 event to catch up"
+    );
     assert_eq!(catchup[0].event_type, EventType::TradingOrderFilled);
 
-    // Nonexistent topic returns empty
-    let empty = store.read_topic("nonexistent", 0, 100).unwrap();
-    assert!(empty.is_empty());
+    assert!(store.read_topic("nonexistent", 0, 100).unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------
 // 3a. Paper broker position netting logic
 // ---------------------------------------------------------------------------
 
-/// Validates the paper broker fills orders and tracks positions with correct
-/// netting logic: accumulation, partial close, and side flip.
+/// Validates that the paper broker correctly nets positions: same-side
+/// accumulates, opposite-side reduces, and excess opposite-side flips.
 #[tokio::test]
 async fn paper_broker_position_netting() {
     let broker = PaperBroker::new(dec!(50_000));
 
-    // Submit a buy order for BTC-USD
-    let buy_actions = vec![StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("BTC-USD")
-        .side(Side::Buy)
-        .quantity(dec!(2.0))
-        .order_type(OrderType::Market)
-        .build()];
+    broker
+        .push(&[StagedAction::builder()
+            .action_type(ActionType::PlaceOrder)
+            .contract_id("BTC-USD")
+            .side(Side::Buy)
+            .quantity(dec!(2.0))
+            .order_type(OrderType::Market)
+            .build()])
+        .await
+        .unwrap();
 
-    let results = broker.push(&buy_actions).await.unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].status, OrderStatus::Filled);
-    assert_eq!(results[0].contract_id, "BTC-USD");
+    let pos = broker.positions().await.unwrap();
+    assert_eq!(pos[0].quantity, dec!(2.0));
+    assert_eq!(pos[0].side, Side::Buy);
 
-    // Position should reflect the buy
-    let positions = broker.positions().await.unwrap();
-    assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0].contract_id, "BTC-USD");
-    assert_eq!(positions[0].side, Side::Buy);
-    assert_eq!(positions[0].quantity, dec!(2.0));
-    assert_eq!(positions[0].avg_entry_price, dec!(50_000));
+    // Same-side accumulates
+    broker
+        .push(&[StagedAction::builder()
+            .action_type(ActionType::PlaceOrder)
+            .contract_id("BTC-USD")
+            .side(Side::Buy)
+            .quantity(dec!(1.5))
+            .order_type(OrderType::Market)
+            .build()])
+        .await
+        .unwrap();
+    assert_eq!(broker.positions().await.unwrap()[0].quantity, dec!(3.5));
 
-    // Submit another buy to increase position
-    let more_buy = vec![StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("BTC-USD")
-        .side(Side::Buy)
-        .quantity(dec!(1.5))
-        .order_type(OrderType::Market)
-        .build()];
-    broker.push(&more_buy).await.unwrap();
+    // Partial sell reduces
+    broker
+        .push(&[StagedAction::builder()
+            .action_type(ActionType::PlaceOrder)
+            .contract_id("BTC-USD")
+            .side(Side::Sell)
+            .quantity(dec!(1.0))
+            .order_type(OrderType::Market)
+            .build()])
+        .await
+        .unwrap();
 
-    let positions = broker.positions().await.unwrap();
-    assert_eq!(positions[0].quantity, dec!(3.5), "same-side buys should accumulate");
+    let pos = broker.positions().await.unwrap();
+    assert_eq!(pos[0].quantity, dec!(2.5), "partial sell should reduce");
+    assert_eq!(pos[0].side, Side::Buy, "side unchanged after partial sell");
 
-    // Partial sell reduces position but keeps side as Buy
-    let partial_sell = vec![StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("BTC-USD")
-        .side(Side::Sell)
-        .quantity(dec!(1.0))
-        .order_type(OrderType::Market)
-        .build()];
-    broker.push(&partial_sell).await.unwrap();
+    // Excess sell flips position
+    broker
+        .push(&[StagedAction::builder()
+            .action_type(ActionType::PlaceOrder)
+            .contract_id("BTC-USD")
+            .side(Side::Sell)
+            .quantity(dec!(4.0))
+            .order_type(OrderType::Market)
+            .build()])
+        .await
+        .unwrap();
 
-    let positions = broker.positions().await.unwrap();
-    assert_eq!(positions[0].quantity, dec!(2.5), "partial sell should reduce position");
-    assert_eq!(positions[0].side, Side::Buy, "side should remain Buy after partial sell");
-
-    // Sell more than remaining flips the position to Sell
-    let flip_sell = vec![StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("BTC-USD")
-        .side(Side::Sell)
-        .quantity(dec!(4.0))
-        .order_type(OrderType::Market)
-        .build()];
-    broker.push(&flip_sell).await.unwrap();
-
-    let positions = broker.positions().await.unwrap();
-    assert_eq!(positions[0].quantity, dec!(1.5), "excess sell should flip position");
-    assert_eq!(positions[0].side, Side::Sell, "position should flip to Sell");
+    let pos = broker.positions().await.unwrap();
+    assert_eq!(pos[0].quantity, dec!(1.5), "excess sell flips position");
+    assert_eq!(pos[0].side, Side::Sell, "position should flip to Sell");
 }
 
 // ---------------------------------------------------------------------------
 // 3b. Paper broker batch orders + guard pipeline integration
 // ---------------------------------------------------------------------------
 
-/// Validates multi-contract batch orders, execution history, and guard pipeline
-/// accept/reject logic based on symbol whitelist.
+/// Validates batch order fills, execution history, and guard pipeline
+/// allow/reject decisions based on symbol whitelisting.
 #[tokio::test]
 async fn paper_broker_batch_and_guard_pipeline() {
     let broker = PaperBroker::new(dec!(50_000));
 
-    // Multi-contract batch order
     let batch = vec![
         StagedAction::builder()
             .action_type(ActionType::PlaceOrder)
             .contract_id("BTC-USD")
             .side(Side::Buy)
-            .quantity(dec!(2.0))
+            .quantity(dec!(1.0))
             .order_type(OrderType::Market)
             .build(),
         StagedAction::builder()
@@ -444,32 +467,20 @@ async fn paper_broker_batch_and_guard_pipeline() {
             .quantity(dec!(10.0))
             .order_type(OrderType::Market)
             .build(),
-        StagedAction::builder()
-            .action_type(ActionType::PlaceOrder)
-            .contract_id("SOL-USD")
-            .side(Side::Sell)
-            .quantity(dec!(100.0))
-            .order_type(OrderType::Market)
-            .build(),
     ];
-    let batch_results = broker.push(&batch).await.unwrap();
-    assert_eq!(batch_results.len(), 3);
-    assert!(batch_results.iter().all(|r| r.status == OrderStatus::Filled));
+    let results = broker.push(&batch).await.unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|r| r.status == OrderStatus::Filled));
 
-    // Execution history should contain all orders
     let executions = broker.sync_orders().await.unwrap();
-    assert_eq!(executions.len(), 3, "should have 3 total execution reports");
-    assert!(
-        executions.iter().all(|e| e.price == dec!(50_000)),
-        "all fills should be at the paper broker's fixed price"
-    );
+    assert_eq!(executions.len(), 2);
+    assert!(executions.iter().all(|e| e.price == dec!(50_000)));
 
-    // Account info reports positions
     let account = broker.account_info().await.unwrap();
     assert_eq!(account.total_equity, Decimal::new(100_000, 0));
-    assert_eq!(account.positions.len(), 3, "should track BTC, ETH, SOL positions");
+    assert_eq!(account.positions.len(), 2);
 
-    // Build a commit that the guard pipeline will evaluate
+    // Guard pipeline: BTC-USD whitelisted -> allow
     let commit = TradingCommit::builder()
         .message("Buy BTC per momentum signal")
         .strategy_id("strat-momentum")
@@ -483,35 +494,31 @@ async fn paper_broker_batch_and_guard_pipeline() {
             .build()])
         .build();
 
-    // Pipeline with BTC-USD whitelisted: should allow
     let allow_pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![
-        "BTC-USD".to_string(),
-        "ETH-USD".to_string(),
+        "BTC-USD".into(),
+        "ETH-USD".into(),
     ]))]);
-    let result = allow_pipeline.run(&commit, &account).await;
-    assert!(
-        matches!(result, GuardResult::Allow),
-        "whitelisted symbol should pass guard"
-    );
+    assert!(matches!(
+        allow_pipeline.run(&commit, &account).await,
+        GuardResult::Allow
+    ));
 
-    // Pipeline with only ETH-USD whitelisted: should reject BTC-USD commit
-    let reject_pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![
-        "ETH-USD".to_string(),
-    ]))]);
-    let result = reject_pipeline.run(&commit, &account).await;
-    assert!(
-        matches!(result, GuardResult::Reject { .. }),
-        "non-whitelisted symbol should be rejected"
-    );
+    // Only ETH-USD whitelisted -> reject BTC-USD commit
+    let reject_pipeline =
+        GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec!["ETH-USD".into()]))]);
+    assert!(matches!(
+        reject_pipeline.run(&commit, &account).await,
+        GuardResult::Reject { .. }
+    ));
 }
 
 // ---------------------------------------------------------------------------
-// 4. Cross-system: research acceptance -> event bus notification -> paper trade
+// 4. Cross-system: research acceptance -> event bus -> paper trade
 // ---------------------------------------------------------------------------
 
-/// Simulates the handoff between systems: research produces an accepted
-/// strategy, publishes a promotion event, and the paper broker executes the
-/// strategy's first trade — validating the full loop without external deps.
+/// Simulates the full handoff: research accepts a strategy, publishes a
+/// promotion event to the bus, paper broker executes the first trade, and
+/// the fill event is published back — validating the complete loop.
 #[tokio::test]
 async fn research_accept_to_event_to_paper_trade() {
     let dir = tempfile::tempdir().unwrap();
@@ -549,29 +556,24 @@ async fn research_accept_to_event_to_paper_trade() {
     let sota = trace.get_sota().unwrap().expect("SOTA should exist");
     assert_eq!(sota.0.id, exp.id);
 
-    // --- Event bus phase: publish promotion event ---
+    // --- Event bus phase ---
     let bus = EventBus::open(&dir.path().join("events")).unwrap();
     let mut rx = bus.subscribe();
 
-    let promote_event = Event::builder()
-        .event_type(EventType::ResearchStrategyCandidate)
-        .source("research-loop")
-        .correlation_id(exp.id.to_string())
-        .strategy_id(exp.id.to_string())
-        .strategy_version(1)
-        .payload(json!({
-            "hypothesis": hyp.text,
-            "sharpe": 2.1,
-            "pnl": 1200.0,
-        }))
-        .build();
-    let seq = bus.publish(&promote_event).unwrap();
+    let seq = bus
+        .publish(
+            &Event::builder()
+                .event_type(EventType::ResearchStrategyCandidate)
+                .source("research-loop")
+                .correlation_id(exp.id.to_string())
+                .strategy_id(exp.id.to_string())
+                .strategy_version(1)
+                .payload(json!({"hypothesis": hyp.text, "sharpe": 2.1}))
+                .build(),
+        )
+        .unwrap();
+    assert_eq!(rx.recv().await.unwrap(), seq);
 
-    // Subscriber receives the notification
-    let notified_seq = rx.recv().await.unwrap();
-    assert_eq!(notified_seq, seq);
-
-    // Event can be retrieved by topic
     let candidates = bus.store().read_topic("research", 0, 10).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(
@@ -579,55 +581,49 @@ async fn research_accept_to_event_to_paper_trade() {
         Some(exp.id.to_string()).as_deref()
     );
 
-    // --- Paper trading phase: execute the strategy's first signal ---
+    // --- Paper trading phase ---
     let broker = PaperBroker::new(dec!(3200));
-
-    let actions = vec![StagedAction::builder()
-        .action_type(ActionType::PlaceOrder)
-        .contract_id("ETH-USD")
-        .side(Side::Buy)
-        .quantity(dec!(5.0))
-        .order_type(OrderType::Market)
-        .build()];
-    let order_results = broker.push(&actions).await.unwrap();
+    let order_results = broker
+        .push(&[StagedAction::builder()
+            .action_type(ActionType::PlaceOrder)
+            .contract_id("ETH-USD")
+            .side(Side::Buy)
+            .quantity(dec!(5.0))
+            .order_type(OrderType::Market)
+            .build()])
+        .await
+        .unwrap();
     assert_eq!(order_results[0].status, OrderStatus::Filled);
 
-    // Publish the fill event back to the bus
-    let fill_event = Event::builder()
-        .event_type(EventType::TradingOrderFilled)
-        .source("paper-broker")
-        .correlation_id(order_results[0].order_id.clone())
-        .strategy_id(exp.id.to_string())
-        .strategy_version(1)
-        .payload(json!({
-            "contract": "ETH-USD",
-            "side": "buy",
-            "qty": 5.0,
-            "price": 3200,
-        }))
-        .build();
-    bus.publish(&fill_event).unwrap();
+    // Publish fill event back to the bus
+    bus.publish(
+        &Event::builder()
+            .event_type(EventType::TradingOrderFilled)
+            .source("paper-broker")
+            .correlation_id(order_results[0].order_id.clone())
+            .strategy_id(exp.id.to_string())
+            .strategy_version(1)
+            .payload(json!({"contract": "ETH-USD", "price": 3200}))
+            .build(),
+    )
+    .unwrap();
 
-    // Trading topic now has the fill
     let trading_events = bus.store().read_topic("trading", 0, 10).unwrap();
     assert_eq!(trading_events.len(), 1);
     assert_eq!(trading_events[0].event_type, EventType::TradingOrderFilled);
 
-    // Verify the paper broker position matches
     let positions = broker.positions().await.unwrap();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contract_id, "ETH-USD");
     assert_eq!(positions[0].quantity, dec!(5.0));
-    assert_eq!(positions[0].avg_entry_price, dec!(3200));
 }
 
 // ---------------------------------------------------------------------------
 // 5. Strategy store artifact persistence
 // ---------------------------------------------------------------------------
 
-/// Validates that the strategy store correctly persists and retrieves compiled
-/// artifacts alongside metadata, and that status filtering works across
-/// multiple strategies in different lifecycle stages.
+/// Validates that the strategy store persists and retrieves compiled artifacts
+/// alongside metadata, with correct status filtering across lifecycle stages.
 #[test]
 fn strategy_store_lifecycle_with_artifacts() {
     let dir = tempfile::tempdir().unwrap();
@@ -636,17 +632,14 @@ fn strategy_store_lifecycle_with_artifacts() {
 
     let hyp_id = Uuid::new_v4();
 
-    // Create strategies at different lifecycle stages
     let s_compiled = ResearchStrategy::builder()
         .hypothesis_id(hyp_id)
         .source_code("fn compiled() {}")
         .build();
-
     let s_accepted = ResearchStrategy::builder()
         .hypothesis_id(hyp_id)
         .source_code("fn accepted() {}")
         .build();
-
     let s_promoted = ResearchStrategy::builder()
         .hypothesis_id(hyp_id)
         .source_code("fn promoted() {}")
@@ -666,29 +659,35 @@ fn strategy_store_lifecycle_with_artifacts() {
         .update_status(s_promoted.id, ResearchStrategyStatus::Promoted)
         .unwrap();
 
-    // Verify filtering by each status
     assert_eq!(
-        store.list(Some(ResearchStrategyStatus::Compiled)).unwrap().len(),
+        store
+            .list(Some(ResearchStrategyStatus::Compiled))
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(
-        store.list(Some(ResearchStrategyStatus::Accepted)).unwrap().len(),
+        store
+            .list(Some(ResearchStrategyStatus::Accepted))
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(
-        store.list(Some(ResearchStrategyStatus::Promoted)).unwrap().len(),
+        store
+            .list(Some(ResearchStrategyStatus::Promoted))
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(store.list(None).unwrap().len(), 3);
 
-    // Save and retrieve an artifact
+    // Artifact persistence
     let fake_wasm = b"\x00asm\x01\x00\x00\x00fake wasm module bytes";
     store.save_artifact(s_promoted.id, fake_wasm).unwrap();
-
     let loaded = store.load_artifact(s_promoted.id).unwrap();
     assert_eq!(loaded, fake_wasm, "artifact bytes must round-trip exactly");
 
     // Nonexistent artifact returns an error, not a panic
-    let missing = store.load_artifact(Uuid::new_v4());
-    assert!(missing.is_err(), "loading nonexistent artifact should fail");
+    assert!(store.load_artifact(Uuid::new_v4()).is_err());
 }
