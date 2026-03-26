@@ -20,6 +20,7 @@ rara-event-bus.workspace = true
 
 [build-dependencies]
 tonic-build = "0.13"
+protox = "0.9"
 
 [lints]
 workspace = true
