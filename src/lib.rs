@@ -10,6 +10,7 @@ pub use rara_server as server;
 pub use rara_trading_engine as trading;
 pub use rara_tui as tui;
 
+pub mod accounts_config;
 pub mod app_config;
 pub mod cli;
 pub mod daemon;
