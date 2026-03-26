@@ -9,7 +9,7 @@ pub fn load_accounts() -> AccountsConfig {
     load_accounts_from_path(&crate::paths::accounts_file())
 }
 
-/// Load accounts from a specific path.
+/// Load accounts from a specific path via the `config` crate.
 ///
 /// Falls back to empty config if the file does not exist.
 /// After loading, environment variables override sensitive fields per account:
@@ -19,14 +19,12 @@ pub fn load_accounts() -> AccountsConfig {
 ///
 /// where `{ID}` is the account id uppercased with hyphens replaced by underscores.
 pub fn load_accounts_from_path(path: &Path) -> AccountsConfig {
-    // Parse TOML directly for correct serde handling of adjacently tagged
-    // enums (BrokerConfig). The config crate's intermediate representation
-    // loses the tag discrimination needed by `#[serde(tag, content)]`.
-    let mut cfg = if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(parsed) = toml::from_str::<AccountsConfig>(&contents)
-    {
-        parsed
+    let mut cfg: AccountsConfig = if path.exists() {
+        let settings = config::Config::builder()
+            .add_source(config::File::from(path))
+            .build()
+            .unwrap_or_default();
+        settings.try_deserialize().unwrap_or_default()
     } else {
         AccountsConfig::default()
     };
@@ -141,27 +139,24 @@ fill_price = 50000.0
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
-    use tempfile::NamedTempFile;
-
     use super::*;
 
     #[test]
     fn load_from_toml_file() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(
-            f,
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("accounts.toml");
+        std::fs::write(
+            &path,
             r#"
             [[accounts]]
             id = "paper-btc"
             broker = "paper"
             [accounts.broker_config]
             fill_price = 100.0
-        "#
+        "#,
         )
         .unwrap();
-        let cfg = load_accounts_from_path(f.path());
+        let cfg = load_accounts_from_path(&path);
         assert_eq!(cfg.accounts.len(), 1);
         assert_eq!(cfg.accounts[0].id, "paper-btc");
     }
