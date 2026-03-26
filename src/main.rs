@@ -440,7 +440,9 @@ async fn run() -> error::Result<()> {
             run_serve(port).await?;
         }
         Command::Tui { server } => {
-            rara_tui::event_loop::run(server.as_deref()).await.context(TuiSnafu)?;
+            rara_tui::event_loop::run(server.as_deref(), crate::paths::strategies_promoted_dir())
+                .await
+                .context(TuiSnafu)?;
         }
         Command::Feedback { action } => {
             run_feedback(action)?;
