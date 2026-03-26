@@ -10,6 +10,7 @@ pub use rara_trading_engine as trading;
 
 pub mod app_config;
 pub mod cli;
+pub mod daemon;
 pub mod error;
 pub mod http;
 pub mod paths;
