@@ -4042,6 +4042,7 @@ dependencies = [
  "rara-infra",
  "rara-market-data",
  "rara-strategy-api",
+ "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
  "serde",

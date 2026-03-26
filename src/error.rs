@@ -65,6 +65,11 @@ pub enum AppError {
 
     #[snafu(display("TUI error: {source}"))]
     Tui { source: rara_tui::error::TuiError },
+
+    #[snafu(display("strategy registry error: {source}"))]
+    Registry {
+        source: crate::research::strategy_registry::RegistryError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
