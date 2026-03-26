@@ -31,6 +31,7 @@ impl EventBus {
 
     /// Publish an event: persist it and broadcast the sequence number to
     /// online subscribers.
+    #[tracing::instrument(skip(self, event), fields(event_type = %event.event_type, event_id = %event.event_id))]
     pub fn publish(&self, event: &Event) -> Result<u64> {
         let seq = self.store.append(event)?;
         // Ignore send error — it just means no active subscribers

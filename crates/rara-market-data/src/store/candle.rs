@@ -49,6 +49,7 @@ impl MarketStore {
     /// Batch insert candles with ON CONFLICT DO NOTHING for idempotency.
     ///
     /// Returns the number of rows actually inserted (excluding conflicts).
+    #[tracing::instrument(skip(self, candles), fields(candle_count = candles.len()))]
     pub async fn insert_candles(&self, candles: &[CandleRow]) -> Result<u64> {
         if candles.is_empty() {
             return Ok(0);
@@ -87,6 +88,7 @@ impl MarketStore {
     }
 
     /// Query candles for a given instrument and time range, ordered by time ascending.
+    #[tracing::instrument(skip(self))]
     pub async fn query_candles(
         &self,
         instrument_id: &str,

@@ -150,6 +150,7 @@ impl ResearchLoop {
     /// Steps: generate hypothesis -> generate code -> compile ->
     /// load into runtime -> backtest -> generate feedback -> record in DAG ->
     /// publish events.
+    #[tracing::instrument(skip(self, context), fields(context_len = context.len()))]
     pub async fn run_iteration(&self, context: &str) -> Result<IterationResult> {
         // 1. Generate hypothesis
         let hypothesis = self
@@ -279,6 +280,7 @@ impl ResearchLoop {
     ///
     /// Only persists the strategy record and artifact after a successful compilation,
     /// avoiding orphaned records from failed attempts.
+    #[tracing::instrument(skip(self, code, hypothesis), fields(hypothesis_id = %hypothesis.id))]
     async fn compile_with_retries(
         &self,
         code: &mut String,
