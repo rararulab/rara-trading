@@ -59,6 +59,12 @@ pub enum AppError {
     DataFetch {
         source: rara_market_data::fetcher::FetchError,
     },
+
+    #[snafu(display("gRPC server error: {source}"))]
+    GrpcServe { source: tonic::transport::Error },
+
+    #[snafu(display("TUI error: {source}"))]
+    Tui { source: rara_tui::error::TuiError },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

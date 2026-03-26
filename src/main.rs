@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -13,7 +15,8 @@ use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
-    IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
+    GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, TraceSnafu,
+    TuiSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::logging::{self, LoggingConfig};
@@ -376,6 +379,12 @@ async fn run() -> error::Result<()> {
                 );
                 std::process::exit(1);
             }
+        }
+        Command::Serve { port } => {
+            run_serve(port).await?;
+        }
+        Command::Tui { server } => {
+            rara_tui::event_loop::run(&server).await.context(TuiSnafu)?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -1034,6 +1043,28 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
         })
         .expect("ResearchPromotedResponse must serialize")
     );
+    Ok(())
+}
+
+/// Start the gRPC server on the given port.
+async fn run_serve(port: u16) -> error::Result<()> {
+    use rara_server::rara_proto::rara_service_server::RaraServiceServer;
+    use rara_server::service::RaraServiceImpl;
+
+    let addr = format!("0.0.0.0:{port}")
+        .parse::<std::net::SocketAddr>()
+        .map_err(|_| error::AppError::Config {
+            message: format!("invalid port: {port}"),
+        })?;
+
+    eprintln!("gRPC server listening on {addr}");
+
+    tonic::transport::Server::builder()
+        .add_service(RaraServiceServer::new(RaraServiceImpl::new()))
+        .serve(addr)
+        .await
+        .context(GrpcServeSnafu)?;
+
     Ok(())
 }
 

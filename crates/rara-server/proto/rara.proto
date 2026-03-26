@@ -1,0 +1,31 @@
+syntax = "proto3";
+package rara;
+
+service RaraService {
+  rpc GetSystemStatus(Empty) returns (SystemStatus);
+  rpc StreamEvents(EventFilter) returns (stream EventMessage);
+}
+
+message Empty {}
+
+message SystemStatus {
+  bool database_connected = 1;
+  bool websocket_connected = 2;
+  bool llm_available = 3;
+  uint64 event_count = 4;
+  string uptime = 5;
+  uint32 strategy_count = 6;
+}
+
+message EventFilter {
+  string topic = 1;  // empty = all topics
+}
+
+message EventMessage {
+  uint64 sequence = 1;
+  string event_type = 2;
+  string timestamp = 3;
+  string source = 4;
+  string strategy_id = 5;
+  string payload_json = 6;
+}
