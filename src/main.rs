@@ -11,7 +11,7 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, ResearchAction};
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, ResearchAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
@@ -207,6 +207,26 @@ struct ResearchPromotedResponse {
     strategies: Vec<PromotedItem>,
 }
 
+#[derive(Serialize)]
+struct EvaluationEntry {
+    timestamp: String,
+    strategy_id: String,
+    decision: String,
+    reason: String,
+    sharpe_ratio: f64,
+    win_rate: f64,
+    trade_count: u64,
+    pnl: String,
+    max_drawdown: String,
+}
+
+#[derive(Serialize)]
+struct FeedbackReportResponse {
+    ok: bool,
+    action: &'static str,
+    evaluations: Vec<EvaluationEntry>,
+}
+
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
 use rara_trading::research::wasm_executor::WasmExecutor;
@@ -385,6 +405,9 @@ async fn run() -> error::Result<()> {
         }
         Command::Tui { server } => {
             rara_tui::event_loop::run(&server).await.context(TuiSnafu)?;
+        }
+        Command::Feedback { action } => {
+            run_feedback(action)?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -618,6 +641,132 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
         ("server.listen_addr".into(), cfg.server.listen_addr.clone()),
         ("server.port".into(), cfg.server.port.to_string()),
     ]
+}
+
+/// Execute the feedback subcommand.
+fn run_feedback(action: FeedbackAction) -> error::Result<()> {
+    match action {
+        FeedbackAction::Report { strategy, limit } => {
+            run_feedback_report(strategy.as_deref(), limit)
+        }
+
+    }
+}
+
+/// Display strategy evaluation history from the event bus.
+///
+/// Reads all feedback-topic events, parses evaluation payloads, optionally
+/// filters by strategy ID, sorts by timestamp descending, and prints a
+/// human-readable table to stderr and JSON to stdout.
+fn run_feedback_report(strategy: Option<&str>, limit: usize) -> error::Result<()> {
+    let events_path = paths::data_dir().join("trace/events");
+    let event_bus = EventBus::open(&events_path).context(EventBusSnafu)?;
+
+    // Read a large batch of feedback events from the store
+    let events = event_bus
+        .store()
+        .read_topic("feedback", 0, 10_000)
+        .context(EventBusSnafu)?;
+
+    let mut entries: Vec<EvaluationEntry> = events
+        .into_iter()
+        .filter(|e| {
+            strategy.is_none_or(|s| e.strategy_id.as_deref() == Some(s))
+        })
+        .map(|e| {
+            let p = &e.payload;
+            EvaluationEntry {
+                timestamp: e.timestamp.to_string(),
+                strategy_id: e
+                    .strategy_id
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                decision: p["decision"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_owned(),
+                reason: p["reason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+                sharpe_ratio: p["sharpe_ratio"].as_f64().unwrap_or(0.0),
+                win_rate: p["win_rate"].as_f64().unwrap_or(0.0),
+                trade_count: p["trade_count"].as_u64().unwrap_or(0),
+                pnl: p["pnl"]
+                    .as_str()
+                    .unwrap_or("0")
+                    .to_owned(),
+                max_drawdown: p["max_drawdown"]
+                    .as_str()
+                    .unwrap_or("0")
+                    .to_owned(),
+            }
+        })
+        .collect();
+
+    // Most recent first
+    entries.reverse();
+    entries.truncate(limit);
+
+    // Print human-readable table to stderr
+    eprintln!(
+        "{:<24} {:<16} {:<9} {:>7} {:>9} {:>7} {:>7} {:>10}",
+        "Time", "Strategy", "Decision", "Sharpe", "DD", "Win%", "Trades", "PnL"
+    );
+    for entry in &entries {
+        // Format win rate as percentage
+        let win_pct = format!("{:.1}%", entry.win_rate * 100.0);
+        // Format drawdown
+        let dd = format_drawdown(&entry.max_drawdown);
+        // Format PnL with sign
+        let pnl = format_pnl(&entry.pnl);
+        // Truncate timestamp to minutes
+        let ts = entry
+            .timestamp
+            .get(..16)
+            .unwrap_or(&entry.timestamp);
+        eprintln!(
+            "{:<24} {:<16} {:<9} {:>7.2} {:>9} {:>7} {:>7} {:>10}",
+            ts,
+            entry.strategy_id,
+            entry.decision,
+            entry.sharpe_ratio,
+            dd,
+            win_pct,
+            entry.trade_count,
+            pnl,
+        );
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string(&FeedbackReportResponse {
+            ok: true,
+            action: "feedback.report",
+            evaluations: entries,
+        })
+        .expect("FeedbackReportResponse must serialize")
+    );
+    Ok(())
+}
+
+/// Format a drawdown decimal string as a negative percentage (e.g. "0.05" -> "-5.0%").
+fn format_drawdown(dd: &str) -> String {
+    dd.parse::<f64>()
+        .map_or_else(|_| dd.to_owned(), |v| format!("-{:.1}%", v * 100.0))
+}
+
+/// Format a `PnL` string with a sign prefix (e.g. "234.50" -> "+$234", "-124" -> "-$124").
+fn format_pnl(pnl: &str) -> String {
+    pnl.parse::<f64>().map_or_else(
+        |_| pnl.to_owned(),
+        |v| {
+            if v >= 0.0 {
+                format!("+${v:.0}")
+            } else {
+                format!("-${:.0}", v.abs())
+            }
+        },
+    )
 }
 
 /// Execute the data subcommand.
