@@ -22,6 +22,7 @@ use rara_server::rara_proto::Empty;
 
 use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_RESEARCH, TRADING_TAB};
 use crate::error::{IoSnafu, Result};
+use crate::server_process::ServerProcess;
 use crate::tabs;
 use crate::ui;
 
@@ -31,11 +32,30 @@ const TICK_RATE: Duration = Duration::from_millis(1000);
 /// Duration for crossterm event polling.
 const POLL_TIMEOUT: Duration = Duration::from_millis(100);
 
-/// Run the TUI event loop, connecting to the given gRPC server address.
+/// Run the TUI event loop.
+///
+/// When `server_addr` is `Some`, connects to an existing gRPC server.
+/// When `None` (standalone mode), auto-spawns a `rara-trading serve` child
+/// process on a random available port and connects to it.
 ///
 /// This function takes ownership of the terminal for the duration of the
-/// application. On exit (or panic), the terminal is restored.
-pub async fn run(server_addr: &str) -> Result<()> {
+/// application. On exit (or panic), the terminal is restored and any spawned
+/// server subprocess is killed.
+pub async fn run(server_addr: Option<&str>) -> Result<()> {
+    // In standalone mode, spawn a server subprocess
+    let mut server_process = if server_addr.is_some() {
+        None
+    } else {
+        info!("no --server provided, spawning gRPC server subprocess (standalone mode)");
+        Some(ServerProcess::spawn().await?)
+    };
+
+    let effective_addr = match (&server_process, server_addr) {
+        (Some(proc), _) => proc.server_addr(),
+        (_, Some(addr)) => addr.to_string(),
+        _ => unreachable!(),
+    };
+
     // Terminal setup
     enable_raw_mode().context(IoSnafu)?;
     let mut stdout = io::stdout();
@@ -43,10 +63,10 @@ pub async fn run(server_addr: &str) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context(IoSnafu)?;
 
-    let mut app = App::new(server_addr.to_string());
+    let mut app = App::new(effective_addr.clone());
 
     // Try initial connection
-    let mut client = try_connect(server_addr).await;
+    let mut client = try_connect(&effective_addr).await;
     if client.is_some() {
         app.connection_status = ConnectionStatus::Connected;
     }
@@ -59,6 +79,11 @@ pub async fn run(server_addr: &str) -> Result<()> {
     disable_raw_mode().context(IoSnafu)?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen).context(IoSnafu)?;
     terminal.show_cursor().context(IoSnafu)?;
+
+    // Shutdown spawned server subprocess if we started one
+    if let Some(proc) = server_process.as_mut() {
+        proc.shutdown().await;
+    }
 
     result
 }
@@ -234,7 +259,7 @@ fn handle_events_search_key(app: &mut App, key: KeyCode) {
 }
 
 /// Handle key presses specific to the Research tab.
-fn handle_research_key(app: &mut App, key: KeyCode) {
+const fn handle_research_key(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('j') | KeyCode::Down => app.research.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.research.select_prev(),

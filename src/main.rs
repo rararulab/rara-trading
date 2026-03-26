@@ -440,7 +440,7 @@ async fn run() -> error::Result<()> {
             run_serve(port).await?;
         }
         Command::Tui { server } => {
-            rara_tui::event_loop::run(&server).await.context(TuiSnafu)?;
+            rara_tui::event_loop::run(server.as_deref()).await.context(TuiSnafu)?;
         }
         Command::Feedback { action } => {
             run_feedback(action)?;
