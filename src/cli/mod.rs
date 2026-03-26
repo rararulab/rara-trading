@@ -77,6 +77,26 @@ pub enum Command {
         #[arg(long, default_value = "http://127.0.0.1:50051")]
         server: String,
     },
+
+    /// Feedback loop operations.
+    Feedback {
+        #[command(subcommand)]
+        action: FeedbackAction,
+    },
+}
+
+/// Feedback loop subcommands.
+#[derive(Subcommand, Debug)]
+pub enum FeedbackAction {
+    /// Show strategy evaluation history.
+    Report {
+        /// Filter by strategy ID.
+        #[arg(long)]
+        strategy: Option<String>,
+        /// Maximum number of entries to show.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
 }
 
 /// Data management subcommands.
