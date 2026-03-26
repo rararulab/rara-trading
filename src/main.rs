@@ -245,6 +245,23 @@ struct PaperStatusResponse {
     total_trades: usize,
 }
 
+/// Response payload for `paper stop`.
+#[derive(Serialize)]
+struct PaperStopResponse {
+    ok: bool,
+    action: &'static str,
+    message: String,
+}
+
+/// Summary printed after graceful shutdown of paper trading.
+#[derive(Serialize)]
+struct PaperShutdownSummary {
+    ok: bool,
+    action: &'static str,
+    duration_secs: u64,
+    total_trades: usize,
+}
+
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
 use rara_trading::research::strategy_executor::StrategyExecutor;
@@ -1245,6 +1262,10 @@ async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {
         PaperAction::Start { contracts } => run_paper_start(contracts).await,
         PaperAction::Status => run_paper_status(),
+        PaperAction::Stop => {
+            run_paper_stop();
+            Ok(())
+        }
     }
 }
 
@@ -1335,6 +1356,27 @@ fn run_paper_status() -> error::Result<()> {
     Ok(())
 }
 
+/// Show instructions for stopping paper trading.
+///
+/// Paper trading runs in the foreground, so the user should press Ctrl+C in
+/// the terminal where `paper start` is running. This command simply prints
+/// that guidance.
+fn run_paper_stop() {
+    let message =
+        "Paper trading runs in the foreground. Press Ctrl+C in the terminal where it's running."
+            .to_string();
+    eprintln!("{message}");
+    println!(
+        "{}",
+        serde_json::to_string(&PaperStopResponse {
+            ok: true,
+            action: "paper.stop",
+            message,
+        })
+        .expect("PaperStopResponse must serialize")
+    );
+}
+
 /// Load promoted WASM strategies for the given contracts.
 ///
 /// Reads all promoted strategy definitions from `promoted_dir`, compiles each
@@ -1393,7 +1435,9 @@ fn load_strategies_for_contracts(
 ///
 /// Connects to Binance WebSocket for live kline data, loads promoted WASM
 /// strategies, and runs the signal loop through a paper broker. Blocks until
-/// Ctrl+C is received, then gracefully shuts down all tasks.
+/// Ctrl+C is received, then gracefully shuts down all tasks and prints a
+/// session summary.
+#[allow(clippy::too_many_lines)]
 async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()> {
     use futures_util::StreamExt;
     use rara_trading::trading::brokers::paper::PaperBroker;
@@ -1418,9 +1462,10 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
         return Ok(());
     }
 
+    let strategy_count = loaded_strategies.len();
     eprintln!(
         "Loaded {} strategy instances for {} contracts",
-        loaded_strategies.len(),
+        strategy_count,
         contracts.len()
     );
 
@@ -1431,6 +1476,10 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
         Box::new(PaperBroker::new(dec!(0)));
     let guard_pipeline = GuardPipeline::new(vec![]);
     let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
+
+    // Shutdown signal via watch channel — tasks check this to drain gracefully
+    let (shutdown_tx, mut shutdown_rx_agg) = tokio::sync::watch::channel(false);
+    let mut shutdown_rx_sig = shutdown_tx.subscribe();
 
     // Setup candle aggregator + WebSocket connection
     let (mut aggregator, candle_rx) = CandleAggregator::with_defaults();
@@ -1443,33 +1492,95 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
             message: format!("WebSocket connection failed: {e}"),
         })?;
 
-    // Spawn aggregator: forward raw klines into candle aggregator
+    // Spawn aggregator: forward raw klines into candle aggregator, exit on shutdown
     let agg_handle = tokio::spawn(async move {
-        while let Some(item) = kline_stream.next().await {
-            match item {
-                Ok(kline) => aggregator.process_kline(&kline),
-                Err(e) => {
-                    tracing::error!(error = %e, "kline stream error");
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_rx_agg.changed() => {
+                    tracing::info!("aggregator received shutdown signal");
                     break;
+                }
+                item = kline_stream.next() => {
+                    match item {
+                        Some(Ok(kline)) => aggregator.process_kline(&kline),
+                        Some(Err(e)) => {
+                            tracing::error!(error = %e, "kline stream error");
+                            break;
+                        }
+                        None => {
+                            tracing::info!("kline stream ended");
+                            break;
+                        }
+                    }
                 }
             }
         }
-        tracing::info!("kline stream ended");
     });
 
-    // Spawn signal loop
+    // Spawn signal loop: exits when the candle broadcast channel closes
     let signal_handle = tokio::spawn(async move {
-        run_signal_loop(candle_rx, engine, loaded_strategies).await;
+        // Wait for either shutdown signal or natural loop end
+        tokio::select! {
+            biased;
+            _ = shutdown_rx_sig.changed() => {
+                tracing::info!("signal loop received shutdown signal");
+            }
+            () = run_signal_loop(candle_rx, engine, loaded_strategies) => {}
+        }
     });
 
+    let start_time = std::time::Instant::now();
     eprintln!("Paper trading started. Press Ctrl+C to stop.");
+
     tokio::signal::ctrl_c()
         .await
         .expect("failed to listen for ctrl+c");
-    eprintln!("\nShutting down...");
+    eprintln!("\nShutting down gracefully...");
 
-    agg_handle.abort();
-    signal_handle.abort();
+    // Signal all tasks to stop
+    let _ = shutdown_tx.send(true);
+
+    // Wait for tasks to drain with a timeout
+    let drain_timeout = std::time::Duration::from_secs(5);
+    let _ = tokio::time::timeout(drain_timeout, async {
+        let _ = agg_handle.await;
+        let _ = signal_handle.await;
+    })
+    .await;
+
+    let duration = start_time.elapsed();
+    let duration_secs = duration.as_secs();
+    let hours = duration_secs / 3600;
+    let minutes = (duration_secs % 3600) / 60;
+
+    // Count trades from event bus for the summary
+    let trade_count = event_bus
+        .store()
+        .read_topic("trading", 0, 100_000)
+        .map(|events| {
+            events
+                .iter()
+                .filter(|e| e.event_type == rara_domain::event::EventType::TradingOrderFilled)
+                .count()
+        })
+        .unwrap_or(0);
+
+    eprintln!("=== Paper Trading Summary ===");
+    eprintln!("Duration: {hours}h {minutes}m");
+    eprintln!("Strategies: {strategy_count}");
+    eprintln!("Total Trades: {trade_count}");
+
+    println!(
+        "{}",
+        serde_json::to_string(&PaperShutdownSummary {
+            ok: true,
+            action: "paper.start",
+            duration_secs,
+            total_trades: trade_count,
+        })
+        .expect("PaperShutdownSummary must serialize")
+    );
 
     eprintln!("Paper trading stopped.");
     Ok(())

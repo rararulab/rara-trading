@@ -119,6 +119,9 @@ pub enum PaperAction {
 
     /// Show paper trading status (strategies, positions, `PnL`).
     Status,
+
+    /// Stop paper trading gracefully.
+    Stop,
 }
 
 /// Data management subcommands.
