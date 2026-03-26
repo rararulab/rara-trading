@@ -84,6 +84,7 @@ pub enum Command {
         action: FeedbackAction,
     },
 
+
     /// Paper trading operations.
     Paper {
         #[command(subcommand)]
@@ -105,6 +106,7 @@ pub enum FeedbackAction {
     },
 }
 
+
 /// Paper trading subcommands.
 #[derive(Subcommand, Debug)]
 pub enum PaperAction {
@@ -114,6 +116,12 @@ pub enum PaperAction {
         #[arg(long)]
         contracts: Option<String>,
     },
+
+    /// Show paper trading status (strategies, positions, `PnL`).
+    Status,
+
+    /// Stop paper trading gracefully.
+    Stop,
 }
 
 /// Data management subcommands.
