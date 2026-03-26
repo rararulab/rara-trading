@@ -60,21 +60,67 @@ fn render_wide(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Single-column layout for narrow terminals (<120 cols).
+///
+/// Renders a compact system+research status bar at top, then stacks
+/// strategies, positions, alerts, and recent events vertically.
 fn render_narrow(frame: &mut Frame, app: &App, area: Rect) {
     let panes = Layout::vertical([
-        Constraint::Length(6),  // strategies (compact)
-        Constraint::Length(6),  // positions (compact)
-        Constraint::Length(4),  // system status (compact)
-        Constraint::Length(5),  // research progress
+        Constraint::Length(3),  // system + research compact bar
+        Constraint::Length(5),  // strategies (compact)
+        Constraint::Length(5),  // positions (compact)
+        Constraint::Length(4),  // alerts
         Constraint::Min(3),    // recent events (fill)
     ])
     .split(area);
 
-    render_strategies(frame, app, panes[0]);
-    render_positions(frame, app, panes[1]);
-    render_system_status(frame, app, panes[2]);
-    render_research_progress(frame, app, panes[3]);
+    render_narrow_status_bar(frame, app, panes[0]);
+    render_strategies(frame, app, panes[1]);
+    render_positions(frame, app, panes[2]);
+    render_alerts(frame, app, panes[3]);
     render_recent_events(frame, app, panes[4]);
+}
+
+/// Compact single-row status bar combining system health and research progress.
+fn render_narrow_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let block = pane_block(" System ");
+
+    let mut spans: Vec<Span> = vec![Span::styled("  ", theme::muted())];
+
+    // System connection indicators
+    if let Some(status) = &app.system_status {
+        spans.push(Span::styled("DB ", theme::muted()));
+        spans.push(indicator_dot(status.database_connected));
+        spans.push(Span::styled("  WS ", theme::muted()));
+        spans.push(indicator_dot(status.websocket_connected));
+        spans.push(Span::styled("  LLM ", theme::muted()));
+        spans.push(indicator_dot(status.llm_available));
+    } else {
+        spans.push(Span::styled("Connecting...", theme::muted()));
+    }
+
+    // Research summary on the same line
+    if let Some(rp) = &app.research_progress {
+        spans.push(Span::styled("  | Research ", theme::muted()));
+        spans.push(Span::styled(
+            format!("{}/{}", rp.current, rp.total),
+            ratatui::style::Style::default().fg(theme::IRIS),
+        ));
+        spans.push(Span::styled(
+            format!(" \u{2713}{}", rp.accepted),
+            theme::positive(),
+        ));
+        spans.push(Span::styled(
+            format!(" \u{2717}{}", rp.rejected),
+            theme::negative(),
+        ));
+        spans.push(Span::styled(
+            format!(" \u{2699}{}", rp.in_progress),
+            theme::warning(),
+        ));
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans)).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 /// Render the strategies table pane.
@@ -82,9 +128,10 @@ fn render_strategies(frame: &mut Frame, app: &App, area: Rect) {
     let block = pane_block(" Strategies ");
 
     if app.strategies.is_empty() {
-        let empty = Paragraph::new("  No strategies loaded")
-            .style(theme::muted())
-            .block(block);
+        let empty =
+            Paragraph::new("  No strategies yet. Run \"rara research run\" to start.")
+                .style(theme::muted())
+                .block(block);
         frame.render_widget(empty, area);
         return;
     }
@@ -104,9 +151,10 @@ fn render_strategies(frame: &mut Frame, app: &App, area: Rect) {
             let pnl_style = pnl_style(s.pnl);
             Row::new(vec![
                 Cell::from(s.name.as_str()).style(theme::text()),
-                Cell::from(s.status.as_str()).style(status_style(&s.status)),
+                Cell::from(format!("\u{25cf}{}", s.status)).style(status_style(&s.status)),
                 Cell::from(format!("{:+.2}", s.pnl)).style(pnl_style),
-                Cell::from(format!("{:.2}", s.sharpe)).style(theme::text()),
+                Cell::from(format!("{:.2}", s.sharpe))
+                    .style(ratatui::style::Style::default().fg(theme::IRIS)),
             ])
         })
         .collect();
@@ -131,7 +179,7 @@ fn render_positions(frame: &mut Frame, app: &App, area: Rect) {
     let block = pane_block(" Positions ");
 
     if app.positions.is_empty() {
-        let empty = Paragraph::new("  No open positions")
+        let empty = Paragraph::new("  No open positions.")
             .style(theme::muted())
             .block(block);
         frame.render_widget(empty, area);
@@ -191,7 +239,7 @@ fn render_recent_events(frame: &mut Frame, app: &App, area: Rect) {
     let block = pane_block(" Recent Events ");
 
     if app.recent_events.is_empty() {
-        let empty = Paragraph::new("  No recent events")
+        let empty = Paragraph::new("  Waiting for events...")
             .style(theme::muted())
             .block(block);
         frame.render_widget(empty, area);
@@ -224,7 +272,7 @@ fn render_system_status(frame: &mut Frame, app: &App, area: Rect) {
     let lines: Vec<Line> = app.system_status.as_ref().map_or_else(
         || {
             vec![Line::from(Span::styled(
-                "  Waiting for server status...",
+                "  Connecting to server...",
                 theme::muted(),
             ))]
         },
@@ -257,7 +305,7 @@ fn render_alerts(frame: &mut Frame, app: &App, area: Rect) {
     let block = pane_block(" Alerts ");
 
     if app.alerts.is_empty() {
-        let empty = Paragraph::new("  No active alerts")
+        let empty = Paragraph::new("  No alerts. All clear.")
             .style(theme::muted())
             .block(block);
         frame.render_widget(empty, area);
@@ -300,7 +348,7 @@ fn render_research_progress(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("{}", rp.in_progress), theme::warning()),
             rp.sota_sharpe.map_or_else(
                 || Span::raw(""),
-                |sharpe| Span::styled(format!("  SOTA Sharpe: {sharpe:.2}"), theme::highlight()),
+                |sharpe| Span::styled(format!("  SOTA Sharpe: {sharpe:.2}"), theme::positive()),
             ),
         ]);
         frame.render_widget(Paragraph::new(summary), panes[0]);
@@ -314,7 +362,7 @@ fn render_research_progress(frame: &mut Frame, app: &App, area: Rect) {
         let gauge = Gauge::default()
             .gauge_style(
                 ratatui::style::Style::default()
-                    .fg(theme::FOAM)
+                    .fg(theme::IRIS)
                     .bg(theme::OVERLAY)
                     .add_modifier(Modifier::BOLD),
             )
@@ -322,7 +370,7 @@ fn render_research_progress(frame: &mut Frame, app: &App, area: Rect) {
             .label(format!("{}/{}", rp.current, rp.total));
         frame.render_widget(gauge, panes[1]);
     } else {
-        let empty = Paragraph::new("  No research running")
+        let empty = Paragraph::new("  Research loop not running.")
             .style(theme::muted())
             .block(block);
         frame.render_widget(empty, area);
@@ -379,8 +427,17 @@ fn event_type_style(event_type: &str) -> ratatui::style::Style {
 /// Return a connection status span (connected/disconnected).
 fn connection_span(connected: bool) -> Span<'static> {
     if connected {
-        Span::styled("Connected", theme::positive())
+        Span::styled("\u{25cf} Connected", theme::positive())
     } else {
-        Span::styled("Disconnected", theme::negative())
+        Span::styled("\u{25cf} Disconnected", theme::negative())
+    }
+}
+
+/// Return a colored dot indicator for compact layouts.
+fn indicator_dot(connected: bool) -> Span<'static> {
+    if connected {
+        Span::styled("\u{25cf}", theme::positive())
+    } else {
+        Span::styled("\u{25cf}", theme::negative())
     }
 }
