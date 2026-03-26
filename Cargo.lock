@@ -4093,6 +4093,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snafu",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
