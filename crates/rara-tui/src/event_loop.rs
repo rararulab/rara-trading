@@ -4,6 +4,7 @@
 //! terminal setup/teardown.
 
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -41,7 +42,7 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(100);
 /// This function takes ownership of the terminal for the duration of the
 /// application. On exit (or panic), the terminal is restored and any spawned
 /// server subprocess is killed.
-pub async fn run(server_addr: Option<&str>) -> Result<()> {
+pub async fn run(server_addr: Option<&str>, promoted_dir: PathBuf) -> Result<()> {
     // In standalone mode, spawn a server subprocess
     let mut server_process = if server_addr.is_some() {
         None
@@ -55,7 +56,6 @@ pub async fn run(server_addr: Option<&str>) -> Result<()> {
         (_, Some(addr)) => addr.to_string(),
         _ => unreachable!(),
     };
-
     // Terminal setup
     enable_raw_mode().context(IoSnafu)?;
     let mut stdout = io::stdout();
@@ -63,7 +63,7 @@ pub async fn run(server_addr: Option<&str>) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context(IoSnafu)?;
 
-    let mut app = App::new(effective_addr.clone());
+    let mut app = App::new(effective_addr.clone(), promoted_dir);
 
     // Try initial connection
     let mut client = try_connect(&effective_addr).await;
@@ -274,7 +274,6 @@ fn handle_strategies_key(app: &mut App, key: KeyCode) {
         KeyCode::Char('j') | KeyCode::Down => app.strategies_state.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.strategies_state.select_previous(),
         KeyCode::Enter => app.strategies_state.toggle_detail(),
-        KeyCode::Char('d') => app.strategies_state.toggle_dag(),
         _ => {}
     }
 }
