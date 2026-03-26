@@ -513,7 +513,6 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) -> 
         // database
         "database.url" => cfg.database.url = value.to_string(),
         // trading
-        "trading.broker" => cfg.trading.broker = value.to_string(),
         "trading.max_position_size" => {
             cfg.trading.max_position_size = value.parse().map_err(|_| parse_err(key, value))?;
         }
@@ -573,8 +572,6 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> error::Result<Opt
         // database
         "database.url" => Ok(Some(cfg.database.url.clone())),
         // trading
-        "trading.broker" => Ok(Some(cfg.trading.broker.clone())),
-        "trading.contracts" => Ok(Some(cfg.trading.contracts.join(","))),
         "trading.max_position_size" => Ok(Some(cfg.trading.max_position_size.to_string())),
         "trading.max_drawdown_pct" => Ok(Some(cfg.trading.max_drawdown_pct.to_string())),
         "trading.max_concurrent_positions" => {
@@ -625,11 +622,6 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
         // database
         ("database.url".into(), cfg.database.url.clone()),
         // trading
-        ("trading.broker".into(), cfg.trading.broker.clone()),
-        (
-            "trading.contracts".into(),
-            cfg.trading.contracts.join(","),
-        ),
         (
             "trading.max_position_size".into(),
             cfg.trading.max_position_size.to_string(),
@@ -1453,8 +1445,17 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
     use rara_market_data::stream::binance_ws::BinanceWsClient;
 
     let cfg = app_config::load();
+    // Contracts are now configured per-account in accounts.toml;
+    // the --contracts CLI flag can still override for ad-hoc runs.
     let contracts: Vec<String> = contracts_override.map_or_else(
-        || cfg.trading.contracts.clone(),
+        || {
+            let accts = rara_trading::accounts_config::load_accounts();
+            accts
+                .accounts
+                .into_iter()
+                .flat_map(|a| a.contracts)
+                .collect::<Vec<_>>()
+        },
         |c| c.split(',').map(|s| s.trim().to_string()).collect(),
     );
 
