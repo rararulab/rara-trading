@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
+use crate::account_config::AccountConfig;
 use crate::health::{BrokerHealth, BrokerHealthInfo};
 use crate::uta::UnifiedTradingAccount;
 
@@ -87,6 +88,19 @@ pub struct AccountManager {
 }
 
 impl AccountManager {
+    /// Build an `AccountManager` from declarative account configs.
+    ///
+    /// Only enabled accounts are initialized. Disabled accounts are skipped.
+    pub fn from_config(accounts: &[AccountConfig]) -> Result<Self, AccountManagerError> {
+        let mut mgr = Self::new();
+        for acc in accounts.iter().filter(|a| a.enabled) {
+            let broker = acc.broker_config.create_broker();
+            let label = acc.label.as_deref().unwrap_or(&acc.id);
+            mgr.add(UnifiedTradingAccount::new(&acc.id, label, broker));
+        }
+        Ok(mgr)
+    }
+
     /// Create an empty account manager.
     pub fn new() -> Self {
         Self {
@@ -237,6 +251,7 @@ mod tests {
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
+    use crate::account_config::{BrokerConfig, PaperBrokerConfig};
     use crate::brokers::paper::PaperBroker;
     use crate::uta::UnifiedTradingAccount;
 
@@ -347,5 +362,53 @@ mod tests {
             assert_eq!(entry.equity, dec!(100_000));
             assert_eq!(entry.health, BrokerHealth::Healthy);
         }
+    }
+
+    #[test]
+    fn from_config_creates_enabled_accounts() {
+        let accounts = vec![
+            AccountConfig {
+                id: "paper-1".to_string(),
+                label: Some("Paper One".to_string()),
+                broker_config: BrokerConfig::Paper(PaperBrokerConfig {
+                    fill_price: Some(100.0),
+                }),
+                enabled: true,
+                contracts: vec!["BTC-USDT".to_string()],
+            },
+            AccountConfig {
+                id: "paper-2".to_string(),
+                label: None,
+                broker_config: BrokerConfig::Paper(PaperBrokerConfig {
+                    fill_price: None,
+                }),
+                enabled: false,
+                contracts: vec![],
+            },
+        ];
+        let mgr = AccountManager::from_config(&accounts).unwrap();
+        assert_eq!(mgr.size(), 1);
+        assert!(mgr.has("paper-1"));
+        assert!(!mgr.has("paper-2"));
+    }
+
+    #[test]
+    fn from_config_uses_label() {
+        let accounts = vec![AccountConfig {
+            id: "test".to_string(),
+            label: Some("My Label".to_string()),
+            broker_config: BrokerConfig::Paper(PaperBrokerConfig { fill_price: None }),
+            enabled: true,
+            contracts: vec![],
+        }];
+        let mgr = AccountManager::from_config(&accounts).unwrap();
+        let list = mgr.list();
+        assert_eq!(list[0].1, "My Label");
+    }
+
+    #[test]
+    fn from_config_empty() {
+        let mgr = AccountManager::from_config(&[]).unwrap();
+        assert_eq!(mgr.size(), 0);
     }
 }

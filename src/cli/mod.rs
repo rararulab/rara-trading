@@ -49,10 +49,9 @@ pub enum Command {
 
     /// Run the full trading loop: research, paper trading, feedback, and gRPC
     /// server as concurrent tasks in a single process.
+    ///
+    /// Accounts and contracts are loaded from `accounts.toml`.
     Run {
-        /// Contracts to trade (comma-separated).
-        #[arg(long, default_value = "BTC-USDT")]
-        contracts: String,
         /// Number of research iterations per cycle.
         #[arg(long, default_value = "10")]
         iterations: u32,
@@ -61,8 +60,11 @@ pub enum Command {
         grpc_addr: String,
     },
 
-    /// Validate configuration and check connectivity.
-    Validate,
+    /// Setup and configuration management.
+    Setup {
+        #[command(subcommand)]
+        action: SetupAction,
+    },
 
     /// Start the gRPC server.
     Serve {
@@ -120,11 +122,9 @@ pub enum FeedbackAction {
 #[derive(Subcommand, Debug)]
 pub enum PaperAction {
     /// Start paper trading with promoted strategies.
-    Start {
-        /// Override contracts to trade (comma-separated, e.g. "BTCUSDT,ETHUSDT").
-        #[arg(long)]
-        contracts: Option<String>,
-    },
+    ///
+    /// Accounts and contracts are loaded from `accounts.toml`.
+    Start,
 
     /// Show paper trading status (strategies, positions, `PnL`).
     Status,
@@ -230,16 +230,10 @@ pub enum StrategyAction {
 /// Config management subcommands.
 #[derive(Subcommand)]
 pub enum ConfigAction {
-    /// Generate a config.toml template with all sections and comments
-    Init {
-        /// Overwrite existing config file if present
-        #[arg(long)]
-        force: bool,
-    },
     /// Set a config value
     Set {
         /// Config key (e.g. example.setting)
-        key:   String,
+        key: String,
         /// Config value
         value: String,
     },
@@ -250,4 +244,90 @@ pub enum ConfigAction {
     },
     /// List all config values
     List,
+}
+
+/// Setup subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SetupAction {
+    /// Generate config.toml and accounts.toml templates.
+    Init {
+        /// Overwrite existing files.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Manage trading accounts.
+    Account {
+        #[command(subcommand)]
+        action: Box<SetupAccountAction>,
+    },
+    /// Validate all configuration files.
+    Validate,
+}
+
+/// Account management subcommands.
+#[derive(Subcommand, Debug)]
+pub enum SetupAccountAction {
+    /// Add a trading account.
+    ///
+    /// EXAMPLES:
+    ///     rara setup account add --id paper-btc --broker paper --contracts BTC-USDT --fill-price 50000
+    ///     rara setup account add --id binance-prod --broker ccxt --exchange binance --api-key "$KEY" --secret "$SECRET" --sandbox
+    Add {
+        /// Account identifier.
+        #[arg(long)]
+        id: String,
+        /// Broker type: "paper" or "ccxt".
+        #[arg(long)]
+        broker: String,
+        /// Human-readable label.
+        #[arg(long)]
+        label: Option<String>,
+        /// Contracts to trade (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        contracts: Option<Vec<String>>,
+        /// Enable/disable the account.
+        #[arg(long, default_value = "true")]
+        enabled: bool,
+        // Paper broker options
+        /// Fixed fill price (paper broker only).
+        #[arg(long)]
+        fill_price: Option<f64>,
+        // CCXT broker options
+        /// Exchange: "binance", "bybit", "okx" (ccxt only).
+        #[arg(long)]
+        exchange: Option<String>,
+        /// API key (ccxt only).
+        #[arg(long)]
+        api_key: Option<String>,
+        /// API secret (ccxt only).
+        #[arg(long)]
+        secret: Option<String>,
+        /// API passphrase, OKX only (ccxt only).
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Use sandbox/testnet (ccxt only).
+        #[arg(long)]
+        sandbox: bool,
+    },
+    /// List configured accounts.
+    List,
+    /// Remove a trading account.
+    ///
+    /// EXAMPLES:
+    ///     rara setup account remove binance-prod --yes
+    Remove {
+        /// Account ID to remove.
+        id: String,
+        /// Skip confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Test broker connectivity for an account.
+    ///
+    /// EXAMPLES:
+    ///     rara setup account test binance-prod
+    Test {
+        /// Account ID to test.
+        id: String,
+    },
 }

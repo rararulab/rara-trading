@@ -7,24 +7,32 @@ use snafu::ResultExt;
 use tokio::task::JoinSet;
 use tracing::{error, info};
 
-use crate::app_config;
+use crate::accounts_config;
 use crate::error::{self, EventBusSnafu};
 use crate::event_bus::bus::EventBus;
 use crate::paths;
 
 /// Run the unified daemon: spawn all trading-loop components as concurrent
 /// tokio tasks and wait for shutdown (Ctrl+C) or a fatal task error.
-pub async fn run(contracts: String, iterations: u32, grpc_addr: String) -> error::Result<()> {
-    let _cfg = app_config::load();
+///
+/// Accounts and contracts are loaded from `accounts.toml` rather than CLI flags.
+pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
+    // Load accounts from config; collect contracts from all enabled accounts
+    let accounts_cfg = accounts_config::load_accounts();
+    let _account_manager = rara_trading_engine::account_manager::AccountManager::from_config(
+        &accounts_cfg.accounts,
+    )
+    .expect("failed to initialize accounts from config");
 
     // Persistent event bus shared across all components
     let trace_path = paths::data_dir().join("trace");
     let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
 
-    let contract_list: Vec<String> = contracts
-        .split(',')
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
+    let contract_list: Vec<String> = accounts_cfg
+        .accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .flat_map(|a| a.contracts.clone())
         .collect();
 
     info!(

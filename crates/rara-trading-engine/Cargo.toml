@@ -31,6 +31,7 @@ hex = "0.4"
 [dev-dependencies]
 tempfile.workspace = true
 rust_decimal_macros = "1"
+toml.workspace = true
 
 [lints]
 workspace = true

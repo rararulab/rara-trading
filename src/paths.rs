@@ -45,3 +45,6 @@ pub fn strategies_generated_dir() -> PathBuf { data_dir().join("strategies/gener
 
 /// Strategy promoted directory: `<data>/strategies/promoted`
 pub fn strategies_promoted_dir() -> PathBuf { data_dir().join("strategies/promoted") }
+
+/// Path to the accounts configuration file.
+pub fn accounts_file() -> PathBuf { data_dir().join("accounts.toml") }

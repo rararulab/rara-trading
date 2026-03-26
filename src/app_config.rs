@@ -48,10 +48,6 @@ impl Default for DatabaseConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TradingConfig {
-    /// Broker type (e.g. "paper", "binance").
-    pub broker: String,
-    /// Contracts to trade, e.g. `BTC-USDT`.
-    pub contracts: Vec<String>,
     /// Maximum position size per contract.
     pub max_position_size: f64,
     /// Maximum total drawdown percentage before halting.
@@ -63,8 +59,6 @@ pub struct TradingConfig {
 impl Default for TradingConfig {
     fn default() -> Self {
         Self {
-            broker: "paper".to_string(),
-            contracts: vec!["BTC-USDT".to_string()],
             max_position_size: 1.0,
             max_drawdown_pct: 5.0,
             max_concurrent_positions: 3,
@@ -198,9 +192,7 @@ fn apply_env_overrides(cfg: &mut AppConfig) {
     {
         cfg.server.port = port;
     }
-    if let Ok(val) = std::env::var("RARA_BROKER") {
-        cfg.trading.broker = val;
-    }
+    // RARA_BROKER removed — broker is now configured per-account in accounts.toml
 }
 
 /// Save config to TOML file.
@@ -234,10 +226,7 @@ url = "postgres://rara:rara@localhost:5432/rara_trading"
 
 # ─── Trading Engine ──────────────────────────────────────────────
 [trading]
-# Broker type: "paper" for simulation, "binance" for live
-broker = "paper"
-# Contracts to trade
-contracts = ["BTC-USDT"]
+# Broker and contracts are configured per-account in accounts.toml
 # Maximum position size per contract (in base units)
 max_position_size = 1.0
 # Maximum total drawdown percentage before halting trading

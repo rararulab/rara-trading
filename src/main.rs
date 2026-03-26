@@ -11,7 +11,8 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, StrategyAction};
+use rara_trading::accounts_config;
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, SetupAction, SetupAccountAction, StrategyAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
@@ -31,6 +32,8 @@ use uuid::Uuid;
 struct ErrorResponse {
     ok: bool,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -57,17 +60,61 @@ struct ConfigListResponse {
 }
 
 #[derive(Serialize)]
-struct ConfigInitResponse<'a> {
+struct SetupInitResponse {
     ok: bool,
     action: &'static str,
-    path: &'a str,
+    created: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Serialize)]
-struct ValidateResponse {
+struct ValidateCheck {
+    name: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SetupValidateResponse {
     ok: bool,
     action: &'static str,
-    errors: Vec<String>,
+    checks: Vec<ValidateCheck>,
+}
+
+#[derive(Serialize)]
+struct SetupAccountAddResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    created: bool,
+}
+
+#[derive(Serialize)]
+struct SetupAccountListResponse {
+    ok: bool,
+    action: &'static str,
+    accounts: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct SetupAccountRemoveResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    removed: bool,
+}
+
+#[derive(Serialize)]
+struct SetupAccountTestResponse<'a> {
+    ok: bool,
+    action: &'static str,
+    id: &'a str,
+    equity: String,
+    available_cash: String,
 }
 
 #[derive(Serialize)]
@@ -289,6 +336,7 @@ async fn main() {
             serde_json::to_string(&ErrorResponse {
                 ok: false,
                 error: e.to_string(),
+                suggestion: None,
             })
             .expect("ErrorResponse must serialize")
         );
@@ -302,34 +350,6 @@ async fn run() -> error::Result<()> {
 
     match cli.command {
         Command::Config { action } => match action {
-            ConfigAction::Init { force } => {
-                let path = paths::config_file();
-                if path.exists() && !force {
-                    return ConfigSnafu {
-                        message: format!(
-                            "config file already exists at {}. Use --force to overwrite.",
-                            path.display()
-                        ),
-                    }
-                    .fail();
-                }
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).context(IoSnafu)?;
-                }
-                let template = app_config::generate_template();
-                std::fs::write(&path, &template).context(IoSnafu)?;
-                let path_str = path.display().to_string();
-                eprintln!("config template written to {path_str}");
-                println!(
-                    "{}",
-                    serde_json::to_string(&ConfigInitResponse {
-                        ok: true,
-                        action: "config_init",
-                        path: &path_str,
-                    })
-                    .expect("ConfigInitResponse must serialize")
-                );
-            }
             ConfigAction::Set { key, value } => {
                 let mut cfg = app_config::load().clone();
                 set_config_field(&mut cfg, &key, &value)?;
@@ -399,42 +419,13 @@ async fn run() -> error::Result<()> {
             run_data(action).await?;
         }
         Command::Run {
-            contracts,
             iterations,
             grpc_addr,
         } => {
-            rara_trading::daemon::run(contracts, iterations, grpc_addr).await?;
+            rara_trading::daemon::run(iterations, grpc_addr).await?;
         }
-        Command::Validate => {
-            let cfg = app_config::load();
-            let errors = validation::validate_startup(cfg).await;
-            let error_strings: Vec<String> = errors.iter().map(ToString::to_string).collect();
-            if errors.is_empty() {
-                eprintln!("All checks passed");
-                println!(
-                    "{}",
-                    serde_json::to_string(&ValidateResponse {
-                        ok: true,
-                        action: "validate",
-                        errors: vec![],
-                    })
-                    .expect("ValidateResponse must serialize")
-                );
-            } else {
-                for e in &errors {
-                    eprintln!("FAIL: {e}");
-                }
-                println!(
-                    "{}",
-                    serde_json::to_string(&ValidateResponse {
-                        ok: false,
-                        action: "validate",
-                        errors: error_strings,
-                    })
-                    .expect("ValidateResponse must serialize")
-                );
-                std::process::exit(1);
-            }
+        Command::Setup { action } => {
+            run_setup(action).await?;
         }
         Command::Serve { port } => {
             run_serve(port).await?;
@@ -513,7 +504,6 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) -> 
         // database
         "database.url" => cfg.database.url = value.to_string(),
         // trading
-        "trading.broker" => cfg.trading.broker = value.to_string(),
         "trading.max_position_size" => {
             cfg.trading.max_position_size = value.parse().map_err(|_| parse_err(key, value))?;
         }
@@ -573,8 +563,6 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> error::Result<Opt
         // database
         "database.url" => Ok(Some(cfg.database.url.clone())),
         // trading
-        "trading.broker" => Ok(Some(cfg.trading.broker.clone())),
-        "trading.contracts" => Ok(Some(cfg.trading.contracts.join(","))),
         "trading.max_position_size" => Ok(Some(cfg.trading.max_position_size.to_string())),
         "trading.max_drawdown_pct" => Ok(Some(cfg.trading.max_drawdown_pct.to_string())),
         "trading.max_concurrent_positions" => {
@@ -625,11 +613,6 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
         // database
         ("database.url".into(), cfg.database.url.clone()),
         // trading
-        ("trading.broker".into(), cfg.trading.broker.clone()),
-        (
-            "trading.contracts".into(),
-            cfg.trading.contracts.join(","),
-        ),
         (
             "trading.max_position_size".into(),
             cfg.trading.max_position_size.to_string(),
@@ -1265,7 +1248,7 @@ async fn run_serve(port: u16) -> error::Result<()> {
 /// Execute the paper trading subcommand.
 async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {
-        PaperAction::Start { contracts } => run_paper_start(contracts).await,
+        PaperAction::Start => run_paper_start().await,
         PaperAction::Status => run_paper_status(),
         PaperAction::Stop => {
             run_paper_stop();
@@ -1443,9 +1426,8 @@ fn load_strategies_for_contracts(
 /// Ctrl+C is received, then gracefully shuts down all tasks and prints a
 /// session summary.
 #[allow(clippy::too_many_lines)]
-async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()> {
+async fn run_paper_start() -> error::Result<()> {
     use futures_util::StreamExt;
-    use rara_trading::trading::brokers::paper::PaperBroker;
     use rara_trading::trading::engine::TradingEngine;
     use rara_trading::trading::guard_pipeline::GuardPipeline;
     use rara_trading::trading::signal_loop::run_signal_loop;
@@ -1453,10 +1435,26 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
     use rara_market_data::stream::binance_ws::BinanceWsClient;
 
     let cfg = app_config::load();
-    let contracts: Vec<String> = contracts_override.map_or_else(
-        || cfg.trading.contracts.clone(),
-        |c| c.split(',').map(|s| s.trim().to_string()).collect(),
-    );
+
+    // Load accounts from config; use AccountManager to create brokers
+    let accounts_cfg = accounts_config::load_accounts();
+    let account_manager = rara_trading_engine::account_manager::AccountManager::from_config(
+        &accounts_cfg.accounts,
+    )
+    .expect("failed to initialize accounts from config");
+
+    if account_manager.size() == 0 {
+        eprintln!("No enabled accounts found in accounts.toml. Run 'rara setup account add' first.");
+        return Ok(());
+    }
+
+    // Collect contracts from all enabled accounts
+    let contracts: Vec<String> = accounts_cfg
+        .accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .flat_map(|a| a.contracts.clone())
+        .collect();
 
     let position_size =
         rust_decimal::Decimal::try_from(cfg.trading.max_position_size).unwrap_or(dec!(1));
@@ -1474,11 +1472,16 @@ async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()
         contracts.len()
     );
 
-    // Open event bus + build trading engine
+    // Open event bus + build trading engine using the first account's broker
+    // TODO: support multi-account engine routing once TradingEngine supports it
     let trace_path = paths::data_dir().join("trace");
     let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
-    let broker: Box<dyn rara_trading::trading::broker::Broker> =
-        Box::new(PaperBroker::new(dec!(0)));
+    let first_account = accounts_cfg
+        .accounts
+        .iter()
+        .find(|a| a.enabled)
+        .expect("at least one enabled account verified above");
+    let broker = first_account.broker_config.create_broker();
     let guard_pipeline = GuardPipeline::new(vec![]);
     let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
 
@@ -1756,6 +1759,419 @@ fn run_strategy_installed() -> error::Result<()> {
         })
         .expect("StrategyInstalledResponse must serialize")
     );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Setup command handlers
+// ---------------------------------------------------------------------------
+
+async fn run_setup(action: SetupAction) -> error::Result<()> {
+    match action {
+        SetupAction::Init { force } => run_setup_init(force)?,
+        SetupAction::Validate => run_setup_validate().await?,
+        SetupAction::Account { action } => run_setup_account(*action).await?,
+    }
+    Ok(())
+}
+
+/// Generate config.toml and accounts.toml templates.
+fn run_setup_init(force: bool) -> error::Result<()> {
+    let config_path = paths::config_file();
+    let accounts_path = paths::accounts_file();
+
+    let mut created = Vec::new();
+
+    // Ensure parent directories exist
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).context(IoSnafu)?;
+    }
+    if let Some(parent) = accounts_path.parent() {
+        std::fs::create_dir_all(parent).context(IoSnafu)?;
+    }
+
+    let config_exists = config_path.exists();
+    let accounts_exists = accounts_path.exists();
+
+    if !config_exists || force {
+        let template = app_config::generate_template();
+        std::fs::write(&config_path, &template).context(IoSnafu)?;
+        eprintln!("wrote {}", config_path.display());
+        created.push("config.toml".to_string());
+    }
+
+    if !accounts_exists || force {
+        let template = accounts_config::generate_accounts_template();
+        std::fs::write(&accounts_path, &template).context(IoSnafu)?;
+        eprintln!("wrote {}", accounts_path.display());
+        created.push("accounts.toml".to_string());
+    }
+
+    let reason = if created.is_empty() {
+        Some("files already exist".to_string())
+    } else {
+        None
+    };
+
+    println!(
+        "{}",
+        serde_json::to_string(&SetupInitResponse {
+            ok: true,
+            action: "init",
+            created,
+            reason,
+        })
+        .expect("SetupInitResponse must serialize")
+    );
+
+    Ok(())
+}
+
+/// Validate all configuration files and connectivity.
+#[allow(clippy::too_many_lines)]
+async fn run_setup_validate() -> error::Result<()> {
+    let mut checks = Vec::new();
+    let mut has_errors = false;
+
+    // Check config.toml exists
+    let config_path = paths::config_file();
+    let config_exists = config_path.exists();
+    checks.push(ValidateCheck {
+        name: "config.toml".to_string(),
+        ok: config_exists,
+        detail: if config_exists {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("not found at {}", config_path.display()))
+        },
+        suggestion: if config_exists {
+            None
+        } else {
+            Some("run 'rara setup init' to generate config files".to_string())
+        },
+    });
+
+    // Check accounts.toml exists
+    let accounts_path = paths::accounts_file();
+    let accounts_exists = accounts_path.exists();
+    checks.push(ValidateCheck {
+        name: "accounts.toml".to_string(),
+        ok: accounts_exists,
+        detail: if accounts_exists {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("not found at {}", accounts_path.display()))
+        },
+        suggestion: if accounts_exists {
+            None
+        } else {
+            Some("run 'rara setup init' to generate config files".to_string())
+        },
+    });
+
+    // Check for duplicate account IDs
+    let accounts_cfg = accounts_config::load_accounts();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+    for acc in &accounts_cfg.accounts {
+        if !seen_ids.insert(&acc.id) {
+            duplicates.push(acc.id.clone());
+        }
+    }
+    let no_dupes = duplicates.is_empty();
+    checks.push(ValidateCheck {
+        name: "unique_account_ids".to_string(),
+        ok: no_dupes,
+        detail: if no_dupes {
+            None
+        } else {
+            has_errors = true;
+            Some(format!("duplicate IDs: {}", duplicates.join(", ")))
+        },
+        suggestion: if no_dupes {
+            None
+        } else {
+            Some("fix accounts.toml or run 'rara setup account add' to reconfigure".to_string())
+        },
+    });
+
+    // Count enabled accounts
+    let enabled_count = accounts_cfg.accounts.iter().filter(|a| a.enabled).count();
+    checks.push(ValidateCheck {
+        name: "enabled_accounts".to_string(),
+        ok: true,
+        detail: Some(format!("{enabled_count} account(s) enabled")),
+        suggestion: None,
+    });
+
+    // Run startup validation (database + LLM connectivity)
+    if config_exists {
+        let cfg = app_config::load();
+        let startup_errors = validation::validate_startup(cfg).await;
+        for e in &startup_errors {
+            has_errors = true;
+            checks.push(ValidateCheck {
+                name: "startup".to_string(),
+                ok: false,
+                detail: Some(e.to_string()),
+                suggestion: None,
+            });
+        }
+        if startup_errors.is_empty() {
+            checks.push(ValidateCheck {
+                name: "startup".to_string(),
+                ok: true,
+                detail: None,
+                suggestion: None,
+            });
+        }
+    }
+
+    for check in &checks {
+        if check.ok {
+            eprintln!("OK: {}", check.name);
+        } else {
+            eprintln!("FAIL: {} — {}", check.name, check.detail.as_deref().unwrap_or(""));
+        }
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string(&SetupValidateResponse {
+            ok: !has_errors,
+            action: "validate",
+            checks,
+        })
+        .expect("SetupValidateResponse must serialize")
+    );
+
+    if has_errors {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Handle account subcommands.
+#[allow(clippy::too_many_lines)]
+async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
+    use rara_trading_engine::account_config::{
+        AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
+    };
+
+    match action {
+        SetupAccountAction::Add {
+            id,
+            broker,
+            label,
+            contracts,
+            enabled,
+            fill_price,
+            exchange,
+            api_key,
+            secret,
+            passphrase,
+            sandbox,
+        } => {
+            let mut cfg = accounts_config::load_accounts();
+
+            // Idempotent: if account already exists, return created: false
+            if cfg.accounts.iter().any(|a| a.id == id) {
+                println!(
+                    "{}",
+                    serde_json::to_string(&SetupAccountAddResponse {
+                        ok: true,
+                        action: "account.add",
+                        id: &id,
+                        created: false,
+                    })
+                    .expect("SetupAccountAddResponse must serialize")
+                );
+                return Ok(());
+            }
+
+            let broker_config = match broker.as_str() {
+                "paper" => BrokerConfig::Paper(PaperBrokerConfig { fill_price }),
+                "ccxt" => {
+                    let Some(exchange) = exchange else {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&ErrorResponse {
+                                ok: false,
+                                error: "--exchange is required for ccxt broker".to_string(),
+                                suggestion: Some("add --exchange binance (or bybit, okx)".to_string()),
+                            })
+                            .expect("ErrorResponse must serialize")
+                        );
+                        std::process::exit(1);
+                    };
+                    BrokerConfig::Ccxt(CcxtBrokerConfig {
+                        exchange,
+                        sandbox,
+                        api_key: api_key.unwrap_or_default(),
+                        secret: secret.unwrap_or_default(),
+                        passphrase,
+                    })
+                }
+                other => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&ErrorResponse {
+                            ok: false,
+                            error: format!(
+                                "unknown broker type \"{other}\""
+                            ),
+                            suggestion: Some("use --broker paper or --broker ccxt".to_string()),
+                        })
+                        .expect("ErrorResponse must serialize")
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            cfg.accounts.push(AccountConfig {
+                id: id.clone(),
+                label,
+                broker_config,
+                enabled,
+                contracts: contracts.unwrap_or_default(),
+            });
+
+            accounts_config::save_accounts(&cfg).context(IoSnafu)?;
+            eprintln!("account \"{id}\" added");
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountAddResponse {
+                    ok: true,
+                    action: "account.add",
+                    id: &id,
+                    created: true,
+                })
+                .expect("SetupAccountAddResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::List => {
+            let mut cfg = accounts_config::load_accounts();
+            for acc in &mut cfg.accounts {
+                acc.mask_secrets();
+            }
+            let accounts: Vec<serde_json::Value> = cfg
+                .accounts
+                .iter()
+                .map(|a| serde_json::to_value(a).expect("AccountConfig must serialize"))
+                .collect();
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountListResponse {
+                    ok: true,
+                    action: "account.list",
+                    accounts,
+                })
+                .expect("SetupAccountListResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::Remove { id, yes } => {
+            if !yes {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: "--yes flag is required to confirm removal".to_string(),
+                        suggestion: Some("add --yes to confirm removal".to_string()),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            }
+
+            let mut cfg = accounts_config::load_accounts();
+            let original_len = cfg.accounts.len();
+            cfg.accounts.retain(|a| a.id != id);
+
+            if cfg.accounts.len() == original_len {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: format!("account \"{id}\" not found"),
+                        suggestion: Some("run 'rara setup account list' to see available accounts".to_string()),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            }
+
+            accounts_config::save_accounts(&cfg).context(IoSnafu)?;
+            eprintln!("account \"{id}\" removed");
+
+            println!(
+                "{}",
+                serde_json::to_string(&SetupAccountRemoveResponse {
+                    ok: true,
+                    action: "account.remove",
+                    id: &id,
+                    removed: true,
+                })
+                .expect("SetupAccountRemoveResponse must serialize")
+            );
+        }
+
+        SetupAccountAction::Test { id } => {
+            let cfg = accounts_config::load_accounts();
+            let Some(acc) = cfg.accounts.iter().find(|a| a.id == id) else {
+                println!(
+                    "{}",
+                    serde_json::to_string(&ErrorResponse {
+                        ok: false,
+                        error: format!("account \"{id}\" not found"),
+                        suggestion: Some(
+                            "run 'rara setup account list' to see available accounts".to_string(),
+                        ),
+                    })
+                    .expect("ErrorResponse must serialize")
+                );
+                std::process::exit(1);
+            };
+
+            let broker = acc.broker_config.create_broker();
+            match broker.account_info().await {
+                Ok(info) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&SetupAccountTestResponse {
+                            ok: true,
+                            action: "account.test",
+                            id: &id,
+                            equity: info.total_equity.to_string(),
+                            available_cash: info.available_cash.to_string(),
+                        })
+                        .expect("SetupAccountTestResponse must serialize")
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&ErrorResponse {
+                            ok: false,
+                            error: format!("connectivity test failed: {e}"),
+                            suggestion: Some(
+                                "check API credentials and network connectivity".to_string(),
+                            ),
+                        })
+                        .expect("ErrorResponse must serialize")
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 
     Ok(())
 }
