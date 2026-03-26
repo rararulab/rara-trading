@@ -11,7 +11,7 @@ use snafu::ResultExt;
 
 use rara_trading::agent::{CliBackend, CliExecutor};
 use rara_trading::app_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, ResearchAction};
+use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction};
 use rara_trading::validation;
 use rara_trading::error::{
     self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
@@ -229,6 +229,7 @@ struct FeedbackReportResponse {
 
 use rara_trading::research::barter_backtester::BarterBacktester;
 use rara_trading::research::compiler::StrategyCompiler;
+use rara_trading::research::strategy_executor::StrategyExecutor;
 use rara_trading::research::wasm_executor::WasmExecutor;
 use rara_trading::research::feedback_gen::FeedbackGenerator;
 use rara_trading::research::hypothesis_gen::HypothesisGenerator;
@@ -408,6 +409,9 @@ async fn run() -> error::Result<()> {
         }
         Command::Feedback { action } => {
             run_feedback(action)?;
+        }
+        Command::Paper { action } => {
+            run_paper(action).await?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -1214,6 +1218,153 @@ async fn run_serve(port: u16) -> error::Result<()> {
         .await
         .context(GrpcServeSnafu)?;
 
+    Ok(())
+}
+
+/// Execute the paper trading subcommand.
+async fn run_paper(action: PaperAction) -> error::Result<()> {
+    match action {
+        PaperAction::Start { contracts } => run_paper_start(contracts).await,
+    }
+}
+
+/// Load promoted WASM strategies for the given contracts.
+///
+/// Reads all promoted strategy definitions from `promoted_dir`, compiles each
+/// into a WASM handle per contract, and returns the resulting
+/// [`LoadedStrategy`] instances.
+fn load_strategies_for_contracts(
+    contracts: &[String],
+    position_size: rust_decimal::Decimal,
+) -> error::Result<Vec<rara_trading::trading::signal_loop::LoadedStrategy>> {
+    use rara_trading::trading::signal_loop::LoadedStrategy;
+
+    let promoted_dir = paths::strategies_promoted_dir();
+    let promoted = list_promoted_from_dir(&promoted_dir).context(PromoterSnafu)?;
+
+    if promoted.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let executor = WasmExecutor::builder().build();
+    let mut loaded = Vec::new();
+
+    for p in &promoted {
+        let wasm_bytes = match std::fs::read(p.wasm_path()) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(strategy = p.meta().name, error = %e, "failed to read WASM file");
+                continue;
+            }
+        };
+
+        for contract in contracts {
+            match executor.load(&wasm_bytes) {
+                Ok(handle) => {
+                    loaded.push(LoadedStrategy {
+                        name: p.meta().name.clone(),
+                        version: p.meta().version,
+                        contract_id: contract.clone(),
+                        position_size,
+                        handle,
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(
+                        strategy = p.meta().name, contract, error = ?e,
+                        "failed to load WASM handle"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(loaded)
+}
+
+/// Start the paper trading main loop.
+///
+/// Connects to Binance WebSocket for live kline data, loads promoted WASM
+/// strategies, and runs the signal loop through a paper broker. Blocks until
+/// Ctrl+C is received, then gracefully shuts down all tasks.
+async fn run_paper_start(contracts_override: Option<String>) -> error::Result<()> {
+    use futures_util::StreamExt;
+    use rara_trading::trading::brokers::paper::PaperBroker;
+    use rara_trading::trading::engine::TradingEngine;
+    use rara_trading::trading::guard_pipeline::GuardPipeline;
+    use rara_trading::trading::signal_loop::run_signal_loop;
+    use rara_market_data::stream::aggregator::CandleAggregator;
+    use rara_market_data::stream::binance_ws::BinanceWsClient;
+
+    let cfg = app_config::load();
+    let contracts: Vec<String> = contracts_override.map_or_else(
+        || cfg.trading.contracts.clone(),
+        |c| c.split(',').map(|s| s.trim().to_string()).collect(),
+    );
+
+    let position_size =
+        rust_decimal::Decimal::try_from(cfg.trading.max_position_size).unwrap_or(dec!(1));
+    let loaded_strategies = load_strategies_for_contracts(&contracts, position_size)?;
+
+    if loaded_strategies.is_empty() {
+        eprintln!("No promoted strategies found. Run 'rara research run' first.");
+        return Ok(());
+    }
+
+    eprintln!(
+        "Loaded {} strategy instances for {} contracts",
+        loaded_strategies.len(),
+        contracts.len()
+    );
+
+    // Open event bus + build trading engine
+    let trace_path = paths::data_dir().join("trace");
+    let event_bus = Arc::new(EventBus::open(&trace_path.join("events")).context(EventBusSnafu)?);
+    let broker: Box<dyn rara_trading::trading::broker::Broker> =
+        Box::new(PaperBroker::new(dec!(0)));
+    let guard_pipeline = GuardPipeline::new(vec![]);
+    let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
+
+    // Setup candle aggregator + WebSocket connection
+    let (mut aggregator, candle_rx) = CandleAggregator::with_defaults();
+    let ws_client = BinanceWsClient::new();
+    let subs: Vec<(&str, &str)> = contracts.iter().map(|c| (c.as_str(), "1m")).collect();
+    let mut kline_stream = ws_client
+        .subscribe_klines_multi(&subs)
+        .await
+        .map_err(|e| error::AppError::Config {
+            message: format!("WebSocket connection failed: {e}"),
+        })?;
+
+    // Spawn aggregator: forward raw klines into candle aggregator
+    let agg_handle = tokio::spawn(async move {
+        while let Some(item) = kline_stream.next().await {
+            match item {
+                Ok(kline) => aggregator.process_kline(&kline),
+                Err(e) => {
+                    tracing::error!(error = %e, "kline stream error");
+                    break;
+                }
+            }
+        }
+        tracing::info!("kline stream ended");
+    });
+
+    // Spawn signal loop
+    let signal_handle = tokio::spawn(async move {
+        run_signal_loop(candle_rx, engine, loaded_strategies).await;
+    });
+
+    eprintln!("Paper trading started. Press Ctrl+C to stop.");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for ctrl+c");
+    eprintln!("\nShutting down...");
+
+    agg_handle.abort();
+    signal_handle.abort();
+
+    eprintln!("Paper trading stopped.");
     Ok(())
 }
 

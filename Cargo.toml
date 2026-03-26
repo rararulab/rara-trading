@@ -75,6 +75,7 @@ repository = "https://github.com/rararulab/rara-trading"
 chrono.workspace = true
 clap.workspace = true
 config.workspace = true
+futures-util.workspace = true
 dirs = "6"
 rara-agent.workspace = true
 rara-domain.workspace = true

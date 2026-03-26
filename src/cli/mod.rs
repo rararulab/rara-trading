@@ -83,6 +83,12 @@ pub enum Command {
         #[command(subcommand)]
         action: FeedbackAction,
     },
+
+    /// Paper trading operations.
+    Paper {
+        #[command(subcommand)]
+        action: PaperAction,
+    },
 }
 
 /// Feedback loop subcommands.
@@ -96,6 +102,17 @@ pub enum FeedbackAction {
         /// Maximum number of entries to show.
         #[arg(long, default_value = "20")]
         limit: usize,
+    },
+}
+
+/// Paper trading subcommands.
+#[derive(Subcommand, Debug)]
+pub enum PaperAction {
+    /// Start paper trading with promoted strategies.
+    Start {
+        /// Override contracts to trade (comma-separated, e.g. "BTCUSDT,ETHUSDT").
+        #[arg(long)]
+        contracts: Option<String>,
     },
 }
 
