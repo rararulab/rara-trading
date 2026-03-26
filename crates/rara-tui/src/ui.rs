@@ -27,9 +27,16 @@ use crate::tabs::strategies as strategies_tab;
 use crate::tabs::trading;
 use crate::theme;
 
+/// Braille spinner animation frames for the startup screen.
+const SPINNER_FRAMES: &[&str] = &[
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}",
+    "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
+];
+
 /// Render the full dashboard to the terminal frame.
 pub fn render(frame: &mut Frame, app: &App) {
-    if app.phase != crate::app::AppPhase::Ready {
+    if !matches!(app.phase, crate::app::AppPhase::Ready) {
         render_startup(frame, app);
         return;
     }
@@ -239,9 +246,7 @@ fn render_startup(frame: &mut Frame, app: &App) {
         crate::app::AppPhase::Ready => return,
     };
 
-    // Spinner frames based on attempt count
-    let spinner_frames = ["\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}"];
-    let spinner = spinner_frames[(attempts as usize) % spinner_frames.len()];
+    let spinner = SPINNER_FRAMES[(attempts as usize) % SPINNER_FRAMES.len()];
 
     let lines = vec![
         Line::from(""),

@@ -33,6 +33,9 @@ const TICK_RATE: Duration = Duration::from_millis(1000);
 /// Duration for crossterm event polling.
 const POLL_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// Maximum connection attempts before giving up during startup.
+const MAX_STARTUP_ATTEMPTS: u32 = 60;
+
 /// Run the TUI event loop.
 ///
 /// When `server_addr` is `Some`, connects to an existing gRPC server.
@@ -118,6 +121,31 @@ async fn event_loop(
         // Startup phase: try to connect to gRPC server
         if let AppPhase::StartingServer { attempts, .. } = &app.phase {
             let attempts = *attempts;
+
+            // Give up after MAX_STARTUP_ATTEMPTS (~30s at 500ms intervals)
+            if attempts >= MAX_STARTUP_ATTEMPTS {
+                warn!("gRPC server did not become ready after {attempts} attempts, giving up");
+                app.phase = AppPhase::StartingServer {
+                    message: format!(
+                        "Server failed to start after {MAX_STARTUP_ATTEMPTS} attempts. Press q to quit."
+                    ),
+                    attempts,
+                };
+                // Render one final frame, then just handle quit keys
+                terminal.draw(|frame| ui::render(frame, app)).context(IoSnafu)?;
+                loop {
+                    if event::poll(POLL_TIMEOUT).context(IoSnafu)?
+                        && let Event::Key(key) = event::read().context(IoSnafu)?
+                        && key.kind == KeyEventKind::Press
+                        && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                    {
+                        app.quit();
+                        break;
+                    }
+                }
+                continue;
+            }
+
             if last_poll.elapsed() >= Duration::from_millis(500) {
                 *last_poll = std::time::Instant::now();
                 if let Some(mut c) = try_connect(&app.server_addr).await {
