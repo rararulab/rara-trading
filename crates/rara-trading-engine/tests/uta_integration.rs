@@ -103,29 +103,31 @@ async fn full_lifecycle_stage_commit_push_log() {
 
 // ── Test 2: AccountManager multi-account ───────────────────────────────
 
-// NOTE: AccountManager (Task 7) is being implemented in parallel.
-// Uncomment this test once `account_manager` module is available.
-//
-// #[tokio::test]
-// async fn account_manager_multi_account() {
-//     use rara_trading_engine::account_manager::AccountManager;
-//
-//     let uta1 = make_uta("acct-btc", dec!(50000));
-//     let uta2 = make_uta("acct-eth", dec!(3500));
-//
-//     let mut manager = AccountManager::new();
-//     manager.add(uta1);
-//     manager.add(uta2);
-//
-//     // resolve_one should find by id
-//     let found = manager.resolve_one("acct-btc");
-//     assert!(found.is_some());
-//     assert_eq!(found.unwrap().id, "acct-btc");
-//
-//     // aggregated_equity should reflect 2 accounts
-//     let equity = manager.aggregated_equity().await;
-//     assert_eq!(equity.len(), 2);
-// }
+#[tokio::test]
+async fn account_manager_multi_account() {
+    use rara_trading_engine::account_manager::AccountManager;
+
+    let uta1 = make_uta("acct-btc", dec!(50000));
+    let uta2 = make_uta("acct-eth", dec!(3500));
+
+    let mut manager = AccountManager::new();
+    manager.add(uta1);
+    manager.add(uta2);
+
+    assert_eq!(manager.size(), 2);
+
+    // resolve_one should find by id
+    let found = manager.resolve_one("acct-btc").expect("should find acct-btc");
+    assert_eq!(found.id, "acct-btc");
+
+    // resolve_one should fail on unknown
+    assert!(manager.resolve_one("nope").is_err());
+
+    // aggregated_equity should reflect 2 accounts
+    let equity = manager.aggregated_equity().await;
+    assert_eq!(equity.accounts.len(), 2);
+    assert!(equity.total_equity > Decimal::ZERO);
+}
 
 // ── Test 3: reject workflow ────────────────────────────────────────────
 
