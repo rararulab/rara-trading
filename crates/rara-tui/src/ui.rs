@@ -20,7 +20,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, ConnectionStatus, TAB_NAMES, TAB_RESEARCH};
+use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, TAB_NAMES, TAB_RESEARCH};
 use crate::tabs;
 use crate::tabs::research;
 use crate::theme;
@@ -124,7 +124,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(tabs, area);
 }
 
-/// Render the main content area — dispatches to tab-specific renderers.
+/// Render the main content area, dispatching to tab-specific renderers.
 fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Show connection overlay when not connected, regardless of tab
     match &app.connection_status {
@@ -165,6 +165,8 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         tabs::overview::render(frame, app, area);
     } else if app.active_tab == TAB_RESEARCH {
         research::render(frame, &app.research, area);
+    } else if app.active_tab == EVENTS_TAB_INDEX {
+        tabs::events::render(frame, &app.events_state, area);
     } else {
         let tab_name = TAB_NAMES
             .get(app.active_tab)
@@ -191,9 +193,17 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             format!("Connection lost. Reconnecting... (attempt {retry_count})  │  q:Quit")
         }
         _ if app.active_tab == TAB_RESEARCH => {
-            "q:Quit  1-4:Tab  j/k:Navigate  p:DAG  ?:Help".to_string()
+            "q:Quit  1-5:Tab  j/k:Navigate  p:DAG  ?:Help".to_string()
         }
-        _ => "q:Quit  1-4:Tab  ?:Help".to_string(),
+        _ if app.active_tab == EVENTS_TAB_INDEX => {
+            if app.events_state.search_active {
+                "Esc:Cancel  Enter:Confirm search".to_string()
+            } else {
+                "q:Quit  1-5:Tab  Space:Pause  j/k:Nav  /:Search  G:Latest  Enter:Detail"
+                    .to_string()
+            }
+        }
+        _ => "q:Quit  1-5:Tab  ?:Help".to_string(),
     };
 
     let footer = Paragraph::new(footer_text).style(theme::footer());

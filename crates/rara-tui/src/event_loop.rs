@@ -20,8 +20,9 @@ use tracing::{info, warn};
 use rara_server::rara_proto::rara_service_client::RaraServiceClient;
 use rara_server::rara_proto::Empty;
 
-use crate::app::{App, ConnectionStatus, TAB_RESEARCH};
+use crate::app::{App, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, TAB_RESEARCH};
 use crate::error::{IoSnafu, Result};
+use crate::tabs;
 use crate::ui;
 
 /// Duration between status poll ticks.
@@ -91,8 +92,8 @@ async fn event_loop(
     Ok(())
 }
 
-/// Handle a key press event, dispatching tab-specific keys as needed.
-const fn handle_key(app: &mut App, key: KeyCode) {
+/// Handle a key press event, dispatching to tab-specific handlers when needed.
+fn handle_key(app: &mut App, key: KeyCode) {
     // Research tab DAG popup intercepts Esc to close instead of quitting
     if app.active_tab == TAB_RESEARCH && app.research.show_dag {
         match key {
@@ -103,23 +104,119 @@ const fn handle_key(app: &mut App, key: KeyCode) {
         return;
     }
 
+    // When search is active on the events tab, capture all input for search
+    if app.active_tab == EVENTS_TAB_INDEX && app.events_state.search_active {
+        handle_events_search_key(app, key);
+        return;
+    }
+
     match key {
         KeyCode::Char('q') | KeyCode::Esc => app.quit(),
         KeyCode::Char('1') => app.select_tab(0),
         KeyCode::Char('2') => app.select_tab(1),
         KeyCode::Char('3') => app.select_tab(2),
         KeyCode::Char('4') => app.select_tab(3),
+        KeyCode::Char('5') => app.select_tab(4),
+        _ if app.active_tab == EVENTS_TAB_INDEX => handle_events_key(app, key),
+        _ if app.active_tab == TAB_RESEARCH => handle_research_key(app, key),
         _ => {}
     }
+}
 
-    // Tab-specific keys
-    if app.active_tab == TAB_RESEARCH {
-        match key {
-            KeyCode::Char('j') | KeyCode::Down => app.research.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => app.research.select_prev(),
-            KeyCode::Char('p') => app.research.toggle_dag(),
-            _ => {}
+/// Handle key presses specific to the Events tab (non-search mode).
+fn handle_events_key(app: &mut App, key: KeyCode) {
+    let state = &mut app.events_state;
+    match key {
+        // Topic filters
+        KeyCode::Char('a') => {
+            state.filter = EventFilter::All;
+            state.selected_index = 0;
         }
+        KeyCode::Char('t') => {
+            state.filter = EventFilter::Trading;
+            state.selected_index = 0;
+        }
+        KeyCode::Char('r') => {
+            state.filter = EventFilter::Research;
+            state.selected_index = 0;
+        }
+        KeyCode::Char('f') => {
+            state.filter = EventFilter::Feedback;
+            state.selected_index = 0;
+        }
+        KeyCode::Char('s') => {
+            state.filter = EventFilter::Sentinel;
+            state.selected_index = 0;
+        }
+        // Pause/resume auto-scroll
+        KeyCode::Char(' ') => {
+            state.auto_scroll = !state.auto_scroll;
+        }
+        // Navigation (when paused)
+        KeyCode::Char('j') | KeyCode::Down => {
+            state.auto_scroll = false;
+            let count = tabs::events::filtered_count(state);
+            if count > 0 && state.selected_index < count - 1 {
+                state.selected_index += 1;
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            state.auto_scroll = false;
+            if state.selected_index > 0 {
+                state.selected_index -= 1;
+            }
+        }
+        // Jump to latest
+        KeyCode::Char('G') => {
+            let count = tabs::events::filtered_count(state);
+            if count > 0 {
+                state.selected_index = count - 1;
+            }
+            state.auto_scroll = true;
+        }
+        // Enter search mode
+        KeyCode::Char('/') => {
+            state.search_active = true;
+            state.search_query.clear();
+        }
+        // Toggle detail pane
+        KeyCode::Enter => {
+            state.detail_expanded = !state.detail_expanded;
+        }
+        _ => {}
+    }
+}
+
+/// Handle key presses while search input is active on the Events tab.
+fn handle_events_search_key(app: &mut App, key: KeyCode) {
+    let state = &mut app.events_state;
+    match key {
+        KeyCode::Esc => {
+            state.search_active = false;
+            state.search_query.clear();
+            state.selected_index = 0;
+        }
+        KeyCode::Enter => {
+            state.search_active = false;
+            state.selected_index = 0;
+        }
+        KeyCode::Backspace => {
+            state.search_query.pop();
+        }
+        KeyCode::Char(c) => {
+            state.search_query.push(c);
+        }
+        _ => {}
+    }
+}
+
+/// Handle key presses specific to the Research tab.
+fn handle_research_key(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Char('j') | KeyCode::Down => app.research.select_next(),
+        KeyCode::Char('k') | KeyCode::Up => app.research.select_prev(),
+        KeyCode::Char('p') => app.research.toggle_dag(),
+        _ => {}
     }
 }
 

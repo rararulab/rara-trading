@@ -77,7 +77,76 @@ pub enum ConnectionStatus {
 }
 
 /// Tab identifiers for the main navigation.
-pub const TAB_NAMES: &[&str] = &["Overview", "Research", "Trading", "Strategies"];
+pub const TAB_NAMES: &[&str] = &["Overview", "Research", "Trading", "Strategies", "Events"];
+
+/// Index of the Events tab in `TAB_NAMES`.
+pub const EVENTS_TAB_INDEX: usize = 4;
+
+/// A single event entry in the events stream.
+#[derive(Debug, Clone)]
+pub struct EventEntry {
+    /// Monotonically increasing sequence number.
+    pub seq: u64,
+    /// Human-readable timestamp string.
+    pub time: String,
+    /// Event topic (trading, research, feedback, sentinel).
+    pub topic: String,
+    /// The type/kind of event within the topic.
+    pub event_type: String,
+    /// One-line summary of the event.
+    pub summary: String,
+    /// Optional strategy identifier associated with this event.
+    pub strategy_id: Option<String>,
+    /// Full event payload, typically JSON.
+    pub payload: String,
+}
+
+/// Topic-level filter for the events stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventFilter {
+    /// Show all events regardless of topic.
+    All,
+    /// Show only trading events.
+    Trading,
+    /// Show only research events.
+    Research,
+    /// Show only feedback events.
+    Feedback,
+    /// Show only sentinel events.
+    Sentinel,
+}
+
+/// State for the Events tab.
+pub struct EventsState {
+    /// All received events (unfiltered buffer).
+    pub events: Vec<EventEntry>,
+    /// Current topic filter.
+    pub filter: EventFilter,
+    /// Whether auto-scroll is enabled (newest events stay visible).
+    pub auto_scroll: bool,
+    /// Currently selected row index within the filtered view.
+    pub selected_index: usize,
+    /// Current search query text.
+    pub search_query: String,
+    /// Whether the search input is actively accepting keystrokes.
+    pub search_active: bool,
+    /// Whether the detail pane is expanded.
+    pub detail_expanded: bool,
+}
+
+impl Default for EventsState {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            filter: EventFilter::All,
+            auto_scroll: true,
+            selected_index: 0,
+            search_query: String::new(),
+            search_active: false,
+            detail_expanded: false,
+        }
+    }
+}
 
 /// Index of the Research tab.
 pub const TAB_RESEARCH: usize = 1;
@@ -106,12 +175,14 @@ pub struct App {
     pub research_progress: Option<ResearchProgress>,
     /// State for the Research tab.
     pub research: ResearchState,
+    /// State for the Events tab.
+    pub events_state: EventsState,
 }
 
 impl App {
     /// Create a new app instance targeting the given gRPC server address.
     #[must_use]
-    pub const fn new(server_addr: String) -> Self {
+    pub fn new(server_addr: String) -> Self {
         Self {
             active_tab: 0,
             running: true,
@@ -124,6 +195,7 @@ impl App {
             alerts: Vec::new(),
             research_progress: None,
             research: ResearchState::empty(),
+            events_state: EventsState::default(),
         }
     }
 
