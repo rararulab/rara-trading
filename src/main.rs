@@ -1230,6 +1230,10 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
 }
 
 /// Start the gRPC server on the given port.
+///
+/// In standalone mode (launched by `rara tui`), this is the "full stack" entry
+/// point: gRPC server + market data WebSocket connection so that all TUI
+/// health indicators reflect real service state.
 async fn run_serve(port: u16) -> error::Result<()> {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -1240,11 +1244,30 @@ async fn run_serve(port: u16) -> error::Result<()> {
 
     let cfg = crate::app_config::load();
 
+    let ws_connected = Arc::new(AtomicBool::new(false));
+
     let health_config = HealthConfig {
         database_url: cfg.database.url.clone(),
         llm_backend: cfg.agent.backend.clone(),
-        ws_connected: Arc::new(AtomicBool::new(false)),
+        ws_connected: Arc::clone(&ws_connected),
     };
+
+    // Collect contracts from enabled accounts for market data subscriptions
+    let accounts_cfg = crate::accounts_config::load_accounts();
+    let contracts: Vec<String> = accounts_cfg
+        .accounts
+        .iter()
+        .filter(|a| a.enabled)
+        .flat_map(|a| a.contracts.clone())
+        .collect();
+
+    // Spawn market data WebSocket task if contracts are configured
+    if !contracts.is_empty() {
+        let ws_flag = Arc::clone(&ws_connected);
+        tokio::spawn(async move {
+            run_market_data_ws(contracts, ws_flag).await;
+        });
+    }
 
     let addr = format!("0.0.0.0:{port}")
         .parse::<std::net::SocketAddr>()
@@ -1263,6 +1286,55 @@ async fn run_serve(port: u16) -> error::Result<()> {
         .context(GrpcServeSnafu)?;
 
     Ok(())
+}
+
+/// Maintain a market data WebSocket connection with automatic reconnection.
+///
+/// Sets `ws_flag` to `true` while connected and `false` on disconnect.
+/// Retries with exponential backoff (1s → 60s cap) on failure.
+async fn run_market_data_ws(contracts: Vec<String>, ws_flag: Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::Ordering;
+
+    use futures_util::StreamExt;
+    use rara_market_data::stream::BinanceWsClient;
+
+    let client = BinanceWsClient::new();
+    let subs: Vec<(String, String)> = contracts
+        .iter()
+        .map(|c| (c.clone(), "1m".to_string()))
+        .collect();
+
+    let mut backoff = std::time::Duration::from_secs(1);
+    let max_backoff = std::time::Duration::from_secs(60);
+
+    loop {
+        let sub_refs: Vec<(&str, &str)> = subs.iter().map(|(s, i)| (s.as_str(), i.as_str())).collect();
+
+        match client.subscribe_klines_multi(&sub_refs).await {
+            Ok(mut stream) => {
+                tracing::info!(contracts = ?contracts, "market data WebSocket connected");
+                ws_flag.store(true, Ordering::Relaxed);
+                backoff = std::time::Duration::from_secs(1);
+
+                // Drain the stream to keep the connection alive
+                while let Some(item) = stream.next().await {
+                    if let Err(e) = item {
+                        tracing::warn!(error = %e, "market data stream error");
+                        break;
+                    }
+                }
+
+                tracing::warn!("market data WebSocket disconnected");
+                ws_flag.store(false, Ordering::Relaxed);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, backoff_secs = backoff.as_secs(), "market data WebSocket connection failed, retrying");
+            }
+        }
+
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(max_backoff);
+    }
 }
 
 
