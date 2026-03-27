@@ -277,7 +277,7 @@ fn render_system_status(frame: &mut Frame, app: &App, area: Rect) {
             ))]
         },
         |status| {
-            vec![
+            let mut lines = vec![
                 Line::from(vec![
                     Span::styled("  DB: ", theme::muted()),
                     connection_span(status.database_connected),
@@ -289,10 +289,20 @@ fn render_system_status(frame: &mut Frame, app: &App, area: Rect) {
                 Line::from(vec![
                     Span::styled("  Strategies: ", theme::muted()),
                     Span::styled(format!("{}", status.strategy_count), theme::text()),
+                    Span::styled("   Contracts: ", theme::muted()),
+                    Span::styled(format!("{}", status.contract_count), theme::text()),
                     Span::styled("   Uptime: ", theme::muted()),
                     Span::styled(&status.uptime, theme::text()),
                 ]),
-            ]
+            ];
+            // Show actionable warnings when services are misconfigured
+            for warning in &status.warnings {
+                lines.push(Line::from(Span::styled(
+                    format!("  ! {warning}"),
+                    theme::warning(),
+                )));
+            }
+            lines
         },
     );
 

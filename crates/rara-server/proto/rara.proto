@@ -15,6 +15,8 @@ message SystemStatus {
   uint64 event_count = 4;
   string uptime = 5;
   uint32 strategy_count = 6;
+  uint32 contract_count = 7;
+  repeated string warnings = 8;
 }
 
 message EventFilter {
