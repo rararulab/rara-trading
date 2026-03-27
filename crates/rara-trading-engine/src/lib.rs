@@ -4,6 +4,7 @@ pub mod account_config;
 pub mod account_manager;
 pub mod binding;
 pub mod broker;
+pub mod broker_registry;
 pub mod brokers;
 pub mod engine;
 pub mod guard_pipeline;

@@ -72,6 +72,11 @@ pub enum AppError {
     Registry {
         source: crate::research::strategy_registry::RegistryError,
     },
+
+    #[snafu(display("broker registry error: {source}"))]
+    BrokerRegistry {
+        source: rara_trading_engine::broker_registry::BrokerRegistryError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

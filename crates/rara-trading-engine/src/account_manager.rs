@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use bon::Builder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 
 use crate::account_config::AccountConfig;
 use crate::health::{BrokerHealth, BrokerHealthInfo};
@@ -77,6 +77,14 @@ pub enum AccountManagerError {
         /// Number of accounts matched.
         count: usize,
     },
+    /// Broker creation failed.
+    #[snafu(display("failed to create broker for account '{id}': {source}"))]
+    BrokerCreate {
+        /// Account whose broker could not be created.
+        id: String,
+        /// The underlying registry error.
+        source: crate::broker_registry::BrokerRegistryError,
+    },
 }
 
 /// Multi-account registry that owns [`UnifiedTradingAccount`] instances.
@@ -94,7 +102,18 @@ impl AccountManager {
     pub fn from_config(accounts: &[AccountConfig]) -> Result<Self, AccountManagerError> {
         let mut mgr = Self::new();
         for acc in accounts.iter().filter(|a| a.enabled) {
-            let broker = acc.broker_config.create_broker();
+            let fields = acc.broker_config.to_field_map();
+            let type_key = acc.broker_config.type_key();
+            let entry = crate::broker_registry::find_broker(type_key).ok_or_else(|| {
+                AccountManagerError::BrokerCreate {
+                    id: acc.id.clone(),
+                    source: crate::broker_registry::BrokerRegistryError::UnknownType {
+                        type_key: type_key.to_string(),
+                    },
+                }
+            })?;
+            let broker =
+                (entry.create_broker)(&fields).context(BrokerCreateSnafu { id: &acc.id })?;
             let label = acc.label.as_deref().unwrap_or(&acc.id);
             mgr.add(UnifiedTradingAccount::new(&acc.id, label, broker));
         }

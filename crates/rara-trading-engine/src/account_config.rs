@@ -1,11 +1,8 @@
 //! Declarative account configuration for `accounts.toml`.
 
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-use crate::broker::Broker;
-use crate::brokers::ccxt::CcxtBroker;
-use crate::brokers::paper::PaperBroker;
+use serde::{Deserialize, Serialize};
 
 /// Root structure for `accounts.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -61,28 +58,34 @@ pub enum BrokerConfig {
 }
 
 impl BrokerConfig {
-    /// Create a boxed broker instance from this config.
-    pub fn create_broker(&self) -> Box<dyn Broker> {
+    /// Return the broker type key for registry lookup.
+    pub const fn type_key(&self) -> &str {
         match self {
-            Self::Paper(cfg) => {
-                let price = cfg
-                    .fill_price
-                    .map(|p| Decimal::try_from(p).unwrap_or_default())
-                    .unwrap_or_default();
-                Box::new(PaperBroker::new(price))
+            Self::Paper(_) => "paper",
+            Self::Ccxt(_) => "ccxt",
+        }
+    }
+
+    /// Convert broker config into a flat field map for the registry factory.
+    pub fn to_field_map(&self) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        match self {
+            Self::Paper(c) => {
+                if let Some(p) = c.fill_price {
+                    m.insert("fill_price".to_string(), p.to_string());
+                }
             }
-            Self::Ccxt(cfg) => {
-                let base = CcxtBroker::builder()
-                    .exchange_id(&cfg.exchange)
-                    .api_key(&cfg.api_key)
-                    .secret(&cfg.secret)
-                    .sandbox(cfg.sandbox);
-                match cfg.passphrase {
-                    Some(ref pass) => Box::new(base.passphrase(pass).build()),
-                    None => Box::new(base.build()),
+            Self::Ccxt(c) => {
+                m.insert("exchange".to_string(), c.exchange.clone());
+                m.insert("sandbox".to_string(), c.sandbox.to_string());
+                m.insert("api_key".to_string(), c.api_key.clone());
+                m.insert("secret".to_string(), c.secret.clone());
+                if let Some(ref p) = c.passphrase {
+                    m.insert("passphrase".to_string(), p.clone());
                 }
             }
         }
+        m
     }
 }
 
