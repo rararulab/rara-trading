@@ -3,6 +3,8 @@
 //! Wraps the `ccxt-rust` library to provide a unified broker interface
 //! across multiple cryptocurrency exchanges (Binance, OKX, Bybit).
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use bon::Builder;
 use rust_decimal::Decimal;
@@ -14,8 +16,13 @@ use ccxt_rust::prelude::{
 };
 
 use rara_domain::trading::{ActionType, OrderType, Side, StagedAction};
+use crate::account_config::{BrokerConfig, CcxtBrokerConfig};
 use crate::broker::{
     AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
+};
+use crate::broker_registry::{
+    BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
+    MissingFieldSnafu, SelectOption,
 };
 
 /// Supported exchange identifiers.
@@ -40,6 +47,139 @@ impl ExchangeId {
                 message: format!("unsupported exchange: {other}"),
             }),
         }
+    }
+}
+
+/// Parsed CCXT config fields shared between `create_broker` and `create_config`.
+struct CcxtFields {
+    exchange: String,
+    sandbox: bool,
+    api_key: String,
+    secret: String,
+    passphrase: Option<String>,
+}
+
+/// Extract and validate common CCXT fields from a raw config map.
+fn parse_ccxt_fields(fields: &HashMap<String, String>) -> Result<CcxtFields, BrokerRegistryError> {
+    let exchange = fields
+        .get("exchange")
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            MissingFieldSnafu {
+                field: "exchange".to_string(),
+            }
+            .build()
+        })?
+        .clone();
+
+    // Validate exchange value
+    ExchangeId::parse(&exchange).map_err(|_| {
+        InvalidValueSnafu {
+            field: "exchange".to_string(),
+            reason: format!("unsupported exchange: {exchange}"),
+        }
+        .build()
+    })?;
+
+    let sandbox = fields
+        .get("sandbox")
+        .is_none_or(|v| v == "true");
+    let api_key = fields.get("api_key").cloned().unwrap_or_default();
+    let secret = fields.get("secret").cloned().unwrap_or_default();
+    let passphrase = fields
+        .get("passphrase")
+        .filter(|v| !v.is_empty())
+        .cloned();
+
+    Ok(CcxtFields {
+        exchange,
+        sandbox,
+        api_key,
+        secret,
+        passphrase,
+    })
+}
+
+/// Return the config field definitions for the CCXT broker.
+fn ccxt_config_fields() -> Vec<ConfigField> {
+    vec![
+        ConfigField::builder()
+            .name("exchange")
+            .field_type(ConfigFieldType::Select)
+            .label("Exchange")
+            .required(true)
+            .sensitive(false)
+            .default("binance")
+            .options(vec![
+                SelectOption { value: "binance".into(), label: "Binance".into() },
+                SelectOption { value: "bybit".into(), label: "Bybit".into() },
+                SelectOption { value: "okx".into(), label: "OKX".into() },
+            ])
+            .build(),
+        ConfigField::builder()
+            .name("sandbox")
+            .field_type(ConfigFieldType::Boolean)
+            .label("Sandbox mode")
+            .required(false)
+            .sensitive(false)
+            .default("true")
+            .description("Use testnet/sandbox environment (recommended for initial setup).")
+            .build(),
+        ConfigField::builder()
+            .name("api_key")
+            .field_type(ConfigFieldType::Password)
+            .label("API key")
+            .required(false)
+            .sensitive(true)
+            .description("Exchange API key. Can also be set via RARA_BROKER_API_KEY env var.")
+            .build(),
+        ConfigField::builder()
+            .name("secret")
+            .field_type(ConfigFieldType::Password)
+            .label("API secret")
+            .required(false)
+            .sensitive(true)
+            .description("Exchange API secret. Can also be set via RARA_BROKER_SECRET env var.")
+            .build(),
+        ConfigField::builder()
+            .name("passphrase")
+            .field_type(ConfigFieldType::Password)
+            .label("API passphrase (OKX only)")
+            .required(false)
+            .sensitive(true)
+            .description("Exchange API passphrase. Can also be set via RARA_BROKER_PASSPHRASE env var.")
+            .build(),
+    ]
+}
+
+/// Build the broker registry entry for the CCXT broker.
+pub fn registry_entry() -> BrokerRegistryEntry {
+    BrokerRegistryEntry {
+        type_key: "ccxt",
+        name: "CCXT (Crypto Exchanges)",
+        description: "Trade on Binance, Bybit, OKX, and other crypto exchanges via CCXT.",
+        config_fields: ccxt_config_fields,
+        create_broker: |fields: &HashMap<String, String>| {
+            let f = parse_ccxt_fields(fields)?;
+            let broker = CcxtBroker::builder()
+                .exchange_id(f.exchange)
+                .api_key(f.api_key)
+                .secret(f.secret)
+                .sandbox(f.sandbox)
+                .maybe_passphrase(f.passphrase)
+                .build();
+            Ok(Box::new(broker) as Box<dyn crate::broker::Broker>)
+        },
+        create_config: |fields: &HashMap<String, String>| {
+            let f = parse_ccxt_fields(fields)?;
+            Ok(BrokerConfig::Ccxt(CcxtBrokerConfig {
+                exchange: f.exchange,
+                sandbox: f.sandbox,
+                api_key: f.api_key,
+                secret: f.secret,
+                passphrase: f.passphrase,
+            }))
+        },
     }
 }
 

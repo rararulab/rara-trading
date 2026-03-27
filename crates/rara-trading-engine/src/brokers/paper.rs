@@ -6,9 +6,16 @@ use rust_decimal::Decimal;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use rara_domain::trading::{Side, StagedAction};
+
+use crate::account_config::{BrokerConfig, PaperBrokerConfig};
 use crate::broker::{
     AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
+};
+use crate::broker_registry::{
+    BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
 };
 
 /// A paper trading broker that fills every order immediately at a fixed price.
@@ -19,6 +26,55 @@ pub struct PaperBroker {
     positions: Mutex<Vec<Position>>,
     /// Record of all executions.
     executions: Mutex<Vec<ExecutionReport>>,
+}
+
+/// Build the broker registry entry for the paper trading broker.
+pub fn registry_entry() -> BrokerRegistryEntry {
+    BrokerRegistryEntry {
+        type_key: "paper",
+        name: "Paper Trading",
+        description: "Simulated fills with no real money — great for testing strategies.",
+        config_fields: || {
+            vec![ConfigField::builder()
+                .name("fill_price")
+                .field_type(ConfigFieldType::Number)
+                .label("Fill price")
+                .required(false)
+                .sensitive(false)
+                .description("Fixed price for all simulated fills (0 = use market price).")
+                .build()]
+        },
+        create_broker: |fields: &HashMap<String, String>| {
+            let fill_price = parse_fill_price(fields)?;
+            Ok(Box::new(PaperBroker::new(fill_price)))
+        },
+        create_config: |fields: &HashMap<String, String>| {
+            let fill_price = parse_fill_price(fields)?;
+            let fp_f64 = fill_price.try_into().ok();
+            Ok(BrokerConfig::Paper(PaperBrokerConfig {
+                fill_price: fp_f64,
+            }))
+        },
+    }
+}
+
+/// Parse the `fill_price` field from a config map, defaulting to zero (market price).
+fn parse_fill_price(fields: &HashMap<String, String>) -> Result<Decimal, BrokerRegistryError> {
+    fields
+        .get("fill_price")
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || Ok(Decimal::ZERO),
+            |v| {
+                v.parse::<Decimal>().map_err(|e| {
+                    InvalidValueSnafu {
+                        field: "fill_price".to_string(),
+                        reason: e.to_string(),
+                    }
+                    .build()
+                })
+            },
+        )
 }
 
 impl PaperBroker {
