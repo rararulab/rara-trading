@@ -1,6 +1,8 @@
 //! Interactive setup wizard — detects prerequisites, guides configuration,
 //! and validates the result so first-time users can get running painlessly.
 
+use std::collections::HashMap;
+
 use dialoguer::{Confirm, Input, Password, Select};
 use snafu::ResultExt;
 
@@ -10,9 +12,8 @@ use crate::error::{self, IoSnafu};
 use crate::paths;
 use crate::validation;
 
-use rara_trading_engine::account_config::{
-    AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
-};
+use rara_trading_engine::account_config::AccountConfig;
+use rara_trading_engine::broker_registry::{ConfigField, ConfigFieldType, BROKER_REGISTRY};
 
 // ---------------------------------------------------------------------------
 // Dialoguer helpers
@@ -242,20 +243,12 @@ fn step_accounts() -> error::Result<Vec<String>> {
     if existing_count > 0 {
         eprintln!("  You have {existing_count} account(s) configured:");
         for acc in &existing.accounts {
-            let broker = match &acc.broker_config {
-                BrokerConfig::Paper(_) => "paper",
-                BrokerConfig::Ccxt(c) => &c.exchange,
-            };
             let status = if acc.enabled { "enabled" } else { "disabled" };
-            eprintln!("    - {} ({broker}, {status})", acc.id);
+            eprintln!("    - {} ({}, {status})", acc.id, acc.broker_config.type_key());
         }
     } else {
         eprintln!("  No accounts configured yet.");
         eprintln!("  You need at least one account to start trading.");
-        eprintln!();
-        eprintln!("  Account types:");
-        eprintln!("    - paper: simulated fills, no real money — great for testing");
-        eprintln!("    - ccxt:  live exchange (Binance, Bybit, OKX) via CCXT");
     }
     eprintln!();
 
@@ -286,7 +279,7 @@ fn step_accounts() -> error::Result<Vec<String>> {
 /// Prompt the user interactively for account details and save to accounts.toml.
 ///
 /// Returns `Some(id)` on success or `None` if the account already exists.
-/// Sensitive fields (API key, secret, passphrase) use masked input.
+/// Broker-specific fields are collected dynamically from the registry.
 fn add_account_interactive() -> error::Result<Option<String>> {
     let id = input(
         "  Account ID (unique identifier, e.g. binance-main, paper-test)",
@@ -299,12 +292,15 @@ fn add_account_interactive() -> error::Result<Option<String>> {
         return Ok(None);
     }
 
-    let broker_options = &[
-        "paper — simulated fills, no real money",
-        "ccxt  — live exchange via CCXT",
-    ];
-    let broker_idx = select("  Broker type", broker_options, 0)?;
-    let broker_type = if broker_idx == 0 { "paper" } else { "ccxt" };
+    // Build broker selection from registry
+    let registry = &*BROKER_REGISTRY;
+    let broker_labels: Vec<String> = registry
+        .iter()
+        .map(|e| format!("{} — {}", e.name, e.description))
+        .collect();
+    let broker_refs: Vec<&str> = broker_labels.iter().map(String::as_str).collect();
+    let broker_idx = select("  Broker type", &broker_refs, 0)?;
+    let entry = &registry[broker_idx];
 
     let label = input("  Label (display name)", Some(&id))?;
 
@@ -318,11 +314,15 @@ fn add_account_interactive() -> error::Result<Option<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let broker_config = match broker_type {
-        "paper" => build_paper_config()?,
-        "ccxt" => build_ccxt_config()?,
-        _ => unreachable!(),
-    };
+    // Collect broker-specific fields dynamically
+    eprintln!();
+    eprintln!("  {} configuration:", entry.name);
+    let fields = collect_config_fields(&(entry.config_fields)())?;
+
+    // Build config via registry factory
+    let broker_config = (entry.create_config)(&fields)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
+        .context(IoSnafu)?;
 
     let mut cfg = accounts_config::load_accounts();
     cfg.accounts.push(AccountConfig {
@@ -338,51 +338,42 @@ fn add_account_interactive() -> error::Result<Option<String>> {
     Ok(Some(id))
 }
 
-/// Build `BrokerConfig::Paper` from interactive prompts.
-fn build_paper_config() -> error::Result<BrokerConfig> {
-    eprintln!();
-    eprintln!("  Paper broker — all orders are simulated locally.");
-    let fill_price_str = input(
-        "  Fixed fill price (leave empty to use market price)",
-        Some(""),
-    )?;
-    let fill_price = fill_price_str.parse::<f64>().ok();
-    Ok(BrokerConfig::Paper(PaperBrokerConfig { fill_price }))
-}
+/// Dynamically collect config field values using dialoguer prompts.
+fn collect_config_fields(fields: &[ConfigField]) -> error::Result<HashMap<String, String>> {
+    let mut values = HashMap::new();
 
-/// Build `BrokerConfig::Ccxt` from interactive prompts.
-///
-/// Only asks for passphrase when OKX is selected.
-fn build_ccxt_config() -> error::Result<BrokerConfig> {
-    eprintln!();
-    let exchange_options = &["binance", "bybit", "okx"];
-    let exchange_idx = select("  Exchange", exchange_options, 0)?;
-    let exchange = exchange_options[exchange_idx].to_string();
+    for field in fields {
+        if let Some(ref desc) = field.description {
+            eprintln!("  {desc}");
+        }
 
-    let sandbox = confirm(
-        "  Use sandbox/testnet? (recommended for first-time setup)",
-        true,
-    )?;
+        let value = match field.field_type {
+            ConfigFieldType::Password => password(&format!("  {}", field.label))?,
+            ConfigFieldType::Select => {
+                let labels: Vec<&str> = field.options.iter().map(|o| o.label.as_str()).collect();
+                let default_idx = field
+                    .default
+                    .as_ref()
+                    .and_then(|d| field.options.iter().position(|o| o.value == *d))
+                    .unwrap_or(0);
+                let idx = select(&format!("  {}", field.label), &labels, default_idx)?;
+                field.options[idx].value.clone()
+            }
+            ConfigFieldType::Boolean => {
+                let default = field.default.as_ref().is_some_and(|d| d == "true");
+                let yes = confirm(&format!("  {}", field.label), default)?;
+                yes.to_string()
+            }
+            ConfigFieldType::Text | ConfigFieldType::Number => input(
+                &format!("  {}", field.label),
+                field.default.as_deref().or(Some("")),
+            )?,
+        };
 
-    eprintln!();
-    eprintln!("  Enter your API credentials (input is hidden):");
-    let api_key = password("  API key")?;
-    let secret = password("  API secret")?;
+        values.insert(field.name.clone(), value);
+    }
 
-    let passphrase = if exchange == "okx" {
-        let p = password("  Passphrase (required for OKX)")?;
-        if p.is_empty() { None } else { Some(p) }
-    } else {
-        None
-    };
-
-    Ok(BrokerConfig::Ccxt(CcxtBrokerConfig {
-        exchange,
-        sandbox,
-        api_key,
-        secret,
-        passphrase,
-    }))
+    Ok(values)
 }
 
 // ---------------------------------------------------------------------------
