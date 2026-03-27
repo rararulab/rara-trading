@@ -5,6 +5,7 @@ use dialoguer::{Confirm, Input, Password, Select};
 use snafu::ResultExt;
 
 use crate::accounts_config;
+use crate::app_config::{self, AppConfig};
 use crate::error::{self, IoSnafu};
 use crate::paths;
 
@@ -64,19 +65,18 @@ fn select(prompt: &str, items: &[&str], default: usize) -> error::Result<usize> 
         .context(IoSnafu)
 }
 
-/// Interactive guided setup — walks the user through init, account creation, and validation.
+/// Interactive guided setup — walks the user through config, accounts, and validation.
 ///
 /// Displays a welcome banner, step indicators, contextual hints, and a final
 /// summary so first-time users always know where they are and what to do next.
 ///
 /// Requires a TTY on stdin; returns an error if prompts cannot be displayed.
 pub async fn run(
-    init_fn: fn(bool) -> error::Result<()>,
     validate_fn: impl AsyncFn() -> error::Result<()>,
 ) -> error::Result<()> {
     print_welcome();
 
-    step_init_config(init_fn)?;
+    step_configure()?;
     let accounts = step_add_accounts()?;
     step_validate(validate_fn).await?;
 
@@ -92,46 +92,73 @@ fn print_welcome() {
     eprintln!();
     eprintln!("  This wizard will walk you through three steps:");
     eprintln!();
-    eprintln!("    1. Initialize configuration files");
+    eprintln!("    1. Configure core settings (database, LLM backend)");
     eprintln!("    2. Add trading accounts");
     eprintln!("    3. Validate your setup");
     eprintln!();
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 — Config file initialization
+// Step 1 — Core configuration
 // ---------------------------------------------------------------------------
 
-/// Step 1: ensure `config.toml` and `accounts.toml` exist.
-fn step_init_config(init_fn: fn(bool) -> error::Result<()>) -> error::Result<()> {
-    eprintln!("[1/3] Initialize configuration files");
-    eprintln!("--------------------------------------");
+/// Available LLM backend choices for the select prompt.
+const BACKEND_OPTIONS: &[&str] = &[
+    "claude", "codex", "gemini", "kiro", "amp", "copilot", "opencode", "pi", "roo",
+];
 
+/// Step 1: interactively configure core settings and write `config.toml`.
+///
+/// Asks the user for the two most important values (database URL and LLM
+/// backend) that have no sensible auto-detection, while keeping all other
+/// settings at their defaults.  Existing values from a previous config file
+/// are shown as defaults so returning users can just press Enter.
+fn step_configure() -> error::Result<()> {
+    eprintln!("[1/3] Configure core settings");
+    eprintln!("-----------------------------");
+
+    // Load existing config (or defaults) so we can pre-fill prompts
     let config_path = paths::config_file();
-    let accounts_path = paths::accounts_file();
-    let config_exists = config_path.exists();
-    let accounts_exists = accounts_path.exists();
-
-    if config_exists && accounts_exists {
-        eprintln!("  Config files already exist:");
-        eprintln!("    - {}", config_path.display());
-        eprintln!("    - {}", accounts_path.display());
-        eprintln!();
-
-        if confirm("  Overwrite with fresh templates?", false)? {
-            init_fn(true)?;
-            eprintln!("  Config files regenerated.\n");
-        } else {
-            eprintln!("  Keeping existing files.\n");
-        }
+    let existing: AppConfig = if config_path.exists() {
+        let text = std::fs::read_to_string(&config_path)
+            .unwrap_or_default();
+        toml::from_str(&text).unwrap_or_default()
     } else {
-        eprintln!("  Generating config files...");
-        init_fn(false)?;
-        eprintln!("  Created:");
-        eprintln!("    - {}", config_path.display());
-        eprintln!("    - {}", accounts_path.display());
-        eprintln!();
+        AppConfig::default()
+    };
+
+    // -- Database URL --
+    eprintln!();
+    eprintln!("  PostgreSQL / TimescaleDB connection URL.");
+    eprintln!("  This is where rara-trading stores market data and strategy results.");
+    let db_url = input("  Database URL", Some(&existing.database.url))?;
+
+    // -- LLM Backend --
+    eprintln!();
+    eprintln!("  Which LLM agent CLI should rara-trading use for research?");
+    let current_backend_idx = BACKEND_OPTIONS
+        .iter()
+        .position(|&b| b == existing.agent.backend)
+        .unwrap_or(0);
+    let backend_idx = select("  LLM backend", BACKEND_OPTIONS, current_backend_idx)?;
+    let backend = BACKEND_OPTIONS[backend_idx].to_string();
+
+    // -- Build and save config --
+    let mut cfg = existing;
+    cfg.database.url = db_url;
+    cfg.agent.backend = backend;
+    app_config::save(&cfg).context(IoSnafu)?;
+
+    // Also ensure accounts.toml exists
+    let accounts_path = paths::accounts_file();
+    if !accounts_path.exists() {
+        let template = accounts_config::generate_accounts_template();
+        std::fs::write(&accounts_path, &template).context(IoSnafu)?;
     }
+
+    eprintln!();
+    eprintln!("  Saved to {}", config_path.display());
+    eprintln!();
 
     Ok(())
 }
@@ -146,7 +173,9 @@ fn step_init_config(init_fn: fn(bool) -> error::Result<()>) -> error::Result<()>
 fn step_add_accounts() -> error::Result<Vec<String>> {
     eprintln!("[2/3] Add trading accounts");
     eprintln!("--------------------------");
-    eprintln!("  Each account connects to a broker (paper for simulation, ccxt for live exchanges).");
+    eprintln!("  Each account connects to a broker:");
+    eprintln!("    - paper: simulated fills, no real money — great for testing");
+    eprintln!("    - ccxt:  live exchange (Binance, Bybit, OKX) via CCXT");
     eprintln!();
 
     let mut added: Vec<String> = Vec::new();
@@ -177,9 +206,8 @@ fn step_add_accounts() -> error::Result<Vec<String>> {
 /// Returns `Some(id)` on success or `None` if the account already exists.
 /// Sensitive fields (API key, secret, passphrase) use masked input.
 fn add_account_interactive() -> error::Result<Option<String>> {
-    // -- identity --
     let id = input(
-        "  Account ID (unique, e.g. binance-main, paper-test)",
+        "  Account ID (unique identifier, e.g. binance-main, paper-test)",
         None,
     )?;
 
@@ -305,7 +333,6 @@ async fn step_validate(validate_fn: impl AsyncFn() -> error::Result<()>) -> erro
             eprintln!("    - LLM backend: ensure the binary is in your PATH");
             eprintln!("    - Run `rara setup validate` to retry after fixing.");
             eprintln!();
-            // Don't propagate — let the wizard finish so the user keeps their config
         }
     }
 
