@@ -1492,9 +1492,11 @@ async fn run_paper_start() -> error::Result<()> {
         let fields = first_account.broker_config.to_field_map();
         let type_key = first_account.broker_config.type_key();
         let entry = rara_trading_engine::broker_registry::find_broker(type_key)
-            .unwrap_or_else(|| panic!("unknown broker type: {type_key}"));
-        (entry.create_broker)(&fields)
-            .unwrap_or_else(|e| panic!("failed to create broker: {e}"))
+            .ok_or_else(|| rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
+                type_key: type_key.to_string(),
+            })
+            .context(error::BrokerRegistrySnafu)?;
+        (entry.create_broker)(&fields).context(error::BrokerRegistrySnafu)?
     };
     let guard_pipeline = GuardPipeline::new(vec![]);
     let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
@@ -2158,9 +2160,11 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 let fields = acc.broker_config.to_field_map();
                 let type_key = acc.broker_config.type_key();
                 let entry = rara_trading_engine::broker_registry::find_broker(type_key)
-                    .unwrap_or_else(|| panic!("unknown broker type: {type_key}"));
-                (entry.create_broker)(&fields)
-                    .unwrap_or_else(|e| panic!("failed to create broker: {e}"))
+                    .ok_or_else(|| rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
+                        type_key: type_key.to_string(),
+                    })
+                    .context(error::BrokerRegistrySnafu)?;
+                (entry.create_broker)(&fields).context(error::BrokerRegistrySnafu)?
             };
             match broker.account_info().await {
                 Ok(info) => {
