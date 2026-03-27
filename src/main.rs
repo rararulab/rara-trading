@@ -426,7 +426,7 @@ async fn run() -> error::Result<()> {
         }
         Command::Setup { interactive, action } => {
             if interactive {
-                rara_trading::setup_wizard::run(run_setup_init, run_setup_validate).await?;
+                rara_trading::setup_wizard::run().await?;
             } else if let Some(action) = action {
                 run_setup(action).await?;
             } else {

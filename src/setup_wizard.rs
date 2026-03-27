@@ -1,16 +1,22 @@
-//! Interactive setup wizard — guides the user through config init, account
-//! creation, and validation via terminal prompts.
+//! Interactive setup wizard — detects prerequisites, guides configuration,
+//! and validates the result so first-time users can get running painlessly.
 
 use dialoguer::{Confirm, Input, Password, Select};
 use snafu::ResultExt;
 
 use crate::accounts_config;
+use crate::app_config::{self, AppConfig};
 use crate::error::{self, IoSnafu};
 use crate::paths;
+use crate::validation;
 
 use rara_trading_engine::account_config::{
     AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
 };
+
+// ---------------------------------------------------------------------------
+// Dialoguer helpers
+// ---------------------------------------------------------------------------
 
 /// Convert `dialoguer::Error` (which wraps `std::io::Error`) into `std::io::Error`
 /// so it can be used with `IoSnafu`.
@@ -64,101 +70,206 @@ fn select(prompt: &str, items: &[&str], default: usize) -> error::Result<usize> 
         .context(IoSnafu)
 }
 
-/// Interactive guided setup — walks the user through init, account creation, and validation.
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/// Interactive guided setup — detects, configures, and validates.
 ///
-/// Displays a welcome banner, step indicators, contextual hints, and a final
-/// summary so first-time users always know where they are and what to do next.
+/// The wizard checks what's already working, only asks about things that need
+/// attention, and gives actionable guidance when something is missing.
 ///
 /// Requires a TTY on stdin; returns an error if prompts cannot be displayed.
-pub async fn run(
-    init_fn: fn(bool) -> error::Result<()>,
-    validate_fn: impl AsyncFn() -> error::Result<()>,
-) -> error::Result<()> {
+pub async fn run() -> error::Result<()> {
     print_welcome();
 
-    step_init_config(init_fn)?;
-    let accounts = step_add_accounts()?;
-    step_validate(validate_fn).await?;
+    let cfg = step_database().await?;
+    let cfg = step_llm_backend(cfg)?;
+    let accounts = step_accounts()?;
 
-    print_summary(&accounts);
+    print_summary(&cfg, &accounts);
     Ok(())
 }
 
-/// Print the welcome banner and an overview of the three setup steps.
+/// Print the welcome banner explaining what rara-trading needs.
 fn print_welcome() {
     eprintln!();
     eprintln!("  rara-trading — interactive setup");
     eprintln!("  ================================");
     eprintln!();
-    eprintln!("  This wizard will walk you through three steps:");
+    eprintln!("  rara-trading needs two things to run:");
     eprintln!();
-    eprintln!("    1. Initialize configuration files");
-    eprintln!("    2. Add trading accounts");
-    eprintln!("    3. Validate your setup");
+    eprintln!("    1. A PostgreSQL database (for market data & strategy results)");
+    eprintln!("    2. An LLM agent CLI     (for AI-driven research)");
+    eprintln!();
+    eprintln!("  This wizard will check each one, help you configure it,");
+    eprintln!("  and then set up your trading accounts.");
     eprintln!();
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 — Config file initialization
+// Step 1 — Database
 // ---------------------------------------------------------------------------
 
-/// Step 1: ensure `config.toml` and `accounts.toml` exist.
-fn step_init_config(init_fn: fn(bool) -> error::Result<()>) -> error::Result<()> {
-    eprintln!("[1/3] Initialize configuration files");
-    eprintln!("--------------------------------------");
+/// Available LLM backend choices for the select prompt.
+const BACKEND_OPTIONS: &[&str] = &[
+    "claude", "codex", "gemini", "kiro", "amp", "copilot", "opencode", "pi", "roo",
+];
 
-    let config_path = paths::config_file();
-    let accounts_path = paths::accounts_file();
-    let config_exists = config_path.exists();
-    let accounts_exists = accounts_path.exists();
+/// Step 1: detect database connectivity and configure if needed.
+///
+/// Loads (or creates) the config, tests the database URL, and lets the user
+/// change it if the connection fails.
+async fn step_database() -> error::Result<AppConfig> {
+    eprintln!("[1/3] Database (PostgreSQL / TimescaleDB)");
+    eprintln!("-----------------------------------------");
 
-    if config_exists && accounts_exists {
-        eprintln!("  Config files already exist:");
-        eprintln!("    - {}", config_path.display());
-        eprintln!("    - {}", accounts_path.display());
+    let mut cfg = load_or_create_config()?;
+
+    loop {
+        eprintln!("  Testing connection: {}", cfg.database.url);
         eprintln!();
 
-        if confirm("  Overwrite with fresh templates?", false)? {
-            init_fn(true)?;
-            eprintln!("  Config files regenerated.\n");
-        } else {
-            eprintln!("  Keeping existing files.\n");
+        match validation::validate_database(&cfg.database.url).await {
+            Ok(()) => {
+                eprintln!("  Connected successfully.");
+                eprintln!();
+                break;
+            }
+            Err(e) => {
+                eprintln!("  Connection failed: {e}");
+                eprintln!();
+                eprintln!("  Make sure PostgreSQL is running and the URL is correct.");
+                eprintln!("  Format: postgres://USER:PASS@HOST:PORT/DBNAME");
+                eprintln!();
+
+                if !confirm("  Enter a different database URL?", true)? {
+                    eprintln!("  Keeping current URL. You can fix this later in config.toml.");
+                    eprintln!();
+                    break;
+                }
+
+                let new_url = input("  Database URL", Some(&cfg.database.url))?;
+                cfg.database.url = new_url;
+                app_config::save(&cfg).context(IoSnafu)?;
+                eprintln!();
+            }
         }
-    } else {
-        eprintln!("  Generating config files...");
-        init_fn(false)?;
-        eprintln!("  Created:");
-        eprintln!("    - {}", config_path.display());
-        eprintln!("    - {}", accounts_path.display());
-        eprintln!();
     }
 
-    Ok(())
+    Ok(cfg)
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 — Account creation
+// Step 2 — LLM Backend
 // ---------------------------------------------------------------------------
 
-/// Step 2: interactively add one or more trading accounts.
+/// Step 2: detect LLM backend availability and configure if needed.
 ///
-/// Returns the list of account IDs that were added during this session.
-fn step_add_accounts() -> error::Result<Vec<String>> {
-    eprintln!("[2/3] Add trading accounts");
-    eprintln!("--------------------------");
-    eprintln!("  Each account connects to a broker (paper for simulation, ccxt for live exchanges).");
+/// Checks whether the selected backend CLI is in PATH. If not, lets the user
+/// pick a different one or continue anyway.
+fn step_llm_backend(mut cfg: AppConfig) -> error::Result<AppConfig> {
+    eprintln!("[2/3] LLM Agent Backend");
+    eprintln!("-----------------------");
+    eprintln!("  rara-trading uses an LLM agent CLI to generate and evaluate");
+    eprintln!("  trading strategies. It needs one of these tools in your PATH.");
+    eprintln!();
+
+    loop {
+        let current = &cfg.agent.backend;
+        eprintln!("  Current backend: {current}");
+
+        if validation::validate_llm_backend(current).is_ok() {
+            eprintln!("  Found `{current}` in PATH.");
+            eprintln!();
+
+            if !confirm("  Keep this backend?", true)? {
+                cfg = pick_backend(cfg)?;
+                continue;
+            }
+
+            break;
+        }
+
+        eprintln!("  `{current}` not found in PATH.");
+        eprintln!();
+        eprintln!("  You can:");
+        eprintln!("    a) Install it and re-run this setup");
+        eprintln!("    b) Pick a different backend that's already installed");
+        eprintln!("    c) Skip for now and configure later in config.toml");
+        eprintln!();
+
+        if !confirm("  Pick a different backend?", true)? {
+            eprintln!("  Keeping `{current}`. Install it before running `rara`.");
+            eprintln!();
+            break;
+        }
+
+        cfg = pick_backend(cfg)?;
+    }
+
+    Ok(cfg)
+}
+
+/// Present the backend selection menu and save the choice.
+fn pick_backend(mut cfg: AppConfig) -> error::Result<AppConfig> {
+    let current_idx = BACKEND_OPTIONS
+        .iter()
+        .position(|&b| b == cfg.agent.backend)
+        .unwrap_or(0);
+    let idx = select("  LLM backend", BACKEND_OPTIONS, current_idx)?;
+    cfg.agent.backend = BACKEND_OPTIONS[idx].to_string();
+    app_config::save(&cfg).context(IoSnafu)?;
+    eprintln!();
+    Ok(cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — Trading accounts
+// ---------------------------------------------------------------------------
+
+/// Step 3: interactively add trading accounts.
+///
+/// Shows existing accounts and lets the user add new ones.
+/// Returns the list of account IDs added during this session.
+fn step_accounts() -> error::Result<Vec<String>> {
+    eprintln!("[3/3] Trading Accounts");
+    eprintln!("----------------------");
+
+    let existing = accounts_config::load_accounts();
+    let existing_count = existing.accounts.len();
+
+    if existing_count > 0 {
+        eprintln!("  You have {existing_count} account(s) configured:");
+        for acc in &existing.accounts {
+            let broker = match &acc.broker_config {
+                BrokerConfig::Paper(_) => "paper",
+                BrokerConfig::Ccxt(c) => &c.exchange,
+            };
+            let status = if acc.enabled { "enabled" } else { "disabled" };
+            eprintln!("    - {} ({broker}, {status})", acc.id);
+        }
+    } else {
+        eprintln!("  No accounts configured yet.");
+        eprintln!("  You need at least one account to start trading.");
+        eprintln!();
+        eprintln!("  Account types:");
+        eprintln!("    - paper: simulated fills, no real money — great for testing");
+        eprintln!("    - ccxt:  live exchange (Binance, Bybit, OKX) via CCXT");
+    }
     eprintln!();
 
     let mut added: Vec<String> = Vec::new();
 
     loop {
-        let prompt = if added.is_empty() {
+        let prompt = if added.is_empty() && existing_count == 0 {
             "  Add a trading account?"
         } else {
             "  Add another account?"
         };
+        let default_yes = added.is_empty() && existing_count == 0;
 
-        if !confirm(prompt, added.is_empty())? {
+        if !confirm(prompt, default_yes)? {
             break;
         }
 
@@ -177,20 +288,21 @@ fn step_add_accounts() -> error::Result<Vec<String>> {
 /// Returns `Some(id)` on success or `None` if the account already exists.
 /// Sensitive fields (API key, secret, passphrase) use masked input.
 fn add_account_interactive() -> error::Result<Option<String>> {
-    // -- identity --
     let id = input(
-        "  Account ID (unique, e.g. binance-main, paper-test)",
+        "  Account ID (unique identifier, e.g. binance-main, paper-test)",
         None,
     )?;
 
-    // bail early on duplicate
     let cfg = accounts_config::load_accounts();
     if cfg.accounts.iter().any(|a| a.id == id) {
         eprintln!("  Account \"{id}\" already exists — skipping.\n");
         return Ok(None);
     }
 
-    let broker_options = &["paper — simulated fills, no real money", "ccxt  — live exchange via CCXT"];
+    let broker_options = &[
+        "paper — simulated fills, no real money",
+        "ccxt  — live exchange via CCXT",
+    ];
     let broker_idx = select("  Broker type", broker_options, 0)?;
     let broker_type = if broker_idx == 0 { "paper" } else { "ccxt" };
 
@@ -206,14 +318,12 @@ fn add_account_interactive() -> error::Result<Option<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    // -- broker-specific config --
     let broker_config = match broker_type {
         "paper" => build_paper_config()?,
         "ccxt" => build_ccxt_config()?,
         _ => unreachable!(),
     };
 
-    // -- save --
     let mut cfg = accounts_config::load_accounts();
     cfg.accounts.push(AccountConfig {
         id: id.clone(),
@@ -259,7 +369,6 @@ fn build_ccxt_config() -> error::Result<BrokerConfig> {
     let api_key = password("  API key")?;
     let secret = password("  API secret")?;
 
-    // Only OKX requires a passphrase
     let passphrase = if exchange == "okx" {
         let p = password("  Passphrase (required for OKX)")?;
         if p.is_empty() { None } else { Some(p) }
@@ -277,68 +386,48 @@ fn build_ccxt_config() -> error::Result<BrokerConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 — Validation
+// Helpers
 // ---------------------------------------------------------------------------
 
-/// Step 3: optionally run validation checks (database, LLM backend).
-async fn step_validate(validate_fn: impl AsyncFn() -> error::Result<()>) -> error::Result<()> {
-    eprintln!("[3/3] Validate setup");
-    eprintln!("--------------------");
-    eprintln!("  Checks database connectivity and LLM backend availability.");
-    eprintln!();
+/// Load existing config from disk, or create a default one if none exists.
+fn load_or_create_config() -> error::Result<AppConfig> {
+    let config_path = paths::config_file();
 
-    if !confirm("  Run validation now?", true)? {
-        eprintln!("  Skipped. You can run validation later with: rara setup validate\n");
-        return Ok(());
+    if config_path.exists() {
+        let text = std::fs::read_to_string(&config_path).context(IoSnafu)?;
+        Ok(toml::from_str(&text).unwrap_or_default())
+    } else {
+        let cfg = AppConfig::default();
+        app_config::save(&cfg).context(IoSnafu)?;
+        eprintln!("  Created {}", config_path.display());
+        eprintln!();
+        Ok(cfg)
     }
-
-    eprintln!();
-    match validate_fn().await {
-        Ok(()) => {
-            eprintln!("  All checks passed.\n");
-        }
-        Err(e) => {
-            eprintln!("  Validation failed: {e}");
-            eprintln!();
-            eprintln!("  Troubleshooting tips:");
-            eprintln!("    - Database: check RARA_DB_URL or [database] in config.toml");
-            eprintln!("    - LLM backend: ensure the binary is in your PATH");
-            eprintln!("    - Run `rara setup validate` to retry after fixing.");
-            eprintln!();
-            // Don't propagate — let the wizard finish so the user keeps their config
-        }
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
-/// Print a final summary of what was accomplished during setup.
-fn print_summary(added_accounts: &[String]) {
+/// Print a final summary of what was configured.
+fn print_summary(cfg: &AppConfig, added_accounts: &[String]) {
+    let accounts_cfg = accounts_config::load_accounts();
+    let total = accounts_cfg.accounts.len();
+
     eprintln!("  ================================");
     eprintln!("  Setup complete!");
     eprintln!();
+    eprintln!("  Database:    {}", cfg.database.url);
+    eprintln!("  LLM backend: {}", cfg.agent.backend);
+    eprintln!("  Accounts:    {total} configured");
 
-    if added_accounts.is_empty() {
-        eprintln!("  No new accounts were added.");
-    } else {
-        eprintln!(
-            "  {} account(s) added: {}",
-            added_accounts.len(),
-            added_accounts.join(", ")
-        );
+    if !added_accounts.is_empty() {
+        eprintln!("               ({} new: {})", added_accounts.len(), added_accounts.join(", "));
     }
 
-    let config_dir = paths::data_dir();
     eprintln!();
-    eprintln!("  Config directory: {}", config_dir.display());
+    eprintln!("  Config: {}", paths::config_file().display());
     eprintln!();
-    eprintln!("  Next steps:");
-    eprintln!("    - Edit config.toml to tune trading/research parameters");
-    eprintln!("    - Run `rara setup validate` to re-check your setup");
-    eprintln!("    - Run `rara` to start trading");
+    eprintln!("  Run `rara` to start trading. Happy trading!");
     eprintln!();
 }
