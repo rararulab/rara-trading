@@ -3,6 +3,7 @@
 //! Exposes system status and event streaming over gRPC so that the TUI client
 //! can render a live dashboard without direct access to internal state.
 
+pub mod health;
 pub mod service;
 
 /// Generated protobuf types for the rara gRPC service.

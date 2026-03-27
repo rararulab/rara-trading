@@ -1231,8 +1231,20 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
 
 /// Start the gRPC server on the given port.
 async fn run_serve(port: u16) -> error::Result<()> {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    use rara_server::health::HealthConfig;
     use rara_server::rara_proto::rara_service_server::RaraServiceServer;
     use rara_server::service::RaraServiceImpl;
+
+    let cfg = crate::app_config::load();
+
+    let health_config = HealthConfig {
+        database_url: cfg.database.url.clone(),
+        llm_backend: cfg.agent.backend.clone(),
+        ws_connected: Arc::new(AtomicBool::new(false)),
+    };
 
     let addr = format!("0.0.0.0:{port}")
         .parse::<std::net::SocketAddr>()
@@ -1243,7 +1255,9 @@ async fn run_serve(port: u16) -> error::Result<()> {
     eprintln!("gRPC server listening on {addr}");
 
     tonic::transport::Server::builder()
-        .add_service(RaraServiceServer::new(RaraServiceImpl::new()))
+        .add_service(RaraServiceServer::new(
+            RaraServiceImpl::with_health(health_config),
+        ))
         .serve(addr)
         .await
         .context(GrpcServeSnafu)?;

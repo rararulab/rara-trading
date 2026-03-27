@@ -10,6 +10,7 @@ use tracing::info;
 
 use rara_event_bus::bus::EventBus;
 
+use crate::health::{self, HealthConfig};
 use crate::rara_proto::rara_service_server::RaraService;
 use crate::rara_proto::{Empty, EventFilter, EventMessage, SystemStatus};
 
@@ -19,6 +20,8 @@ pub struct RaraServiceImpl {
     start_time: Instant,
     /// Event bus for subscribing to real-time events.
     event_bus: Option<Arc<EventBus>>,
+    /// Health probe configuration (None = legacy scaffold mode, all indicators false).
+    health_config: Option<Arc<HealthConfig>>,
 }
 
 impl RaraServiceImpl {
@@ -28,6 +31,17 @@ impl RaraServiceImpl {
         Self {
             start_time: Instant::now(),
             event_bus: None,
+            health_config: None,
+        }
+    }
+
+    /// Create a new service instance with health probes enabled.
+    #[must_use]
+    pub fn with_health(health_config: HealthConfig) -> Self {
+        Self {
+            start_time: Instant::now(),
+            event_bus: None,
+            health_config: Some(Arc::new(health_config)),
         }
     }
 
@@ -37,7 +51,15 @@ impl RaraServiceImpl {
         Self {
             start_time: Instant::now(),
             event_bus: Some(event_bus),
+            health_config: None,
         }
+    }
+
+    /// Attach health probe configuration to an existing instance.
+    #[must_use]
+    pub fn health(mut self, config: HealthConfig) -> Self {
+        self.health_config = Some(Arc::new(config));
+        self
     }
 }
 
@@ -58,10 +80,18 @@ impl RaraService for RaraServiceImpl {
         let minutes = (uptime.as_secs() % 3600) / 60;
         let seconds = uptime.as_secs() % 60;
 
+        let (database_connected, websocket_connected, llm_available) =
+            if let Some(ref config) = self.health_config {
+                let h = health::probe(config).await;
+                (h.database_connected, h.websocket_connected, h.llm_available)
+            } else {
+                (false, false, false)
+            };
+
         let status = SystemStatus {
-            database_connected: false,
-            websocket_connected: false,
-            llm_available: false,
+            database_connected,
+            websocket_connected,
+            llm_available,
             event_count: 0,
             uptime: format!("{hours:02}:{minutes:02}:{seconds:02}"),
             strategy_count: 0,
