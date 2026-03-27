@@ -14,6 +14,8 @@ pub struct HealthConfig {
     pub llm_backend: String,
     /// Shared flag set by the WebSocket layer when a connection is active.
     pub ws_connected: Arc<AtomicBool>,
+    /// Number of configured trading contracts.
+    pub contract_count: u32,
 }
 
 /// Probe results for a single status poll.

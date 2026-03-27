@@ -1246,12 +1246,6 @@ async fn run_serve(port: u16) -> error::Result<()> {
 
     let ws_connected = Arc::new(AtomicBool::new(false));
 
-    let health_config = HealthConfig {
-        database_url: cfg.database.url.clone(),
-        llm_backend: cfg.agent.backend.clone(),
-        ws_connected: Arc::clone(&ws_connected),
-    };
-
     // Collect contracts from enabled accounts for market data subscriptions
     let accounts_cfg = crate::accounts_config::load_accounts();
     let contracts: Vec<String> = accounts_cfg
@@ -1260,6 +1254,13 @@ async fn run_serve(port: u16) -> error::Result<()> {
         .filter(|a| a.enabled)
         .flat_map(|a| a.contracts.clone())
         .collect();
+
+    let health_config = HealthConfig {
+        database_url: cfg.database.url.clone(),
+        llm_backend: cfg.agent.backend.clone(),
+        ws_connected: Arc::clone(&ws_connected),
+        contract_count: u32::try_from(contracts.len()).unwrap_or(u32::MAX),
+    };
 
     // Spawn market data WebSocket task if contracts are configured
     if !contracts.is_empty() {

@@ -80,13 +80,24 @@ impl RaraService for RaraServiceImpl {
         let minutes = (uptime.as_secs() % 3600) / 60;
         let seconds = uptime.as_secs() % 60;
 
-        let (database_connected, websocket_connected, llm_available) =
+        let (database_connected, websocket_connected, llm_available, contract_count) =
             if let Some(ref config) = self.health_config {
                 let h = health::probe(config).await;
-                (h.database_connected, h.websocket_connected, h.llm_available)
+                (h.database_connected, h.websocket_connected, h.llm_available, config.contract_count)
             } else {
-                (false, false, false)
+                (false, false, false, 0)
             };
+
+        let mut warnings = Vec::new();
+        if contract_count == 0 {
+            warnings.push("No contracts configured. Run `rara setup -i` to add trading pairs.".to_string());
+        }
+        if !database_connected {
+            warnings.push("Database unreachable. Check PostgreSQL is running.".to_string());
+        }
+        if !llm_available {
+            warnings.push("LLM backend not found in PATH. Run `rara setup -i` to configure.".to_string());
+        }
 
         let status = SystemStatus {
             database_connected,
@@ -95,6 +106,8 @@ impl RaraService for RaraServiceImpl {
             event_count: 0,
             uptime: format!("{hours:02}:{minutes:02}:{seconds:02}"),
             strategy_count: 0,
+            contract_count,
+            warnings,
         };
 
         info!("GetSystemStatus called, uptime={}", status.uptime);
