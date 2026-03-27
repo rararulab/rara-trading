@@ -13,7 +13,9 @@ use crate::paths;
 use crate::validation;
 
 use rara_trading_engine::account_config::AccountConfig;
-use rara_trading_engine::broker_registry::{ConfigField, ConfigFieldType, BROKER_REGISTRY};
+use rara_trading_engine::broker_registry::{
+    BrokerRegistryEntry, ConfigField, ConfigFieldType, BROKER_REGISTRY,
+};
 
 // ---------------------------------------------------------------------------
 // Dialoguer helpers
@@ -86,7 +88,7 @@ pub async fn run() -> error::Result<()> {
 
     let cfg = step_database().await?;
     let cfg = step_llm_backend(cfg)?;
-    let accounts = step_accounts()?;
+    let accounts = step_accounts().await?;
 
     print_summary(&cfg, &accounts);
     Ok(())
@@ -233,7 +235,7 @@ fn pick_backend(mut cfg: AppConfig) -> error::Result<AppConfig> {
 ///
 /// Shows existing accounts and lets the user add new ones.
 /// Returns the list of account IDs added during this session.
-fn step_accounts() -> error::Result<Vec<String>> {
+async fn step_accounts() -> error::Result<Vec<String>> {
     eprintln!("[3/3] Trading Accounts");
     eprintln!("----------------------");
 
@@ -267,7 +269,7 @@ fn step_accounts() -> error::Result<Vec<String>> {
         }
 
         eprintln!();
-        if let Some(id) = add_account_interactive()? {
+        if let Some(id) = add_account_interactive().await? {
             added.push(id);
         }
     }
@@ -276,23 +278,37 @@ fn step_accounts() -> error::Result<Vec<String>> {
     Ok(added)
 }
 
+/// Generate a default account ID like "{type_key}-main", incrementing if taken.
+fn generate_default_id(type_key: &str, existing: &[AccountConfig]) -> String {
+    let candidate = format!("{type_key}-main");
+    if !existing.iter().any(|a| a.id == candidate) {
+        return candidate;
+    }
+    for n in 2.. {
+        let candidate = format!("{type_key}-{n}");
+        if !existing.iter().any(|a| a.id == candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+/// Test broker connectivity by creating a broker instance and calling `account_info`.
+async fn test_broker_connection(
+    entry: &BrokerRegistryEntry,
+    fields: &HashMap<String, String>,
+) -> std::result::Result<rara_trading_engine::broker::AccountInfo, String> {
+    let broker = (entry.create_broker)(fields).map_err(|e| e.to_string())?;
+    broker.account_info().await.map_err(|e| e.to_string())
+}
+
 /// Prompt the user interactively for account details and save to accounts.toml.
 ///
-/// Returns `Some(id)` on success or `None` if the account already exists.
-/// Broker-specific fields are collected dynamically from the registry.
-fn add_account_interactive() -> error::Result<Option<String>> {
-    let id = input(
-        "  Account ID (unique identifier, e.g. binance-main, paper-test)",
-        None,
-    )?;
-
-    let cfg = accounts_config::load_accounts();
-    if cfg.accounts.iter().any(|a| a.id == id) {
-        eprintln!("  Account \"{id}\" already exists — skipping.\n");
-        return Ok(None);
-    }
-
-    // Build broker selection from registry
+/// Uses a broker-first flow: select broker type, auto-generate an account ID,
+/// collect credentials, then test the connection before saving.
+/// Returns `Some(id)` on success or `None` if the account was not saved.
+async fn add_account_interactive() -> error::Result<Option<String>> {
+    // 1. Select broker type first
     let registry = &*BROKER_REGISTRY;
     let broker_labels: Vec<String> = registry
         .iter()
@@ -302,8 +318,25 @@ fn add_account_interactive() -> error::Result<Option<String>> {
     let broker_idx = select("  Broker type", &broker_refs, 0)?;
     let entry = &registry[broker_idx];
 
-    let label = input("  Label (display name)", Some(&id))?;
+    // 2. Auto-generate ID with option to override
+    let mut cfg = accounts_config::load_accounts();
+    let default_id = generate_default_id(entry.type_key, &cfg.accounts);
+    let id = input("  Account ID", Some(&default_id))?;
 
+    if cfg.accounts.iter().any(|a| a.id == id) {
+        eprintln!("  Account \"{id}\" already exists — skipping.\n");
+        return Ok(None);
+    }
+
+    // 3. Label defaults to broker name
+    let label = input("  Label (display name)", Some(entry.name))?;
+
+    // 4. Collect broker-specific fields
+    eprintln!();
+    eprintln!("  {} configuration:", entry.name);
+    let fields = collect_config_fields(&(entry.config_fields)())?;
+
+    // 5. Contracts
     let contracts_str = input(
         "  Contracts (comma-separated, e.g. BTC-USDT,ETH-USDT)",
         Some(""),
@@ -314,17 +347,35 @@ fn add_account_interactive() -> error::Result<Option<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    // Collect broker-specific fields dynamically
+    // 6. Test connection
     eprintln!();
-    eprintln!("  {} configuration:", entry.name);
-    let fields = collect_config_fields(&(entry.config_fields)())?;
-
-    // Build config via registry factory
+    eprintln!("  Testing connection...");
     let broker_config = (entry.create_config)(&fields)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
         .context(IoSnafu)?;
 
-    let mut cfg = accounts_config::load_accounts();
+    let save = match test_broker_connection(entry, &fields).await {
+        Ok(info) => {
+            eprintln!(
+                "  Connected! Equity: {}, Cash: {}",
+                info.total_equity, info.available_cash
+            );
+            eprintln!();
+            true
+        }
+        Err(e) => {
+            eprintln!("  Connection failed: {e}");
+            eprintln!();
+            confirm("  Save account anyway?", false)?
+        }
+    };
+
+    if !save {
+        eprintln!("  Account not saved.\n");
+        return Ok(None);
+    }
+
+    // 7. Save — reuse the cfg loaded earlier to avoid redundant disk I/O
     cfg.accounts.push(AccountConfig {
         id: id.clone(),
         label: Some(label),
