@@ -64,7 +64,9 @@ pub enum AppError {
     GrpcServe { source: tonic::transport::Error },
 
     #[snafu(display("TUI error: {source}"))]
-    Tui { source: rara_tui::error::TuiError },
+    Tui {
+        source: Box<rara_tui::error::TuiError>,
+    },
 
     #[snafu(display("strategy registry error: {source}"))]
     Registry {

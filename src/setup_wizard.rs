@@ -20,185 +20,201 @@ fn dialog_io(e: dialoguer::Error) -> std::io::Error {
     }
 }
 
+/// Helper to run a dialoguer `Confirm` prompt with consistent error handling.
+fn confirm(prompt: &str, default: bool) -> error::Result<bool> {
+    Confirm::new()
+        .with_prompt(prompt)
+        .default(default)
+        .interact()
+        .map_err(dialog_io)
+        .context(IoSnafu)
+}
+
+/// Helper to run a dialoguer `Input<String>` prompt with consistent error handling.
+fn input(prompt: &str, default: Option<&str>) -> error::Result<String> {
+    let builder = Input::new().with_prompt(prompt);
+    let builder = match default {
+        Some(d) => builder.default(d.to_string()),
+        None => builder,
+    };
+    builder
+        .interact_text()
+        .map_err(dialog_io)
+        .context(IoSnafu)
+}
+
+/// Helper to run a dialoguer `Password` prompt with consistent error handling.
+fn password(prompt: &str) -> error::Result<String> {
+    Password::new()
+        .with_prompt(prompt)
+        .allow_empty_password(true)
+        .interact()
+        .map_err(dialog_io)
+        .context(IoSnafu)
+}
+
+/// Helper to run a dialoguer `Select` prompt with consistent error handling.
+fn select(prompt: &str, items: &[&str], default: usize) -> error::Result<usize> {
+    Select::new()
+        .with_prompt(prompt)
+        .items(items)
+        .default(default)
+        .interact()
+        .map_err(dialog_io)
+        .context(IoSnafu)
+}
+
 /// Interactive guided setup — walks the user through init, account creation, and validation.
+///
+/// Displays a welcome banner, step indicators, contextual hints, and a final
+/// summary so first-time users always know where they are and what to do next.
 ///
 /// Requires a TTY on stdin; returns an error if prompts cannot be displayed.
 pub async fn run(
     init_fn: fn(bool) -> error::Result<()>,
     validate_fn: impl AsyncFn() -> error::Result<()>,
 ) -> error::Result<()> {
-    eprintln!("=== rara-trading interactive setup ===\n");
+    print_welcome();
 
-    // --- Step 1: Init config files ---
+    step_init_config(init_fn)?;
+    let accounts = step_add_accounts()?;
+    step_validate(validate_fn).await?;
+
+    print_summary(&accounts);
+    Ok(())
+}
+
+/// Print the welcome banner and an overview of the three setup steps.
+fn print_welcome() {
+    eprintln!();
+    eprintln!("  rara-trading — interactive setup");
+    eprintln!("  ================================");
+    eprintln!();
+    eprintln!("  This wizard will walk you through three steps:");
+    eprintln!();
+    eprintln!("    1. Initialize configuration files");
+    eprintln!("    2. Add trading accounts");
+    eprintln!("    3. Validate your setup");
+    eprintln!();
+}
+
+// ---------------------------------------------------------------------------
+// Step 1 — Config file initialization
+// ---------------------------------------------------------------------------
+
+/// Step 1: ensure `config.toml` and `accounts.toml` exist.
+fn step_init_config(init_fn: fn(bool) -> error::Result<()>) -> error::Result<()> {
+    eprintln!("[1/3] Initialize configuration files");
+    eprintln!("--------------------------------------");
+
     let config_path = paths::config_file();
     let accounts_path = paths::accounts_file();
     let config_exists = config_path.exists();
     let accounts_exists = accounts_path.exists();
 
     if config_exists && accounts_exists {
-        eprintln!("Config files already exist:");
-        eprintln!("  {}", config_path.display());
-        eprintln!("  {}", accounts_path.display());
-        let overwrite = Confirm::new()
-            .with_prompt("Overwrite existing config files?")
-            .default(false)
-            .interact()
-            .map_err(dialog_io)
-            .context(IoSnafu)?;
-        if overwrite {
+        eprintln!("  Config files already exist:");
+        eprintln!("    - {}", config_path.display());
+        eprintln!("    - {}", accounts_path.display());
+        eprintln!();
+
+        if confirm("  Overwrite with fresh templates?", false)? {
             init_fn(true)?;
+            eprintln!("  Config files regenerated.\n");
+        } else {
+            eprintln!("  Keeping existing files.\n");
         }
     } else {
-        eprintln!("Generating config files...");
+        eprintln!("  Generating config files...");
         init_fn(false)?;
+        eprintln!("  Created:");
+        eprintln!("    - {}", config_path.display());
+        eprintln!("    - {}", accounts_path.display());
+        eprintln!();
     }
 
-    // --- Step 2: Add accounts ---
-    loop {
-        let add_account = Confirm::new()
-            .with_prompt("Add a trading account?")
-            .default(true)
-            .interact()
-            .map_err(dialog_io)
-            .context(IoSnafu)?;
+    Ok(())
+}
 
-        if !add_account {
+// ---------------------------------------------------------------------------
+// Step 2 — Account creation
+// ---------------------------------------------------------------------------
+
+/// Step 2: interactively add one or more trading accounts.
+///
+/// Returns the list of account IDs that were added during this session.
+fn step_add_accounts() -> error::Result<Vec<String>> {
+    eprintln!("[2/3] Add trading accounts");
+    eprintln!("--------------------------");
+    eprintln!("  Each account connects to a broker (paper for simulation, ccxt for live exchanges).");
+    eprintln!();
+
+    let mut added: Vec<String> = Vec::new();
+
+    loop {
+        let prompt = if added.is_empty() {
+            "  Add a trading account?"
+        } else {
+            "  Add another account?"
+        };
+
+        if !confirm(prompt, added.is_empty())? {
             break;
         }
 
-        add_account_interactive()?;
+        eprintln!();
+        if let Some(id) = add_account_interactive()? {
+            added.push(id);
+        }
     }
 
-    // --- Step 3: Validate ---
-    let validate = Confirm::new()
-        .with_prompt("Run validation checks?")
-        .default(true)
-        .interact()
-        .map_err(dialog_io)
-        .context(IoSnafu)?;
-
-    if validate {
-        eprintln!("\nRunning validation...");
-        validate_fn().await?;
-    }
-
-    eprintln!("\n=== Setup complete ===");
-    Ok(())
+    eprintln!();
+    Ok(added)
 }
 
 /// Prompt the user interactively for account details and save to accounts.toml.
 ///
+/// Returns `Some(id)` on success or `None` if the account already exists.
 /// Sensitive fields (API key, secret, passphrase) use masked input.
-#[allow(clippy::result_large_err, clippy::too_many_lines)]
-fn add_account_interactive() -> error::Result<()> {
-    let id: String = Input::new()
-        .with_prompt("Account ID")
-        .interact_text()
-        .map_err(dialog_io)
-        .context(IoSnafu)?;
+fn add_account_interactive() -> error::Result<Option<String>> {
+    // -- identity --
+    let id = input(
+        "  Account ID (unique, e.g. binance-main, paper-test)",
+        None,
+    )?;
 
-    let broker_options = &["paper", "ccxt"];
-    let broker_idx = Select::new()
-        .with_prompt("Broker type")
-        .items(broker_options)
-        .default(0)
-        .interact()
-        .map_err(dialog_io)
-        .context(IoSnafu)?;
-    let broker_type = broker_options[broker_idx];
+    // bail early on duplicate
+    let cfg = accounts_config::load_accounts();
+    if cfg.accounts.iter().any(|a| a.id == id) {
+        eprintln!("  Account \"{id}\" already exists — skipping.\n");
+        return Ok(None);
+    }
 
-    let label: String = Input::new()
-        .with_prompt("Label (human-readable name)")
-        .default(id.clone())
-        .interact_text()
-        .map_err(dialog_io)
-        .context(IoSnafu)?;
+    let broker_options = &["paper — simulated fills, no real money", "ccxt  — live exchange via CCXT"];
+    let broker_idx = select("  Broker type", broker_options, 0)?;
+    let broker_type = if broker_idx == 0 { "paper" } else { "ccxt" };
 
-    let contracts_str: String = Input::new()
-        .with_prompt("Contracts (comma-separated, e.g. BTC-USDT,ETH-USDT)")
-        .default(String::new())
-        .interact_text()
-        .map_err(dialog_io)
-        .context(IoSnafu)?;
+    let label = input("  Label (display name)", Some(&id))?;
 
+    let contracts_str = input(
+        "  Contracts (comma-separated, e.g. BTC-USDT,ETH-USDT)",
+        Some(""),
+    )?;
     let contracts: Vec<String> = contracts_str
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
+    // -- broker-specific config --
     let broker_config = match broker_type {
-        "paper" => {
-            let fill_price_str: String = Input::new()
-                .with_prompt("Fill price (leave empty for market price)")
-                .default(String::new())
-                .interact_text()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-            let fill_price = fill_price_str.parse::<f64>().ok();
-            BrokerConfig::Paper(PaperBrokerConfig { fill_price })
-        }
-        "ccxt" => {
-            let exchange_options = &["binance", "bybit", "okx"];
-            let exchange_idx = Select::new()
-                .with_prompt("Exchange")
-                .items(exchange_options)
-                .default(0)
-                .interact()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-            let exchange = exchange_options[exchange_idx].to_string();
-
-            let sandbox = Confirm::new()
-                .with_prompt("Use sandbox/testnet?")
-                .default(true)
-                .interact()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-
-            let api_key = Password::new()
-                .with_prompt("API key (input hidden)")
-                .allow_empty_password(true)
-                .interact()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-
-            let secret = Password::new()
-                .with_prompt("API secret (input hidden)")
-                .allow_empty_password(true)
-                .interact()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-
-            let passphrase = Password::new()
-                .with_prompt("Passphrase — OKX only, press Enter to skip (input hidden)")
-                .allow_empty_password(true)
-                .interact()
-                .map_err(dialog_io)
-                .context(IoSnafu)?;
-
-            BrokerConfig::Ccxt(CcxtBrokerConfig {
-                exchange,
-                sandbox,
-                api_key,
-                secret,
-                passphrase: if passphrase.is_empty() {
-                    None
-                } else {
-                    Some(passphrase)
-                },
-            })
-        }
+        "paper" => build_paper_config()?,
+        "ccxt" => build_ccxt_config()?,
         _ => unreachable!(),
     };
 
+    // -- save --
     let mut cfg = accounts_config::load_accounts();
-
-    if cfg.accounts.iter().any(|a| a.id == id) {
-        eprintln!("Account \"{id}\" already exists, skipping.");
-        return Ok(());
-    }
-
     cfg.accounts.push(AccountConfig {
         id: id.clone(),
         label: Some(label),
@@ -206,9 +222,123 @@ fn add_account_interactive() -> error::Result<()> {
         enabled: true,
         contracts,
     });
-
     accounts_config::save_accounts(&cfg).context(IoSnafu)?;
-    eprintln!("Account \"{id}\" added successfully.\n");
+    eprintln!("  Account \"{id}\" saved.\n");
+
+    Ok(Some(id))
+}
+
+/// Build `BrokerConfig::Paper` from interactive prompts.
+fn build_paper_config() -> error::Result<BrokerConfig> {
+    eprintln!();
+    eprintln!("  Paper broker — all orders are simulated locally.");
+    let fill_price_str = input(
+        "  Fixed fill price (leave empty to use market price)",
+        Some(""),
+    )?;
+    let fill_price = fill_price_str.parse::<f64>().ok();
+    Ok(BrokerConfig::Paper(PaperBrokerConfig { fill_price }))
+}
+
+/// Build `BrokerConfig::Ccxt` from interactive prompts.
+///
+/// Only asks for passphrase when OKX is selected.
+fn build_ccxt_config() -> error::Result<BrokerConfig> {
+    eprintln!();
+    let exchange_options = &["binance", "bybit", "okx"];
+    let exchange_idx = select("  Exchange", exchange_options, 0)?;
+    let exchange = exchange_options[exchange_idx].to_string();
+
+    let sandbox = confirm(
+        "  Use sandbox/testnet? (recommended for first-time setup)",
+        true,
+    )?;
+
+    eprintln!();
+    eprintln!("  Enter your API credentials (input is hidden):");
+    let api_key = password("  API key")?;
+    let secret = password("  API secret")?;
+
+    // Only OKX requires a passphrase
+    let passphrase = if exchange == "okx" {
+        let p = password("  Passphrase (required for OKX)")?;
+        if p.is_empty() { None } else { Some(p) }
+    } else {
+        None
+    };
+
+    Ok(BrokerConfig::Ccxt(CcxtBrokerConfig {
+        exchange,
+        sandbox,
+        api_key,
+        secret,
+        passphrase,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — Validation
+// ---------------------------------------------------------------------------
+
+/// Step 3: optionally run validation checks (database, LLM backend).
+async fn step_validate(validate_fn: impl AsyncFn() -> error::Result<()>) -> error::Result<()> {
+    eprintln!("[3/3] Validate setup");
+    eprintln!("--------------------");
+    eprintln!("  Checks database connectivity and LLM backend availability.");
+    eprintln!();
+
+    if !confirm("  Run validation now?", true)? {
+        eprintln!("  Skipped. You can run validation later with: rara setup validate\n");
+        return Ok(());
+    }
+
+    eprintln!();
+    match validate_fn().await {
+        Ok(()) => {
+            eprintln!("  All checks passed.\n");
+        }
+        Err(e) => {
+            eprintln!("  Validation failed: {e}");
+            eprintln!();
+            eprintln!("  Troubleshooting tips:");
+            eprintln!("    - Database: check RARA_DB_URL or [database] in config.toml");
+            eprintln!("    - LLM backend: ensure the binary is in your PATH");
+            eprintln!("    - Run `rara setup validate` to retry after fixing.");
+            eprintln!();
+            // Don't propagate — let the wizard finish so the user keeps their config
+        }
+    }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
+
+/// Print a final summary of what was accomplished during setup.
+fn print_summary(added_accounts: &[String]) {
+    eprintln!("  ================================");
+    eprintln!("  Setup complete!");
+    eprintln!();
+
+    if added_accounts.is_empty() {
+        eprintln!("  No new accounts were added.");
+    } else {
+        eprintln!(
+            "  {} account(s) added: {}",
+            added_accounts.len(),
+            added_accounts.join(", ")
+        );
+    }
+
+    let config_dir = paths::data_dir();
+    eprintln!();
+    eprintln!("  Config directory: {}", config_dir.display());
+    eprintln!();
+    eprintln!("  Next steps:");
+    eprintln!("    - Edit config.toml to tune trading/research parameters");
+    eprintln!("    - Run `rara setup validate` to re-check your setup");
+    eprintln!("    - Run `rara` to start trading");
+    eprintln!();
 }
