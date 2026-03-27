@@ -15,9 +15,9 @@ use rara_trading::accounts_config;
 use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, SetupAction, SetupAccountAction, StrategyAction};
 use rara_trading::validation;
 use rara_trading::error::{
-    self, AgentBackendSnafu, AgentExecutionSnafu, ConfigSnafu, DataFetchSnafu, EventBusSnafu,
-    GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu, PromptRendererSnafu, RegistrySnafu,
-    TraceSnafu, TuiSnafu,
+    self, AgentBackendSnafu, AgentExecutionSnafu, AppError, ConfigSnafu, DataFetchSnafu,
+    EventBusSnafu, GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu,
+    PromptRendererSnafu, RegistrySnafu, TraceSnafu,
 };
 use rara_trading::event_bus::bus::EventBus;
 use rara_trading::logging::{self, LoggingConfig};
@@ -440,7 +440,7 @@ async fn run() -> error::Result<()> {
         Command::Tui { server } => {
             rara_tui::event_loop::run(server.as_deref(), crate::paths::strategies_promoted_dir())
                 .await
-                .context(TuiSnafu)?;
+                .map_err(|e| AppError::Tui { source: Box::new(e) })?;
         }
         Command::Feedback { action } => {
             run_feedback(action)?;
