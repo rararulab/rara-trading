@@ -278,21 +278,6 @@ async fn step_accounts() -> error::Result<Vec<String>> {
     Ok(added)
 }
 
-/// Generate a default account ID like "{type_key}-main", incrementing if taken.
-fn generate_default_id(type_key: &str, existing: &[AccountConfig]) -> String {
-    let candidate = format!("{type_key}-main");
-    if !existing.iter().any(|a| a.id == candidate) {
-        return candidate;
-    }
-    for n in 2.. {
-        let candidate = format!("{type_key}-{n}");
-        if !existing.iter().any(|a| a.id == candidate) {
-            return candidate;
-        }
-    }
-    unreachable!()
-}
-
 /// Test broker connectivity by creating a broker instance and calling `account_info`.
 async fn test_broker_connection(
     entry: &BrokerRegistryEntry,
@@ -304,11 +289,11 @@ async fn test_broker_connection(
 
 /// Prompt the user interactively for account details and save to accounts.toml.
 ///
-/// Uses a broker-first flow: select broker type, auto-generate an account ID,
-/// collect credentials, then test the connection before saving.
-/// Returns `Some(id)` on success or `None` if the account was not saved.
+/// Uses a broker-first flow: select broker type, collect broker-specific config,
+/// then suggest a short account ID derived from broker context (e.g. `bybit`
+/// for CCXT/Bybit, `paper` for Paper). Tests the connection before saving.
 async fn add_account_interactive() -> error::Result<Option<String>> {
-    // 1. Select broker type first
+    // 1. Broker type selection
     let registry = &*BROKER_REGISTRY;
     let broker_labels: Vec<String> = registry
         .iter()
@@ -318,23 +303,27 @@ async fn add_account_interactive() -> error::Result<Option<String>> {
     let broker_idx = select("  Broker type", &broker_refs, 0)?;
     let entry = &registry[broker_idx];
 
-    // 2. Auto-generate ID with option to override
-    let mut cfg = accounts_config::load_accounts();
-    let default_id = generate_default_id(entry.type_key, &cfg.accounts);
-    let id = input("  Account ID", Some(&default_id))?;
-
-    if cfg.accounts.iter().any(|a| a.id == id) {
-        eprintln!("  Account \"{id}\" already exists — skipping.\n");
-        return Ok(None);
-    }
-
-    // 3. Label defaults to broker name
-    let label = input("  Label (display name)", Some(entry.name))?;
-
-    // 4. Collect broker-specific fields
+    // 2. Collect broker-specific fields first (e.g. exchange for CCXT)
     eprintln!();
     eprintln!("  {} configuration:", entry.name);
     let fields = collect_config_fields(&(entry.config_fields)())?;
+
+    // 3. Pick a unique account ID — suggest from broker context, retry on conflict
+    let suggested_id = suggest_account_id(entry.type_key, &fields);
+    let id = loop {
+        let candidate = input("  Account ID", Some(&suggested_id))?;
+        let cfg = accounts_config::load_accounts();
+        if !cfg.accounts.iter().any(|a| a.id == candidate) {
+            break candidate;
+        }
+        eprintln!(
+            "  \"{candidate}\" already exists — try a different name \
+             (e.g. {suggested_id}-demo, {suggested_id}-test)."
+        );
+    };
+
+    // 4. Label defaults to broker name
+    let label = input("  Label (display name)", Some(entry.name))?;
 
     // 5. Contracts
     let contracts_str = input(
@@ -375,7 +364,8 @@ async fn add_account_interactive() -> error::Result<Option<String>> {
         return Ok(None);
     }
 
-    // 7. Save — reuse the cfg loaded earlier to avoid redundant disk I/O
+    // 7. Save
+    let mut cfg = accounts_config::load_accounts();
     cfg.accounts.push(AccountConfig {
         id: id.clone(),
         label: Some(label),
@@ -387,6 +377,19 @@ async fn add_account_interactive() -> error::Result<Option<String>> {
     eprintln!("  Account \"{id}\" saved.\n");
 
     Ok(Some(id))
+}
+
+/// Suggest an account ID based on broker type and collected config fields.
+///
+/// For CCXT brokers, uses the exchange name (e.g. `bybit`).
+/// For other brokers, uses the type key (e.g. `paper`).
+/// Returns a simple, descriptive base — no auto-incrementing suffixes.
+fn suggest_account_id(type_key: &str, fields: &HashMap<String, String>) -> String {
+    fields
+        .get("exchange")
+        .filter(|v| !v.is_empty())
+        .cloned()
+        .unwrap_or_else(|| type_key.to_string())
 }
 
 /// Dynamically collect config field values using dialoguer prompts.
