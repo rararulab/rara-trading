@@ -33,27 +33,28 @@ pub struct AccountConfig {
 impl AccountConfig {
     /// Replace sensitive fields with "****".
     pub fn mask_secrets(&mut self) {
-        if let BrokerConfig::Ccxt(ref mut c) = self.broker_config {
-            if !c.api_key.is_empty() {
-                c.api_key = "****".to_string();
-            }
-            if !c.secret.is_empty() {
-                c.secret = "****".to_string();
-            }
-            if c.passphrase.is_some() {
-                c.passphrase = Some("****".to_string());
-            }
+        let BrokerConfig::Ccxt(ref mut c) = self.broker_config;
+        if !c.api_key.is_empty() {
+            c.api_key = "****".to_string();
+        }
+        if !c.secret.is_empty() {
+            c.secret = "****".to_string();
+        }
+        if c.passphrase.is_some() {
+            c.passphrase = Some("****".to_string());
         }
     }
 }
 
 /// Broker-specific configuration, discriminated by the `broker` field.
+///
+/// Only real exchange brokers are supported — paper/simulated brokers are
+/// restricted to the test suite (`brokers::paper::PaperBroker`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "broker", content = "broker_config", rename_all = "snake_case")]
 pub enum BrokerConfig {
-    /// Paper trading (simulated fills).
-    Paper(PaperBrokerConfig),
     /// CCXT-based exchange (Binance, Bybit, OKX).
+    /// Use `sandbox = true` for testnet/paper trading.
     Ccxt(CcxtBrokerConfig),
 }
 
@@ -61,7 +62,6 @@ impl BrokerConfig {
     /// Return the broker type key for registry lookup.
     pub const fn type_key(&self) -> &str {
         match self {
-            Self::Paper(_) => "paper",
             Self::Ccxt(_) => "ccxt",
         }
     }
@@ -70,11 +70,6 @@ impl BrokerConfig {
     pub fn to_field_map(&self) -> HashMap<String, String> {
         let mut m = HashMap::new();
         match self {
-            Self::Paper(c) => {
-                if let Some(p) = c.fill_price {
-                    m.insert("fill_price".to_string(), p.to_string());
-                }
-            }
             Self::Ccxt(c) => {
                 m.insert("exchange".to_string(), c.exchange.clone());
                 m.insert("sandbox".to_string(), c.sandbox.to_string());
@@ -87,13 +82,6 @@ impl BrokerConfig {
         }
         m
     }
-}
-
-/// Paper broker configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PaperBrokerConfig {
-    /// Fixed fill price for all orders. Defaults to `None` if omitted.
-    pub fill_price: Option<f64>,
 }
 
 /// CCXT broker configuration.
@@ -121,27 +109,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deserialize_paper_account() {
-        let toml_str = r#"
-            [[accounts]]
-            id = "paper-btc"
-            label = "Paper BTC"
-            broker = "paper"
-            enabled = true
-            contracts = ["BTC-USDT"]
-
-            [accounts.broker_config]
-            fill_price = 50000.0
-        "#;
-        let cfg: AccountsConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(cfg.accounts.len(), 1);
-        let acc = &cfg.accounts[0];
-        assert_eq!(acc.id, "paper-btc");
-        assert!(acc.enabled);
-        assert!(matches!(acc.broker_config, BrokerConfig::Paper(_)));
-    }
-
-    #[test]
     fn deserialize_ccxt_account() {
         let toml_str = r#"
             [[accounts]]
@@ -164,10 +131,12 @@ mod tests {
     fn deserialize_multiple_accounts() {
         let toml_str = r#"
             [[accounts]]
-            id = "paper"
-            broker = "paper"
+            id = "sandbox"
+            broker = "ccxt"
 
             [accounts.broker_config]
+            exchange = "binance"
+            sandbox = true
 
             [[accounts]]
             id = "live"
@@ -185,9 +154,10 @@ mod tests {
         let toml_str = r#"
             [[accounts]]
             id = "minimal"
-            broker = "paper"
+            broker = "ccxt"
 
             [accounts.broker_config]
+            exchange = "binance"
         "#;
         let cfg: AccountsConfig = toml::from_str(toml_str).unwrap();
         let acc = &cfg.accounts[0];
@@ -202,8 +172,12 @@ mod tests {
             accounts: vec![AccountConfig {
                 id:            "test".to_string(),
                 label:         Some("Test Account".to_string()),
-                broker_config: BrokerConfig::Paper(PaperBrokerConfig {
-                    fill_price: Some(100.0),
+                broker_config: BrokerConfig::Ccxt(CcxtBrokerConfig {
+                    exchange:   "binance".to_string(),
+                    sandbox:    true,
+                    api_key:    String::new(),
+                    secret:     String::new(),
+                    passphrase: None,
                 }),
                 enabled:       true,
                 contracts:     vec!["BTC-USDT".to_string()],
@@ -231,12 +205,9 @@ mod tests {
             contracts:     vec![],
         };
         acc.mask_secrets();
-        if let BrokerConfig::Ccxt(ref c) = acc.broker_config {
-            assert_eq!(c.api_key, "****");
-            assert_eq!(c.secret, "****");
-            assert_eq!(c.passphrase.as_deref(), Some("****"));
-        } else {
-            panic!("expected ccxt");
-        }
+        let BrokerConfig::Ccxt(ref c) = acc.broker_config;
+        assert_eq!(c.api_key, "****");
+        assert_eq!(c.secret, "****");
+        assert_eq!(c.passphrase.as_deref(), Some("****"));
     }
 }

@@ -516,7 +516,7 @@ async fn test_broker_connection(
 ///
 /// Uses a broker-first flow: select broker type, collect broker-specific
 /// config, then suggest a short account ID derived from broker context (e.g.
-/// `bybit` for CCXT/Bybit, `paper` for Paper). Tests the connection before
+/// `bybit` for CCXT/Bybit). Tests the connection before
 /// saving.
 async fn add_account_interactive() -> error::Result<Option<String>> {
     // 1. Broker type selection
@@ -608,7 +608,7 @@ async fn add_account_interactive() -> error::Result<Option<String>> {
 /// Suggest an account ID based on broker type and collected config fields.
 ///
 /// For CCXT brokers, uses the exchange name (e.g. `bybit`).
-/// For other brokers, uses the type key (e.g. `paper`).
+/// For other brokers, uses the type key.
 /// Returns a simple, descriptive base — no auto-incrementing suffixes.
 fn suggest_account_id(type_key: &str, fields: &HashMap<String, String>) -> String {
     fields

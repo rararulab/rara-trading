@@ -92,8 +92,8 @@ pub enum AppError {
         source: rara_research::strategy_executor::ExecutorError,
     },
 
-    #[snafu(display("paper trading error: {message}"))]
-    PaperTrading { message: String },
+    #[snafu(display("trading error: {message}"))]
+    Trading { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

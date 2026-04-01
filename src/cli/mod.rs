@@ -47,7 +47,7 @@ pub enum Command {
         action: DataAction,
     },
 
-    /// Run the full trading loop: research, paper trading, feedback, and gRPC
+    /// Run the full trading loop: research, trading, feedback, and gRPC
     /// server as concurrent tasks in a single process.
     ///
     /// Accounts and contracts are loaded from `accounts.toml`.
@@ -96,10 +96,10 @@ pub enum Command {
         action: FeedbackAction,
     },
 
-    /// Paper trading operations.
-    Paper {
+    /// Live/sandbox trading operations.
+    Trade {
         #[command(subcommand)]
-        action: PaperAction,
+        action: TradeAction,
     },
 
     /// Manage strategies from the rara-strategies registry.
@@ -129,18 +129,18 @@ pub enum FeedbackAction {
     },
 }
 
-/// Paper trading subcommands.
+/// Trading subcommands.
 #[derive(Subcommand, Debug)]
-pub enum PaperAction {
-    /// Start paper trading with promoted strategies.
+pub enum TradeAction {
+    /// Start trading with promoted strategies.
     ///
     /// Accounts and contracts are loaded from `accounts.toml`.
     Start,
 
-    /// Show paper trading status (strategies, positions, `PnL`).
+    /// Show trading status (strategies, positions, `PnL`).
     Status,
 
-    /// Stop paper trading gracefully.
+    /// Stop trading gracefully.
     Stop,
 }
 
@@ -330,17 +330,14 @@ pub enum SetupAccountAction {
     /// Add a trading account.
     ///
     /// EXAMPLES:
-    ///     rara setup account add --id paper-btc --broker paper --contracts
-    /// BTC-USDT --fill-price 50000     rara setup account add --id
-    /// binance-prod --broker ccxt --exchange binance --api-key "$KEY" --secret
-    /// "$SECRET" --sandbox
+    ///     rara setup account add --id binance-sandbox --exchange binance
+    /// --sandbox --api-key "$KEY" --secret "$SECRET"     rara setup account
+    /// add --id binance-prod --exchange binance --api-key "$KEY" --secret
+    /// "$SECRET"
     Add {
         /// Account identifier.
         #[arg(long)]
         id:         String,
-        /// Broker type: "paper" or "ccxt".
-        #[arg(long)]
-        broker:     String,
         /// Human-readable label.
         #[arg(long)]
         label:      Option<String>,
@@ -350,24 +347,19 @@ pub enum SetupAccountAction {
         /// Enable/disable the account.
         #[arg(long, default_value = "true")]
         enabled:    bool,
-        // Paper broker options
-        /// Fixed fill price (paper broker only).
+        /// Exchange: "binance", "bybit", "okx".
         #[arg(long)]
-        fill_price: Option<f64>,
-        // CCXT broker options
-        /// Exchange: "binance", "bybit", "okx" (ccxt only).
-        #[arg(long)]
-        exchange:   Option<String>,
-        /// API key (ccxt only).
+        exchange:   String,
+        /// API key.
         #[arg(long)]
         api_key:    Option<String>,
-        /// API secret (ccxt only).
+        /// API secret.
         #[arg(long)]
         secret:     Option<String>,
-        /// API passphrase, OKX only (ccxt only).
+        /// API passphrase (OKX only).
         #[arg(long)]
         passphrase: Option<String>,
-        /// Use sandbox/testnet (ccxt only).
+        /// Use exchange sandbox/testnet environment.
         #[arg(long)]
         sandbox:    bool,
     },
