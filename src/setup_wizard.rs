@@ -9,13 +9,13 @@ use rara_trading_engine::{
     broker_registry::{BROKER_REGISTRY, BrokerRegistryEntry, ConfigField, ConfigFieldType},
 };
 use chrono::{NaiveDate, Utc};
-use rara_market_data::fetcher::HistoryFetcher;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use snafu::ResultExt;
 
 use crate::{
     accounts_config,
     app_config::{self, AppConfig},
-    error::{self, DataFetchSnafu, IoSnafu, MarketStoreSnafu},
+    error::{self, IoSnafu, MarketStoreSnafu},
     paths, validation,
 };
 
@@ -169,14 +169,31 @@ async fn step_database() -> error::Result<AppConfig> {
 // ---------------------------------------------------------------------------
 
 /// After database connects, offer to download historical candles for
-/// backtesting. Downloads 10 years of 1m data for BTC and ETH from Binance.
+/// backtesting. Downloads 10 years of 1m data for BTC and ETH from Binance,
+/// with parallel fetching and progress bars.
 async fn step_market_data(database_url: &str) -> error::Result<()> {
-    if !confirm("  Download historical market data for backtesting? (BTC + ETH, ~10 years)", true)? {
-        eprintln!("  Skipped. You can fetch data later with: rara data fetch");
+    if !confirm(
+        "  Download historical market data for backtesting? (BTC + ETH, ~10 years)",
+        true,
+    )? {
+        eprintln!("  Skipped. You can add data later with: rara setup data");
         eprintln!();
         return Ok(());
     }
 
+    let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+    download_symbols_parallel(database_url, &symbols).await
+}
+
+/// Download multiple symbols in parallel with per-symbol progress bars.
+///
+/// Connects to `TimescaleDB`, runs migrations, then spawns one task per symbol.
+/// Each task fetches 1m candles from Binance (2016-01-01 → today) and reports
+/// progress via an `indicatif` bar. Prints a coverage summary on completion.
+pub async fn download_symbols_parallel(
+    database_url: &str,
+    symbols: &[String],
+) -> error::Result<()> {
     let store = rara_market_data::store::MarketStore::connect(database_url)
         .await
         .context(MarketStoreSnafu)?;
@@ -185,18 +202,65 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
     let start = NaiveDate::from_ymd_opt(2016, 1, 1).expect("valid date");
     let end = Utc::now().date_naive();
 
-    let symbols = [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")];
+    // ~minutes from 2016-01-01 to today as estimated total per symbol
+    let est_total =
+        u64::try_from((end - start).num_minutes().max(0)).unwrap_or(5_000_000);
 
-    for (symbol, instrument_id) in &symbols {
-        eprintln!("  Fetching {symbol} 1m candles ({start} → {end}) …");
+    let mp = MultiProgress::new();
+    let style = ProgressStyle::with_template(
+        "  {prefix:>10} [{bar:30.cyan/dim}] {pos}/{len} candles  {msg}",
+    )
+    .expect("valid template")
+    .progress_chars("█▓░");
 
-        let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(*symbol);
-        let count = fetcher
-            .fetch_and_store(&store, instrument_id, start, end)
-            .await
-            .context(DataFetchSnafu)?;
+    let mut handles = Vec::with_capacity(symbols.len());
 
-        eprintln!("  {symbol}: {count} new candles stored");
+    for symbol in symbols {
+        let pb = mp.add(ProgressBar::new(est_total));
+        pb.set_style(style.clone());
+        pb.set_prefix(symbol.clone());
+        pb.set_message("fetching…");
+
+        let store = store.clone();
+        let symbol = symbol.clone();
+        let pb_clone = pb.clone();
+
+        handles.push(tokio::spawn(async move {
+            let fetcher =
+                rara_market_data::fetcher::binance::BinanceFetcher::new(&symbol);
+            let result = fetcher
+                .fetch_and_store_with_progress(
+                    &store,
+                    &symbol,
+                    start,
+                    end,
+                    |batch| {
+                        pb_clone.inc(u64::try_from(batch).unwrap_or(0));
+                    },
+                )
+                .await;
+
+            match &result {
+                Ok(count) => pb.finish_with_message(format!("{count} total")),
+                Err(e) => pb.finish_with_message(format!("error: {e}")),
+            }
+
+            (symbol, result)
+        }));
+    }
+
+    let mut had_error = false;
+    for handle in handles {
+        let (symbol, result) = handle.await.expect("task panicked");
+        if let Err(e) = result {
+            eprintln!("  {symbol}: {e}");
+            had_error = true;
+        }
+    }
+
+    if had_error {
+        eprintln!();
+        eprintln!("  Some downloads failed. Re-run to resume (already-stored data is kept).");
     }
 
     // Coverage summary
@@ -204,8 +268,10 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
     eprintln!();
     eprintln!("  Data coverage:");
     for c in &coverage {
-        let min = c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
-        let max = c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let min =
+            c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let max =
+            c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
         eprintln!(
             "    {} ({}): {} candles  [{} → {}]",
             c.instrument_id, c.interval, c.count, min, max

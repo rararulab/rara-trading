@@ -1877,8 +1877,48 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
         SetupAction::Init { force } => run_setup_init(force)?,
         SetupAction::Validate => run_setup_validate().await?,
         SetupAction::Account { action } => run_setup_account(*action).await?,
+        SetupAction::Data { search, symbols } => run_setup_data(search, symbols).await?,
     }
     Ok(())
+}
+
+/// Download historical market data for backtesting.
+///
+/// With `--search`, queries Binance for matching symbols. Otherwise downloads
+/// the given symbols (defaulting to BTCUSDT + ETHUSDT).
+async fn run_setup_data(
+    search: Option<String>,
+    mut symbols: Vec<String>,
+) -> error::Result<()> {
+    // Symbol search mode
+    if let Some(query) = search {
+        eprintln!("Searching Binance for \"{query}\"…");
+        let results = rara_market_data::fetcher::binance::search_symbols(&query)
+            .await
+            .context(DataFetchSnafu)?;
+
+        if results.is_empty() {
+            eprintln!("No USDT spot symbols found matching \"{query}\".");
+            return Ok(());
+        }
+
+        for s in &results {
+            eprintln!("  {s}");
+        }
+        eprintln!("{} symbols found.", results.len());
+
+        if symbols.is_empty() {
+            return Ok(());
+        }
+    }
+
+    // Default symbols
+    if symbols.is_empty() {
+        symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+    }
+
+    let cfg = app_config::load();
+    rara_trading::setup_wizard::download_symbols_parallel(&cfg.database.url, &symbols).await
 }
 
 /// Generate config.toml and accounts.toml templates.

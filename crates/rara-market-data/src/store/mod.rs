@@ -23,6 +23,7 @@ pub enum StoreError {
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// `TimescaleDB` connection pool wrapper for all market data operations.
+#[derive(Clone)]
 pub struct MarketStore {
     /// Underlying connection pool.
     pub pool: PgPool,

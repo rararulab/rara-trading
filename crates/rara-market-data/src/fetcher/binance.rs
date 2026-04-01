@@ -70,14 +70,30 @@ impl BinanceFetcher {
     }
 }
 
-#[async_trait]
-impl HistoryFetcher for BinanceFetcher {
-    async fn fetch_and_store(
+impl BinanceFetcher {
+    /// Fetch and store candles with a per-page progress callback.
+    ///
+    /// `on_progress` is called after each page with the number of candles
+    /// written in that batch, enabling progress bar integration.
+    pub async fn fetch_and_store_with_progress(
         &self,
         store: &MarketStore,
         instrument_id: &str,
         start: NaiveDate,
         end: NaiveDate,
+        on_progress: impl Fn(usize) + Send + Sync,
+    ) -> Result<usize> {
+        Self::fetch_core(self, store, instrument_id, start, end, &on_progress).await
+    }
+
+    /// Core fetch loop shared by trait impl and progress variant.
+    async fn fetch_core(
+        &self,
+        store: &MarketStore,
+        instrument_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        on_progress: &(dyn Fn(usize) + Send + Sync),
     ) -> Result<usize> {
         let range_start_ms = start.and_time(NaiveTime::MIN).and_utc().timestamp_millis();
         let range_end_ms = end
@@ -132,11 +148,56 @@ impl HistoryFetcher for BinanceFetcher {
                 .insert_candles(&candle_rows)
                 .await
                 .context(StoreSnafu)?;
-            total += usize::try_from(count).expect("candle count fits in usize");
+            let written = usize::try_from(count).expect("candle count fits in usize");
+            total += written;
+            on_progress(written);
         }
 
         info!(total, "binance: fetch complete");
         Ok(total)
+    }
+}
+
+/// Search Binance for tradeable USDT-margined spot symbols.
+///
+/// Fetches `/api/v3/exchangeInfo` and filters by `query` substring
+/// (case-insensitive). Returns matching symbol names.
+pub async fn search_symbols(query: &str) -> Result<Vec<String>> {
+    let url = format!("{BASE_URL}/api/v3/exchangeInfo?permissions=SPOT");
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.context(HttpSnafu)?;
+    let body: serde_json::Value = resp.json().await.context(HttpSnafu)?;
+
+    let query_upper = query.to_uppercase();
+    let symbols = body["symbols"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|s| {
+            let symbol = s["symbol"].as_str()?;
+            let status = s["status"].as_str()?;
+            let quote = s["quoteAsset"].as_str()?;
+            if status == "TRADING" && quote == "USDT" && symbol.contains(&query_upper) {
+                Some(symbol.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(symbols)
+}
+
+#[async_trait]
+impl HistoryFetcher for BinanceFetcher {
+    async fn fetch_and_store(
+        &self,
+        store: &MarketStore,
+        instrument_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<usize> {
+        Self::fetch_core(self, store, instrument_id, start, end, &|_| {}).await
     }
 }
 
