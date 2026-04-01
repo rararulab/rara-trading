@@ -40,7 +40,7 @@ rara-trading-engine = { path = "crates/rara-trading-engine" }
 rara-feedback = { path = "crates/rara-feedback" }
 rara-sentinel = { path = "crates/rara-sentinel" }
 rara-research = { path = "crates/rara-research" }
-strategy-api = { path = "../rara-strategies/crates/strategy-api" }
+strategy-api = { git = "https://github.com/rararulab/rara-strategies", subdirectory = "crates/strategy-api" }
 rara-market-data = { path = "crates/rara-market-data" }
 rara-server = { path = "crates/rara-server" }
 rara-tui = { path = "crates/rara-tui" }

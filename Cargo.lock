@@ -5539,6 +5539,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "strategy-api"
 version = "0.1.0"
+source = "git+https://github.com/rararulab/rara-strategies#3faef3f358363f8f6c29304dadca2b0fd086fb49"
 dependencies = [
  "serde",
  "serde_json",
