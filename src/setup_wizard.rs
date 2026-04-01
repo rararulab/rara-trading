@@ -8,12 +8,14 @@ use rara_trading_engine::{
     account_config::AccountConfig,
     broker_registry::{BROKER_REGISTRY, BrokerRegistryEntry, ConfigField, ConfigFieldType},
 };
+use chrono::{NaiveDate, Utc};
+use rara_market_data::fetcher::HistoryFetcher;
 use snafu::ResultExt;
 
 use crate::{
     accounts_config,
     app_config::{self, AppConfig},
-    error::{self, IoSnafu},
+    error::{self, DataFetchSnafu, IoSnafu, MarketStoreSnafu},
     paths, validation,
 };
 
@@ -135,6 +137,7 @@ async fn step_database() -> error::Result<AppConfig> {
             Ok(()) => {
                 eprintln!("  Connected successfully.");
                 eprintln!();
+                step_market_data(&cfg.database.url).await?;
                 break;
             }
             Err(e) => {
@@ -159,6 +162,58 @@ async fn step_database() -> error::Result<AppConfig> {
     }
 
     Ok(cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Step 1b — Market Data
+// ---------------------------------------------------------------------------
+
+/// After database connects, offer to download historical candles for
+/// backtesting. Downloads 10 years of 1m data for BTC and ETH from Binance.
+async fn step_market_data(database_url: &str) -> error::Result<()> {
+    if !confirm("  Download historical market data for backtesting? (BTC + ETH, ~10 years)", true)? {
+        eprintln!("  Skipped. You can fetch data later with: rara data fetch");
+        eprintln!();
+        return Ok(());
+    }
+
+    let store = rara_market_data::store::MarketStore::connect(database_url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let start = NaiveDate::from_ymd_opt(2016, 1, 1).expect("valid date");
+    let end = Utc::now().date_naive();
+
+    let symbols = [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")];
+
+    for (symbol, instrument_id) in &symbols {
+        eprintln!("  Fetching {symbol} 1m candles ({start} → {end}) …");
+
+        let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(*symbol);
+        let count = fetcher
+            .fetch_and_store(&store, instrument_id, start, end)
+            .await
+            .context(DataFetchSnafu)?;
+
+        eprintln!("  {symbol}: {count} new candles stored");
+    }
+
+    // Coverage summary
+    let coverage = store.get_coverage().await.context(MarketStoreSnafu)?;
+    eprintln!();
+    eprintln!("  Data coverage:");
+    for c in &coverage {
+        let min = c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let max = c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        eprintln!(
+            "    {} ({}): {} candles  [{} → {}]",
+            c.instrument_id, c.interval, c.count, min, max
+        );
+    }
+    eprintln!();
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

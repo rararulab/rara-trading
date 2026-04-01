@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use clap::Parser;
 use rara_trading::{
     accounts_config,
@@ -28,7 +28,6 @@ use rust_decimal_macros::dec;
 use serde::Serialize;
 use snafu::ResultExt;
 
-use rara_market_data::fetcher::HistoryFetcher;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -1878,52 +1877,7 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
         SetupAction::Init { force } => run_setup_init(force)?,
         SetupAction::Validate => run_setup_validate().await?,
         SetupAction::Account { action } => run_setup_account(*action).await?,
-        SetupAction::Data => run_setup_data().await?,
     }
-    Ok(())
-}
-
-/// Download historical market data for backtesting.
-///
-/// Fetches 10 years of 1m candles for BTCUSDT and ETHUSDT from Binance.
-/// Resumable — already-stored candles are skipped via `MAX(ts)` resume logic.
-async fn run_setup_data() -> error::Result<()> {
-    let cfg = app_config::load();
-    let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
-        .await
-        .context(MarketStoreSnafu)?;
-    store.migrate().await.context(MarketStoreSnafu)?;
-
-    let start = NaiveDate::from_ymd_opt(2016, 1, 1).expect("valid date");
-    let end = Utc::now().date_naive();
-
-    let symbols = [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")];
-
-    for (symbol, instrument_id) in &symbols {
-        eprintln!(">>> fetching {symbol} 1m candles ({start} → {end}) …");
-
-        let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(*symbol);
-        let count = fetcher
-            .fetch_and_store(&store, instrument_id, start, end)
-            .await
-            .context(DataFetchSnafu)?;
-
-        eprintln!("    {symbol}: {count} new candles stored");
-    }
-
-    // Show final coverage summary
-    let coverage = store.get_coverage().await.context(MarketStoreSnafu)?;
-    eprintln!("\n=== data coverage ===");
-    for c in &coverage {
-        let min = c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
-        let max = c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
-        eprintln!(
-            "  {} ({}): {} candles  [{} → {}]",
-            c.instrument_id, c.interval, c.count, min, max
-        );
-    }
-
-    eprintln!("\nsetup data complete ✓");
     Ok(())
 }
 
