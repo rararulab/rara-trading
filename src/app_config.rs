@@ -76,6 +76,8 @@ pub struct ResearchConfig {
     pub timeframes: Vec<String>,
     /// Maximum compile retries per hypothesis.
     pub max_compile_retries: u32,
+    /// Delay in seconds between research cycles in daemon mode.
+    pub cycle_delay_secs: u64,
 }
 
 impl Default for ResearchConfig {
@@ -84,6 +86,7 @@ impl Default for ResearchConfig {
             iterations: 5,
             timeframes: vec!["1h".to_string(), "4h".to_string(), "1d".to_string()],
             max_compile_retries: 3,
+            cycle_delay_secs: 30,
         }
     }
 }
@@ -242,6 +245,8 @@ iterations = 5
 timeframes = ["1h", "4h", "1d"]
 # Maximum compile retries per hypothesis before giving up
 max_compile_retries = 3
+# Delay in seconds between research cycles in daemon mode
+cycle_delay_secs = 30
 
 # ─── Feedback Evaluation ─────────────────────────────────────────
 [feedback]
