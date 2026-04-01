@@ -491,3 +491,120 @@ fn load_installed_strategies(promoted_dir: PathBuf) -> Vec<StrategyEntry> {
         }
     }
 }
+
+/// Maximum number of events to retain in the events buffer.
+const MAX_EVENTS: usize = 1000;
+
+/// Maximum number of recent events shown on the overview tab.
+const MAX_RECENT_EVENTS: usize = 50;
+
+impl App {
+    /// Ingest a gRPC [`EventMessage`] into the application state.
+    ///
+    /// Converts the message into an [`EventEntry`] for the Events tab and a
+    /// [`RecentEvent`] for the Overview tab. Older events are evicted when the
+    /// buffer exceeds [`MAX_EVENTS`].
+    pub fn push_event(&mut self, msg: rara_server::rara_proto::EventMessage) {
+        // Derive topic from the dotted event_type (e.g. "trading.order.filled" ->
+        // "trading")
+        let topic = msg
+            .event_type
+            .split('.')
+            .next()
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Build a one-line summary from the payload JSON (first 80 chars)
+        let summary = build_summary(&msg.payload_json);
+
+        let strategy_id = if msg.strategy_id.is_empty() {
+            None
+        } else {
+            Some(msg.strategy_id.clone())
+        };
+
+        // Truncate timestamp to HH:MM:SS for display
+        let time = truncate_timestamp(&msg.timestamp);
+
+        let entry = EventEntry {
+            seq: msg.sequence,
+            time: time.clone(),
+            topic: topic.clone(),
+            event_type: msg.event_type.clone(),
+            summary: summary.clone(),
+            strategy_id,
+            payload: msg.payload_json,
+        };
+
+        self.events_state.events.push(entry);
+
+        // Evict oldest events when buffer is full
+        if self.events_state.events.len() > MAX_EVENTS {
+            let drain_count = self.events_state.events.len() - MAX_EVENTS;
+            self.events_state.events.drain(..drain_count);
+        }
+
+        // Auto-scroll: keep selected_index at the end
+        if self.events_state.auto_scroll && !self.events_state.events.is_empty() {
+            let filtered_len = crate::tabs::events::filtered_count(&self.events_state);
+            if filtered_len > 0 {
+                self.events_state.selected_index = filtered_len - 1;
+            }
+        }
+
+        // Mirror to recent_events for the Overview tab
+        let event_type_tag = topic.to_uppercase();
+        self.recent_events.push(RecentEvent {
+            time,
+            event_type: event_type_tag,
+            summary,
+        });
+        if self.recent_events.len() > MAX_RECENT_EVENTS {
+            let drain_count = self.recent_events.len() - MAX_RECENT_EVENTS;
+            self.recent_events.drain(..drain_count);
+        }
+    }
+}
+
+/// Extract a short display timestamp from an ISO-8601 or similar string.
+///
+/// Looks for a `T` separator and takes the time portion up to the first dot
+/// (fractional seconds) or end. Falls back to the first 8 characters.
+fn truncate_timestamp(ts: &str) -> String {
+    ts.split('T')
+        .nth(1)
+        .unwrap_or(ts)
+        .split('.')
+        .next()
+        .unwrap_or(ts)
+        .chars()
+        .take(8)
+        .collect()
+}
+
+/// Build a one-line summary from a JSON payload string.
+///
+/// Attempts to extract a "message" or "msg" field; otherwise truncates the
+/// raw JSON to 80 characters.
+fn build_summary(payload_json: &str) -> String {
+    // Quick extraction without full JSON parse for performance
+    for key in &["\"message\":", "\"msg\":"] {
+        if let Some(pos) = payload_json.find(key) {
+            let after = &payload_json[pos + key.len()..];
+            let trimmed = after.trim_start();
+            if let Some(inner) = trimmed.strip_prefix('"') {
+                // Extract string value between quotes
+                if let Some(end) = inner.find('"') {
+                    return inner[..end].to_string();
+                }
+            }
+        }
+    }
+    // Fallback: truncate raw payload
+    let truncated: String = payload_json.chars().take(80).collect();
+    if payload_json.len() > 80 {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
