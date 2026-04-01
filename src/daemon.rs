@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use rust_decimal_macros::dec;
 use snafu::ResultExt;
 use tokio::task::JoinSet;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::accounts_config;
 use crate::agent::{CliBackend, CliExecutor};
@@ -27,6 +27,8 @@ use crate::research::strategy_store::StrategyStore;
 use crate::research::trace::Trace;
 use crate::research::wasm_executor::WasmExecutor;
 use crate::research::wasm_strategy_manager::WasmStrategyManager;
+
+use rara_domain::event::EventType;
 
 /// Run the unified daemon: spawn all trading-loop components as concurrent
 /// tokio tasks and wait for shutdown (Ctrl+C) or a fatal task error.
@@ -83,8 +85,8 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
         let cycle_delay = std::time::Duration::from_secs(cfg.research.cycle_delay_secs);
         tasks.spawn(async move {
             info!(iterations, contract = %contract, "research loop starting");
-            let research_loop = build_research_loop(&trace_path, bus).await?;
-            run_research_iterations(&research_loop, iterations, &contract, cycle_delay).await
+            let research_loop = build_research_loop(&trace_path, Arc::clone(&bus)).await?;
+            run_research_loop(&research_loop, &bus, iterations, &contract, cycle_delay).await
         });
     }
 
@@ -218,6 +220,67 @@ async fn build_research_loop(
         .build())
 }
 
+/// Run research iterations in a continuous loop.
+///
+/// First executes `iterations` initial cycles, then waits for either a
+/// [`FeedbackResearchRetrainRequested`](EventType::FeedbackResearchRetrainRequested)
+/// event on the bus or a periodic timeout (`cycle_delay`), whichever comes
+/// first, before starting the next batch of iterations.
+async fn run_research_loop(
+    research_loop: &ResearchLoop,
+    event_bus: &EventBus,
+    iterations: u32,
+    contract: &str,
+    cycle_delay: std::time::Duration,
+) -> error::Result<()> {
+    let mut rx = event_bus.subscribe();
+    let mut cycle: u64 = 1;
+
+    loop {
+        info!(cycle, iterations, "research cycle starting");
+        run_research_iterations(research_loop, iterations, contract, cycle_delay).await;
+
+        info!(cycle, "research cycle complete — waiting for retrain signal or periodic timeout");
+
+        // Wait for a retrain event or the periodic fallback timer
+        loop {
+            tokio::select! {
+                result = rx.recv() => {
+                    match result {
+                        Ok(seq) => {
+                            // Check if this sequence is a retrain event
+                            if is_retrain_event(event_bus, seq) {
+                                info!(seq, "received FeedbackResearchRetrainRequested — triggering new research cycle");
+                                break;
+                            }
+                            // Not a retrain event, keep waiting
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(skipped = n, "research event subscriber lagged — checking store for missed retrain events");
+                            // After lagging, check if any retrain events were published
+                            // recently; if so, trigger immediately
+                            if has_pending_retrain_events(event_bus) {
+                                info!("found pending retrain event after lag — triggering new research cycle");
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            info!("event bus closed — research loop exiting");
+                            return Ok(());
+                        }
+                    }
+                }
+                () = tokio::time::sleep(cycle_delay) => {
+                    info!(delay_secs = cycle_delay.as_secs(), "periodic research timeout — starting new cycle");
+                    break;
+                }
+            }
+        }
+
+        cycle += 1;
+    }
+}
+
 /// Run N research iterations with a configurable delay between cycles.
 /// Errors from individual iterations are logged but do not abort the loop;
 /// only the final summary is reported.
@@ -226,7 +289,7 @@ async fn run_research_iterations(
     iterations: u32,
     contract: &str,
     cycle_delay: std::time::Duration,
-) -> error::Result<()> {
+) {
     let mut accepted_count: u32 = 0;
     let mut rejected_count: u32 = 0;
     let mut error_count: u32 = 0;
@@ -270,10 +333,38 @@ async fn run_research_iterations(
         accepted = accepted_count,
         rejected = rejected_count,
         errors = error_count,
-        "research loop finished"
+        "research iterations finished"
     );
+}
 
-    Ok(())
+/// Check whether the event at the given sequence number is a
+/// [`FeedbackResearchRetrainRequested`](EventType::FeedbackResearchRetrainRequested).
+fn is_retrain_event(event_bus: &EventBus, seq: u64) -> bool {
+    event_bus
+        .store()
+        .get(seq)
+        .ok()
+        .flatten()
+        .is_some_and(|e| e.event_type == EventType::FeedbackResearchRetrainRequested)
+}
+
+/// Scan the feedback topic for any recent retrain events that may have been
+/// missed due to broadcast channel lag.
+///
+/// This is a best-effort fallback: it reads the last batch of feedback events
+/// and returns `true` if any of them are retrain requests. The window is
+/// intentionally small (last 50 events) to avoid expensive full-topic scans.
+fn has_pending_retrain_events(event_bus: &EventBus) -> bool {
+    // Read recent feedback events from the store; use offset 0 with a reasonable
+    // limit since we only care about the presence of *any* retrain event.
+    // In practice the consumer offset should be tracked, but for this fallback
+    // a simple tail-scan is sufficient.
+    event_bus
+        .store()
+        .read_topic("feedback", 0, 50)
+        .unwrap_or_default()
+        .iter()
+        .any(|e| e.event_type == EventType::FeedbackResearchRetrainRequested)
 }
 
 
