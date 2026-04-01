@@ -10,14 +10,25 @@ use rara_domain::contract::Contract;
 use rara_domain::trading::{OrderType, Side, StagedAction};
 
 /// Result of submitting an order to a broker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct OrderResult {
     /// Broker-assigned order identifier.
+    #[builder(into)]
     pub order_id: String,
     /// Contract the order targets.
+    #[builder(into)]
     pub contract_id: String,
     /// Current status of the order.
     pub status: OrderStatus,
+    /// Trade direction.
+    pub side: Side,
+    /// Filled quantity.
+    pub quantity: Decimal,
+    /// Execution price.
+    pub price: Decimal,
+    /// Realized `PnL` from closing/reducing a position (zero for new positions).
+    #[builder(default)]
+    pub realized_pnl: Decimal,
 }
 
 /// Lifecycle status of an order.

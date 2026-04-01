@@ -444,11 +444,14 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult {
-                        order_id: order.id,
-                        contract_id: action.contract_id.clone(),
-                        status: from_ccxt_order_status(order.status),
-                    }
+                    OrderResult::builder()
+                        .order_id(order.id)
+                        .contract_id(&action.contract_id)
+                        .status(from_ccxt_order_status(order.status))
+                        .side(action.side)
+                        .quantity(order.filled.unwrap_or(action.quantity))
+                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
+                        .build()
                 }
                 ActionType::CancelOrder => {
                     debug!(contract = action.contract_id, "cancelling order");
@@ -458,11 +461,14 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult {
-                        order_id: order.id,
-                        contract_id: action.contract_id.clone(),
-                        status: from_ccxt_order_status(order.status),
-                    }
+                    OrderResult::builder()
+                        .order_id(order.id)
+                        .contract_id(&action.contract_id)
+                        .status(from_ccxt_order_status(order.status))
+                        .side(action.side)
+                        .quantity(Decimal::ZERO)
+                        .price(Decimal::ZERO)
+                        .build()
                 }
                 ActionType::ClosePosition => {
                     // Close position by placing an opposite-side market order
@@ -490,11 +496,14 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult {
-                        order_id: order.id,
-                        contract_id: action.contract_id.clone(),
-                        status: from_ccxt_order_status(order.status),
-                    }
+                    OrderResult::builder()
+                        .order_id(order.id)
+                        .contract_id(&action.contract_id)
+                        .status(from_ccxt_order_status(order.status))
+                        .side(action.side)
+                        .quantity(order.filled.unwrap_or(action.quantity))
+                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
+                        .build()
                 }
                 ActionType::ModifyOrder => {
                     // ccxt-rust Exchange trait has no edit_order, so cancel + re-place
@@ -518,11 +527,14 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult {
-                        order_id: order.id,
-                        contract_id: action.contract_id.clone(),
-                        status: from_ccxt_order_status(order.status),
-                    }
+                    OrderResult::builder()
+                        .order_id(order.id)
+                        .contract_id(&action.contract_id)
+                        .status(from_ccxt_order_status(order.status))
+                        .side(action.side)
+                        .quantity(order.filled.unwrap_or(action.quantity))
+                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
+                        .build()
                 }
             };
 
