@@ -8,12 +8,14 @@ use rara_trading_engine::{
     account_config::AccountConfig,
     broker_registry::{BROKER_REGISTRY, BrokerRegistryEntry, ConfigField, ConfigFieldType},
 };
+use chrono::{NaiveDate, Utc};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use snafu::ResultExt;
 
 use crate::{
     accounts_config,
     app_config::{self, AppConfig},
-    error::{self, IoSnafu},
+    error::{self, IoSnafu, MarketStoreSnafu},
     paths, validation,
 };
 
@@ -135,6 +137,7 @@ async fn step_database() -> error::Result<AppConfig> {
             Ok(()) => {
                 eprintln!("  Connected successfully.");
                 eprintln!();
+                step_market_data(&cfg.database.url).await?;
                 break;
             }
             Err(e) => {
@@ -159,6 +162,222 @@ async fn step_database() -> error::Result<AppConfig> {
     }
 
     Ok(cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Step 1b — Market Data
+// ---------------------------------------------------------------------------
+
+/// Available data source choices for the select prompt.
+const DATA_SOURCE_OPTIONS: &[&str] = &["binance", "yahoo"];
+
+/// After database connects, offer to download historical candles for
+/// backtesting. Lets the user pick a data source, then downloads BTC + ETH
+/// in parallel with progress bars.
+async fn step_market_data(database_url: &str) -> error::Result<()> {
+    if !confirm(
+        "  Download historical market data for backtesting?",
+        true,
+    )? {
+        eprintln!("  Skipped. You can add data later with: rara setup data");
+        eprintln!();
+        return Ok(());
+    }
+
+    let source_idx = select("  Data source", DATA_SOURCE_OPTIONS, 0)?;
+    let source = DATA_SOURCE_OPTIONS[source_idx];
+
+    let symbols_raw = input(
+        "  Symbols (comma-separated)",
+        Some("BTCUSDT,ETHUSDT"),
+    )?;
+    let symbols: Vec<String> = symbols_raw
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if symbols.is_empty() {
+        eprintln!("  No symbols specified, skipping.");
+        eprintln!();
+        return Ok(());
+    }
+
+    let date_mode_options = &["Auto-detect (earliest available per symbol)", "Custom range"];
+    let date_mode = select("  Date range", date_mode_options, 0)?;
+
+    let (start, end) = if date_mode == 1 {
+        let start_str = input("  Start date (YYYY-MM-DD)", Some("2020-01-01"))?;
+        let end_str = input("  End date (YYYY-MM-DD)", Some(&Utc::now().format("%Y-%m-%d").to_string()))?;
+        let start = NaiveDate::parse_from_str(&start_str, "%Y-%m-%d")
+            .map_err(|_| error::AppError::Config {
+                message: format!("invalid start date: {start_str}"),
+            })?;
+        let end = NaiveDate::parse_from_str(&end_str, "%Y-%m-%d")
+            .map_err(|_| error::AppError::Config {
+                message: format!("invalid end date: {end_str}"),
+            })?;
+        (Some(start), Some(end))
+    } else {
+        (None, None)
+    };
+
+    eprintln!();
+    download_symbols_parallel(database_url, source, &symbols, start, end).await
+}
+
+/// Download multiple symbols in parallel with per-symbol progress bars.
+///
+/// Connects to `TimescaleDB`, runs migrations, then spawns one task per symbol.
+/// Each task fetches 1m candles from the chosen source and reports progress via
+/// an `indicatif` bar. When `start` is `None`, auto-detects the earliest
+/// available date per symbol from the exchange. Prints coverage on completion.
+pub async fn download_symbols_parallel(
+    database_url: &str,
+    source: &str,
+    symbols: &[String],
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
+) -> error::Result<()> {
+    let store = rara_market_data::store::MarketStore::connect(database_url)
+        .await
+        .context(MarketStoreSnafu)?;
+    store.migrate().await.context(MarketStoreSnafu)?;
+
+    let end = end.unwrap_or_else(|| Utc::now().date_naive());
+
+    let mp = MultiProgress::new();
+    let style = ProgressStyle::with_template(
+        "  {prefix:>10} [{bar:30.cyan/dim}] {pos}/{len} candles  {msg}",
+    )
+    .expect("valid template")
+    .progress_chars("█▓░");
+
+    let source = source.to_string();
+    let mut handles = Vec::with_capacity(symbols.len());
+
+    for symbol in symbols {
+        // Placeholder bar — real length set after detecting start date
+        let pb = mp.add(ProgressBar::new(0));
+        pb.set_style(style.clone());
+        pb.set_prefix(symbol.clone());
+        pb.set_message("detecting range…");
+
+        let store = store.clone();
+        let symbol = symbol.clone();
+        let source = source.clone();
+        let pb_clone = pb.clone();
+
+        handles.push(tokio::spawn(async move {
+            // Auto-detect start date if not provided
+            let sym_start = match start {
+                Some(d) => d,
+                None => detect_start_date(&source, &symbol).await.unwrap_or_else(|_| {
+                    // Fallback: 2017-01-01 covers most major symbols
+                    NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")
+                }),
+            };
+
+            let est_total =
+                u64::try_from((end - sym_start).num_minutes().max(0)).unwrap_or(5_000_000);
+            pb.set_length(est_total);
+            pb.set_message(format!("{sym_start} → {end}"));
+
+            let result =
+                fetch_symbol(&source, &store, &symbol, sym_start, end, &pb_clone).await;
+
+            match &result {
+                Ok(count) => pb.finish_with_message(format!("{count} total")),
+                Err(e) => pb.finish_with_message(format!("error: {e}")),
+            }
+
+            (symbol, result)
+        }));
+    }
+
+    let mut had_error = false;
+    for handle in handles {
+        let (symbol, result) = handle.await.expect("task panicked");
+        if let Err(e) = result {
+            eprintln!("  {symbol}: {e}");
+            had_error = true;
+        }
+    }
+
+    if had_error {
+        eprintln!();
+        eprintln!("  Some downloads failed. Re-run to resume (already-stored data is kept).");
+    }
+
+    // Coverage summary
+    let coverage = store.get_coverage().await.context(MarketStoreSnafu)?;
+    eprintln!();
+    eprintln!("  Data coverage:");
+    for c in &coverage {
+        let min =
+            c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let max =
+            c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        eprintln!(
+            "    {} ({}): {} candles  [{} → {}]",
+            c.instrument_id, c.interval, c.count, min, max
+        );
+    }
+    eprintln!();
+
+    Ok(())
+}
+
+/// Auto-detect the earliest available data date for a symbol on the exchange.
+async fn detect_start_date(
+    source: &str,
+    symbol: &str,
+) -> std::result::Result<NaiveDate, rara_market_data::fetcher::FetchError> {
+    match source {
+        "binance" => {
+            let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(symbol);
+            fetcher.earliest_available().await.map(|opt| {
+                opt.unwrap_or_else(|| NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date"))
+            })
+        }
+        // Yahoo doesn't have a cheap "earliest" query — use a safe default
+        _ => Ok(NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")),
+    }
+}
+
+/// Fetch one symbol from the given source with progress reporting.
+async fn fetch_symbol(
+    source: &str,
+    store: &rara_market_data::store::MarketStore,
+    symbol: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+    pb: &ProgressBar,
+) -> std::result::Result<usize, rara_market_data::fetcher::FetchError> {
+    let on_progress = |batch: usize| {
+        pb.inc(u64::try_from(batch).unwrap_or(0));
+    };
+
+    match source {
+        "binance" => {
+            let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(symbol);
+            fetcher
+                .fetch_and_store_with_progress(store, symbol, start, end, on_progress)
+                .await
+        }
+        "yahoo" => {
+            // Yahoo fetcher doesn't support progress callbacks yet — fall back
+            // to the trait method (no per-page progress, bar jumps to done).
+            use rara_market_data::fetcher::HistoryFetcher;
+            let fetcher = rara_market_data::fetcher::yahoo::YahooFetcher::new(symbol);
+            fetcher.fetch_and_store(store, symbol, start, end).await
+        }
+        _ => {
+            Err(rara_market_data::fetcher::FetchError::Parse {
+                message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

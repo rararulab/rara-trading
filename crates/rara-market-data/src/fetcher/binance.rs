@@ -46,6 +46,36 @@ impl BinanceFetcher {
         }
     }
 
+    /// Query the earliest available kline timestamp for this symbol.
+    ///
+    /// Fetches a single candle starting from epoch to discover when Binance
+    /// first has data for the symbol. Returns `None` if no data exists.
+    pub async fn earliest_available(&self) -> Result<Option<NaiveDate>> {
+        let url = format!(
+            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime=0&limit=1",
+            self.symbol
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context(HttpSnafu)?
+            .error_for_status()
+            .context(HttpSnafu)?;
+        let rows = resp
+            .json::<Vec<Vec<serde_json::Value>>>()
+            .await
+            .context(HttpSnafu)?;
+
+        Ok(rows
+            .first()
+            .and_then(|row| parse_binance_kline(row).ok())
+            .and_then(|k| {
+                DateTime::from_timestamp_millis(k.open_time_ms).map(|dt| dt.date_naive())
+            }))
+    }
+
     /// Fetch one page of klines.
     async fn fetch_page(&self, start_ms: i64, end_ms: i64) -> Result<Vec<RawKline>> {
         let url = format!(
@@ -70,14 +100,30 @@ impl BinanceFetcher {
     }
 }
 
-#[async_trait]
-impl HistoryFetcher for BinanceFetcher {
-    async fn fetch_and_store(
+impl BinanceFetcher {
+    /// Fetch and store candles with a per-page progress callback.
+    ///
+    /// `on_progress` is called after each page with the number of candles
+    /// written in that batch, enabling progress bar integration.
+    pub async fn fetch_and_store_with_progress(
         &self,
         store: &MarketStore,
         instrument_id: &str,
         start: NaiveDate,
         end: NaiveDate,
+        on_progress: impl Fn(usize) + Send + Sync,
+    ) -> Result<usize> {
+        Self::fetch_core(self, store, instrument_id, start, end, &on_progress).await
+    }
+
+    /// Core fetch loop shared by trait impl and progress variant.
+    async fn fetch_core(
+        &self,
+        store: &MarketStore,
+        instrument_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+        on_progress: &(dyn Fn(usize) + Send + Sync),
     ) -> Result<usize> {
         let range_start_ms = start.and_time(NaiveTime::MIN).and_utc().timestamp_millis();
         let range_end_ms = end
@@ -132,11 +178,56 @@ impl HistoryFetcher for BinanceFetcher {
                 .insert_candles(&candle_rows)
                 .await
                 .context(StoreSnafu)?;
-            total += usize::try_from(count).expect("candle count fits in usize");
+            let written = usize::try_from(count).expect("candle count fits in usize");
+            total += written;
+            on_progress(written);
         }
 
         info!(total, "binance: fetch complete");
         Ok(total)
+    }
+}
+
+/// Search Binance for tradeable USDT-margined spot symbols.
+///
+/// Fetches `/api/v3/exchangeInfo` and filters by `query` substring
+/// (case-insensitive). Returns matching symbol names.
+pub async fn search_symbols(query: &str) -> Result<Vec<String>> {
+    let url = format!("{BASE_URL}/api/v3/exchangeInfo?permissions=SPOT");
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.context(HttpSnafu)?;
+    let body: serde_json::Value = resp.json().await.context(HttpSnafu)?;
+
+    let query_upper = query.to_uppercase();
+    let symbols = body["symbols"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|s| {
+            let symbol = s["symbol"].as_str()?;
+            let status = s["status"].as_str()?;
+            let quote = s["quoteAsset"].as_str()?;
+            if status == "TRADING" && quote == "USDT" && symbol.contains(&query_upper) {
+                Some(symbol.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(symbols)
+}
+
+#[async_trait]
+impl HistoryFetcher for BinanceFetcher {
+    async fn fetch_and_store(
+        &self,
+        store: &MarketStore,
+        instrument_id: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<usize> {
+        Self::fetch_core(self, store, instrument_id, start, end, &|_| {}).await
     }
 }
 

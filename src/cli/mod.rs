@@ -290,6 +290,26 @@ pub enum SetupAction {
     },
     /// Validate all configuration files.
     Validate,
+    /// Download historical market data for backtesting.
+    ///
+    /// Without arguments, downloads BTC + ETH (10 years, 1m candles).
+    /// Use `--search` to find and add other symbols from Binance.
+    Data {
+        /// Data source: "binance" or "yahoo".
+        #[arg(long, default_value = "binance")]
+        source: String,
+        /// Search for a symbol (e.g. "SOL", "DOGE").
+        #[arg(long)]
+        search: Option<String>,
+        /// Start date (YYYY-MM-DD). Defaults to earliest available on exchange.
+        #[arg(long)]
+        start: Option<String>,
+        /// End date (YYYY-MM-DD). Defaults to today.
+        #[arg(long)]
+        end: Option<String>,
+        /// Symbols to download (e.g. BTCUSDT ETHUSDT). Defaults to BTC + ETH.
+        symbols: Vec<String>,
+    },
 }
 
 /// Account management subcommands.

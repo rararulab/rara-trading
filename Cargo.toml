@@ -50,6 +50,7 @@ prost-types = "0.13"
 ratatui = "0.29"
 crossterm = "0.28"
 dialoguer = "0.11"
+indicatif = "0.18"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -96,6 +97,7 @@ rust_decimal.workspace = true
 rust_decimal_macros = "1"
 serde.workspace = true
 serde_json.workspace = true
+indicatif.workspace = true
 snafu.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
