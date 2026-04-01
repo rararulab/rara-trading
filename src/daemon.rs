@@ -29,6 +29,13 @@ use crate::research::wasm_executor::WasmExecutor;
 use crate::research::wasm_strategy_manager::WasmStrategyManager;
 
 use rara_domain::event::EventType;
+use rara_sentinel::analyzer::SignalAnalyzer;
+use rara_sentinel::engine::SentinelEngine;
+use rara_sentinel::source::DataSource;
+use rara_sentinel::sources::rss::RssDataSource;
+use rara_sentinel::sources::trump_code::TrumpCodeDataSource;
+
+use crate::app_config::SentinelConfig;
 
 /// Run the unified daemon: spawn all trading-loop components as concurrent
 /// tokio tasks and wait for shutdown (Ctrl+C) or a fatal task error.
@@ -119,6 +126,9 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
             Ok::<(), error::AppError>(())
         });
     }
+
+    // --- Sentinel monitoring task ---
+    spawn_sentinel_task(&mut tasks, &event_bus);
 
     info!("daemon running — press Ctrl+C to shut down");
 
@@ -367,6 +377,105 @@ fn has_pending_retrain_events(event_bus: &EventBus) -> bool {
         .any(|e| e.event_type == EventType::FeedbackResearchRetrainRequested)
 }
 
+
+/// Spawn the sentinel monitoring task if enabled in config.
+///
+/// When enabled, creates a polling loop that periodically checks all
+/// configured data sources (RSS feeds, trump-code) for market-moving
+/// signals using LLM analysis, publishing detected signals to the event bus.
+fn spawn_sentinel_task(tasks: &mut JoinSet<error::Result<()>>, event_bus: &Arc<EventBus>) {
+    let sentinel_cfg = app_config::load().sentinel.clone();
+    if !sentinel_cfg.enabled {
+        info!("sentinel monitoring disabled — skipping");
+        return;
+    }
+
+    let bus = Arc::clone(event_bus);
+    let cfg = app_config::load();
+    tasks.spawn(async move {
+        info!("sentinel monitoring starting");
+        let cli_backend =
+            CliBackend::from_agent_config(&cfg.agent).context(AgentBackendSnafu)?;
+        let llm = CliExecutor::new(cli_backend);
+        let sources = build_sentinel_sources(&sentinel_cfg);
+        let analyzer = SignalAnalyzer::new(llm);
+        let engine = SentinelEngine::new(sources, analyzer, Arc::clone(&bus));
+        let interval = std::time::Duration::from_secs(sentinel_cfg.check_interval_secs);
+        run_sentinel_loop(&engine, interval).await;
+        Ok::<(), error::AppError>(())
+    });
+}
+
+/// Build data sources from sentinel configuration.
+///
+/// Creates RSS feed sources and optionally the trump-code source based on
+/// the config. Returns an empty vec if no sources are configured.
+fn build_sentinel_sources(cfg: &SentinelConfig) -> Vec<Box<dyn DataSource>> {
+    let client = reqwest::Client::new();
+    let mut sources: Vec<Box<dyn DataSource>> = cfg
+        .rss_feeds
+        .iter()
+        .map(|feed| -> Box<dyn DataSource> {
+            Box::new(
+                RssDataSource::builder()
+                    .name(feed.name.clone())
+                    .url(feed.url.clone())
+                    .client(client.clone())
+                    .build(),
+            )
+        })
+        .collect();
+
+    if cfg.trump_code_enabled {
+        sources.push(Box::new(
+            TrumpCodeDataSource::builder()
+                .base_url(cfg.trump_code_url.clone())
+                .client(client)
+                .build(),
+        ));
+    }
+
+    sources
+}
+
+/// Run the sentinel engine in a polling loop.
+///
+/// Each cycle polls all data sources and analyzes signals via LLM.
+/// Errors are logged but never crash the daemon — sentinel is a monitoring
+/// component that must not take down the trading system.
+async fn run_sentinel_loop<L: rara_infra::llm::LlmClient>(
+    engine: &SentinelEngine<L>,
+    interval: std::time::Duration,
+) {
+    loop {
+        match engine.poll_and_analyze().await {
+            Ok(signals) => {
+                if signals.is_empty() {
+                    info!("sentinel poll complete — no actionable signals");
+                } else {
+                    info!(
+                        count = signals.len(),
+                        "sentinel poll complete — published signals to event bus"
+                    );
+                    for signal in &signals {
+                        info!(
+                            signal_type = %signal.signal_type,
+                            severity = %signal.severity,
+                            contracts = ?signal.affected_contracts,
+                            "sentinel signal detected"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                // Log and continue — sentinel errors must never crash the daemon
+                error!(error = %e, "sentinel poll failed — will retry next cycle");
+            }
+        }
+
+        tokio::time::sleep(interval).await;
+    }
+}
 
 /// Build a [`StrategyEvaluator`](rara_feedback::evaluator::StrategyEvaluator)
 /// from the application's feedback configuration.
