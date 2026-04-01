@@ -145,6 +145,9 @@ pub struct ResearchLoop {
     /// Timeframes to evaluate each hypothesis on.
     #[builder(default = vec![Timeframe::Hour1, Timeframe::Hour4, Timeframe::Day1])]
     timeframes:          Vec<Timeframe>,
+    /// Contract/instrument name used for backtesting (e.g. "BTCUSDT").
+    #[builder(default = "default".to_string(), into)]
+    contract:            String,
 }
 
 impl ResearchLoop {
@@ -380,7 +383,7 @@ impl ResearchLoop {
             .load_handle(strategy_id)
             .context(StrategyManagerSnafu)?;
         self.backtester
-            .run(handle, "default", timeframe)
+            .run(handle, &self.contract, timeframe)
             .await
             .context(BacktestSnafu)
     }

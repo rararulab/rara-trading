@@ -902,7 +902,7 @@ async fn run_research(action: ResearchAction) -> error::Result<()> {
 }
 
 /// Build the `ResearchLoop` from config, trace path, and DB connection.
-async fn build_research_loop(trace_path: &Path) -> error::Result<ResearchLoop> {
+async fn build_research_loop(trace_path: &Path, contract: &str) -> error::Result<ResearchLoop> {
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
     let prompts_dir =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/rara-research/src/prompts");
@@ -962,6 +962,7 @@ async fn build_research_loop(trace_path: &Path) -> error::Result<ResearchLoop> {
         .trace(trace)
         .event_bus(event_bus)
         .generated_dir(paths::strategies_generated_dir())
+        .contract(contract)
         .build())
 }
 
@@ -973,7 +974,7 @@ async fn run_research_loop(
     quiet: bool,
 ) -> error::Result<()> {
     let trace_path = trace_dir.map_or_else(|| paths::data_dir().join("trace"), PathBuf::from);
-    let research_loop = build_research_loop(&trace_path).await?;
+    let research_loop = build_research_loop(&trace_path, contract).await?;
 
     let mut accepted_count: u32 = 0;
     let mut rejected_count: u32 = 0;
@@ -1720,7 +1721,11 @@ fn list_promoted_from_dir(
         let entry = entry.context(PmIoSnafu)?;
         let path = entry.path();
 
-        if path.extension().is_some_and(|ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json")
+            && !path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(".registry.json"))
+        {
             let contents = std::fs::read_to_string(&path).context(PmIoSnafu)?;
             let strategy: PromotedStrategy =
                 serde_json::from_str(&contents).context(PmSerializeSnafu)?;
