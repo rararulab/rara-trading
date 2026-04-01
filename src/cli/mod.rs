@@ -47,7 +47,7 @@ pub enum Command {
         action: DataAction,
     },
 
-    /// Run the full trading loop: research, paper trading, feedback, and gRPC
+    /// Run the full trading loop: research, trading, feedback, and gRPC
     /// server as concurrent tasks in a single process.
     ///
     /// Accounts and contracts are loaded from `accounts.toml`.
@@ -96,10 +96,10 @@ pub enum Command {
         action: FeedbackAction,
     },
 
-    /// Paper trading operations.
-    Paper {
+    /// Live/sandbox trading operations.
+    Trade {
         #[command(subcommand)]
-        action: PaperAction,
+        action: TradeAction,
     },
 
     /// Manage strategies from the rara-strategies registry.
@@ -129,18 +129,18 @@ pub enum FeedbackAction {
     },
 }
 
-/// Paper trading subcommands.
+/// Trading subcommands.
 #[derive(Subcommand, Debug)]
-pub enum PaperAction {
-    /// Start paper trading with promoted strategies.
+pub enum TradeAction {
+    /// Start trading with promoted strategies.
     ///
     /// Accounts and contracts are loaded from `accounts.toml`.
     Start,
 
-    /// Show paper trading status (strategies, positions, `PnL`).
+    /// Show trading status (strategies, positions, `PnL`).
     Status,
 
-    /// Stop paper trading gracefully.
+    /// Stop trading gracefully.
     Stop,
 }
 
@@ -347,7 +347,7 @@ pub enum SetupAccountAction {
         /// API passphrase (OKX only).
         #[arg(long)]
         passphrase: Option<String>,
-        /// Use sandbox/testnet for paper trading.
+        /// Use exchange sandbox/testnet environment.
         #[arg(long)]
         sandbox:    bool,
     },

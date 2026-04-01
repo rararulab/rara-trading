@@ -12,7 +12,7 @@ use rara_trading::{
     agent::{CliBackend, CliExecutor},
     app_config,
     cli::{
-        Cli, Command, ConfigAction, DataAction, EventsAction, FeedbackAction, PaperAction,
+        Cli, Command, ConfigAction, DataAction, EventsAction, FeedbackAction, TradeAction,
         ResearchAction, SetupAccountAction, SetupAction, StrategyAction,
     },
     error::{
@@ -289,26 +289,26 @@ struct StrategyStatus {
     rejected: usize,
 }
 
-/// Response payload for `paper status`.
+/// Response payload for `trade status`.
 #[derive(Serialize)]
-struct PaperStatusResponse {
+struct TradeStatusResponse {
     ok:           bool,
     action:       &'static str,
     strategies:   Vec<StrategyStatus>,
     total_trades: usize,
 }
 
-/// Response payload for `paper stop`.
+/// Response payload for `trade stop`.
 #[derive(Serialize)]
-struct PaperStopResponse {
+struct TradeStopResponse {
     ok:      bool,
     action:  &'static str,
     message: String,
 }
 
-/// Summary printed after graceful shutdown of paper trading.
+/// Summary printed after graceful shutdown of trading.
 #[derive(Serialize)]
-struct PaperShutdownSummary {
+struct TradeShutdownSummary {
     ok:            bool,
     action:        &'static str,
     duration_secs: u64,
@@ -451,8 +451,8 @@ async fn run() -> error::Result<()> {
         Command::Feedback { action } => {
             run_feedback(action)?;
         }
-        Command::Paper { action } => {
-            run_paper(action).await?;
+        Command::Trade { action } => {
+            run_trade(action).await?;
         }
         Command::Strategy { action } => {
             run_strategy(action).await?;
@@ -1332,23 +1332,23 @@ async fn run_market_data_ws(contracts: Vec<String>, ws_flag: Arc<std::sync::atom
     }
 }
 
-/// Execute the paper trading subcommand.
-async fn run_paper(action: PaperAction) -> error::Result<()> {
+/// Execute the trading subcommand.
+async fn run_trade(action: TradeAction) -> error::Result<()> {
     match action {
-        PaperAction::Start => run_paper_start().await,
-        PaperAction::Status => run_paper_status(),
-        PaperAction::Stop => {
-            run_paper_stop();
+        TradeAction::Start => run_trade_start().await,
+        TradeAction::Status => run_trade_status(),
+        TradeAction::Stop => {
+            run_trade_stop();
             Ok(())
         }
     }
 }
 
-/// Show paper trading status by reading trading events from the event bus.
+/// Show trading status by reading trading events from the event bus.
 ///
 /// Aggregates order-submitted, order-filled, and order-rejected events by
 /// strategy and prints a summary table to stderr plus JSON to stdout.
-fn run_paper_status() -> error::Result<()> {
+fn run_trade_status() -> error::Result<()> {
     use std::collections::BTreeMap;
 
     use rara_domain::event::EventType;
@@ -1357,16 +1357,16 @@ fn run_paper_status() -> error::Result<()> {
     let event_bus_path = trace_path.join("events");
 
     if !event_bus_path.exists() {
-        eprintln!("No event bus data found. Has paper trading been run?");
+        eprintln!("No event bus data found. Has trading been run?");
         println!(
             "{}",
-            serde_json::to_string(&PaperStatusResponse {
+            serde_json::to_string(&TradeStatusResponse {
                 ok:           true,
-                action:       "paper.status",
+                action:       "trade.status",
                 strategies:   vec![],
                 total_trades: 0,
             })
-            .expect("PaperStatusResponse must serialize")
+            .expect("TradeStatusResponse must serialize")
         );
         return Ok(());
     }
@@ -1424,35 +1424,35 @@ fn run_paper_status() -> error::Result<()> {
 
     println!(
         "{}",
-        serde_json::to_string(&PaperStatusResponse {
+        serde_json::to_string(&TradeStatusResponse {
             ok: true,
-            action: "paper.status",
+            action: "trade.status",
             strategies,
             total_trades,
         })
-        .expect("PaperStatusResponse must serialize")
+        .expect("TradeStatusResponse must serialize")
     );
     Ok(())
 }
 
-/// Show instructions for stopping paper trading.
+/// Show instructions for stopping trading.
 ///
-/// Paper trading runs in the foreground, so the user should press Ctrl+C in
-/// the terminal where `paper start` is running. This command simply prints
+/// Trading runs in the foreground, so the user should press Ctrl+C in
+/// the terminal where `trade start` is running. This command simply prints
 /// that guidance.
-fn run_paper_stop() {
-    let message = "Paper trading runs in the foreground. Press Ctrl+C in the terminal where it's \
+fn run_trade_stop() {
+    let message = "Trading runs in the foreground. Press Ctrl+C in the terminal where it's \
                    running."
         .to_string();
     eprintln!("{message}");
     println!(
         "{}",
-        serde_json::to_string(&PaperStopResponse {
+        serde_json::to_string(&TradeStopResponse {
             ok: true,
-            action: "paper.stop",
+            action: "trade.stop",
             message,
         })
-        .expect("PaperStopResponse must serialize")
+        .expect("TradeStopResponse must serialize")
     );
 }
 
@@ -1510,14 +1510,14 @@ fn load_strategies_for_contracts(
     Ok(loaded)
 }
 
-/// Start the paper trading main loop.
+/// Start the trading main loop.
 ///
 /// Connects to Binance WebSocket for live kline data, loads promoted WASM
-/// strategies, and runs the signal loop through a paper broker. Blocks until
+/// strategies, and runs the signal loop through a configured broker. Blocks until
 /// Ctrl+C is received, then gracefully shuts down all tasks and prints a
 /// session summary.
 #[allow(clippy::too_many_lines)]
-async fn run_paper_start() -> error::Result<()> {
+async fn run_trade_start() -> error::Result<()> {
     use futures_util::StreamExt;
     use rara_market_data::stream::{aggregator::CandleAggregator, binance_ws::BinanceWsClient};
     use rara_trading::trading::{
@@ -1646,7 +1646,7 @@ async fn run_paper_start() -> error::Result<()> {
     });
 
     let start_time = std::time::Instant::now();
-    eprintln!("Paper trading started. Press Ctrl+C to stop.");
+    eprintln!("Trading started. Press Ctrl+C to stop.");
 
     tokio::signal::ctrl_c()
         .await
@@ -1681,23 +1681,23 @@ async fn run_paper_start() -> error::Result<()> {
         })
         .unwrap_or(0);
 
-    eprintln!("=== Paper Trading Summary ===");
+    eprintln!("=== Trading Summary ===");
     eprintln!("Duration: {hours}h {minutes}m");
     eprintln!("Strategies: {strategy_count}");
     eprintln!("Total Trades: {trade_count}");
 
     println!(
         "{}",
-        serde_json::to_string(&PaperShutdownSummary {
+        serde_json::to_string(&TradeShutdownSummary {
             ok: true,
-            action: "paper.start",
+            action: "trade.start",
             duration_secs,
             total_trades: trade_count,
         })
-        .expect("PaperShutdownSummary must serialize")
+        .expect("TradeShutdownSummary must serialize")
     );
 
-    eprintln!("Paper trading stopped.");
+    eprintln!("Trading stopped.");
     Ok(())
 }
 
