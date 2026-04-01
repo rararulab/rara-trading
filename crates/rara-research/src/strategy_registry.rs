@@ -87,8 +87,10 @@ pub struct RegistryEntry {
     pub name:          String,
     /// Version string derived from the tag.
     pub version:       String,
-    /// WASM asset download URL.
+    /// WASM asset download URL (browser URL for public, API URL for private).
     pub wasm_url:      String,
+    /// WASM asset API URL for authenticated downloads.
+    pub wasm_api_url:  String,
     /// WASM asset filename.
     pub wasm_filename: String,
     /// Asset size in bytes.
@@ -111,6 +113,8 @@ pub struct FetchedStrategy {
 struct GitHubAsset {
     name:                 String,
     size:                 u64,
+    /// API URL for downloading (works with auth for private repos).
+    url:                  String,
     browser_download_url: String,
 }
 
@@ -130,18 +134,40 @@ pub struct StrategyRegistry {
 
     /// Directory to save fetched WASM artifacts.
     promoted_dir: PathBuf,
+
+    /// Optional GitHub personal access token for private repositories.
+    /// Falls back to the `GITHUB_TOKEN` environment variable when not set.
+    github_token: Option<String>,
 }
 
 impl StrategyRegistry {
+    /// Resolve the GitHub token from the explicit field or `GITHUB_TOKEN` env
+    /// var.
+    fn resolve_token(&self) -> Option<String> {
+        self.github_token
+            .clone()
+            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+    }
+
+    /// Build an authenticated request if a token is available.
+    fn authed_get(&self, client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+        let mut req = client
+            .get(url)
+            .header("User-Agent", "rara-trading")
+            .header("Accept", "application/vnd.github+json");
+        if let Some(token) = self.resolve_token() {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        req
+    }
+
     /// List all available strategies from the GitHub registry.
     pub async fn list_available(&self) -> Result<Vec<RegistryEntry>> {
         let url = format!("https://api.github.com/repos/{}/releases", self.repo);
 
         let client = reqwest::Client::new();
-        let response = client
-            .get(&url)
-            .header("User-Agent", "rara-trading")
-            .header("Accept", "application/vnd.github+json")
+        let response = self
+            .authed_get(&client, &url)
             .send()
             .await
             .context(HttpSnafu)?;
@@ -173,6 +199,7 @@ impl StrategyRegistry {
                     name,
                     version,
                     wasm_url: wasm_asset.browser_download_url,
+                    wasm_api_url: wasm_asset.url,
                     wasm_filename: wasm_asset.name,
                     size: wasm_asset.size,
                 })
@@ -201,11 +228,22 @@ impl StrategyRegistry {
     async fn fetch_entry(&self, entry: &RegistryEntry) -> Result<FetchedStrategy> {
         info!(strategy = %entry.name, version = %entry.version, "fetching strategy from registry");
 
-        // Download the WASM binary
+        // Download the WASM binary. For private repos, use the API URL with auth
+        // and Accept: application/octet-stream to get the raw binary.
         let client = reqwest::Client::new();
-        let wasm_bytes = client
-            .get(&entry.wasm_url)
+        let download_url = if self.resolve_token().is_some() {
+            &entry.wasm_api_url
+        } else {
+            &entry.wasm_url
+        };
+        let mut req = client
+            .get(download_url)
             .header("User-Agent", "rara-trading")
+            .header("Accept", "application/octet-stream");
+        if let Some(token) = self.resolve_token() {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        let wasm_bytes = req
             .send()
             .await
             .context(HttpSnafu)?
