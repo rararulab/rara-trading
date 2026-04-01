@@ -2,18 +2,17 @@
 //! threshold from its peak.
 
 use async_trait::async_trait;
+use rara_domain::trading::TradingCommit;
 use rust_decimal::Decimal;
 
-use rara_domain::trading::TradingCommit;
-use crate::broker::AccountInfo;
-
 use super::{Guard, GuardResult};
+use crate::broker::AccountInfo;
 
 /// Rejects commits when current equity is below `(1 - max_drawdown_pct) *
 /// peak_equity`.
 pub struct DrawdownLimit {
     /// Peak equity observed (set externally or tracked over time).
-    peak_equity: Decimal,
+    peak_equity:      Decimal,
     /// Maximum allowed drawdown as a fraction (e.g. 0.20 = 20%).
     max_drawdown_pct: Decimal,
 }
@@ -30,9 +29,7 @@ impl DrawdownLimit {
 
 #[async_trait]
 impl Guard for DrawdownLimit {
-    fn name(&self) -> &'static str {
-        "DrawdownLimit"
-    }
+    fn name(&self) -> &'static str { "DrawdownLimit" }
 
     async fn check(&self, _commit: &TradingCommit, account: &AccountInfo) -> GuardResult {
         let threshold = self.peak_equity * (Decimal::ONE - self.max_drawdown_pct);
@@ -40,8 +37,8 @@ impl Guard for DrawdownLimit {
         if account.total_equity < threshold {
             return GuardResult::Reject {
                 reason: format!(
-                    "equity {} is below drawdown threshold {threshold} \
-                     (peak: {}, max drawdown: {})",
+                    "equity {} is below drawdown threshold {threshold} (peak: {}, max drawdown: \
+                     {})",
                     account.total_equity, self.peak_equity, self.max_drawdown_pct,
                 ),
             };

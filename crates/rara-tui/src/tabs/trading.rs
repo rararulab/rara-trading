@@ -6,21 +6,25 @@
 //! 3. Orders table: Time, Symbol, Side, Qty, Price, Status, Strategy, Guard
 //! 4. `PnL` sparkline (4 lines): ratatui `Sparkline` widget
 
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
-use ratatui::Frame;
+use ratatui::{
+    Frame,
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table},
+};
 
-use crate::app::{App, PnlRange, TradingState};
-use crate::theme;
+use crate::{
+    app::{App, PnlRange, TradingState},
+    theme,
+};
 
 /// Render the full trading tab content into the given area.
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let trading = &app.trading;
 
     let chunks = Layout::vertical([
-        Constraint::Length(1),  // account bar
+        Constraint::Length(1), // account bar
         Constraint::Min(5),    // positions table
         Constraint::Min(8),    // orders table
         Constraint::Length(6), // PnL sparkline
@@ -70,9 +74,11 @@ fn render_positions_table(frame: &mut Frame, state: &TradingState, area: Rect) {
         return;
     }
 
-    let header = Row::new(["Symbol", "Side", "Qty", "Entry", "Current", "PnL", "Strategy"])
-        .style(theme::emphasis())
-        .bottom_margin(0);
+    let header = Row::new([
+        "Symbol", "Side", "Qty", "Entry", "Current", "PnL", "Strategy",
+    ])
+    .style(theme::emphasis())
+    .bottom_margin(0);
 
     let rows = state.positions.iter().map(|p| {
         let pnl_s = pnl_style(p.pnl);

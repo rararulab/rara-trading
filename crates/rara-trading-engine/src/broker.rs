@@ -2,31 +2,33 @@
 
 use async_trait::async_trait;
 use bon::Builder;
+use rara_domain::{
+    contract::Contract,
+    trading::{OrderType, Side, StagedAction},
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
-
-use rara_domain::contract::Contract;
-use rara_domain::trading::{OrderType, Side, StagedAction};
 
 /// Result of submitting an order to a broker.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct OrderResult {
     /// Broker-assigned order identifier.
     #[builder(into)]
-    pub order_id: String,
+    pub order_id:     String,
     /// Contract the order targets.
     #[builder(into)]
-    pub contract_id: String,
+    pub contract_id:  String,
     /// Current status of the order.
-    pub status: OrderStatus,
+    pub status:       OrderStatus,
     /// Trade direction.
-    pub side: Side,
+    pub side:         Side,
     /// Filled quantity.
-    pub quantity: Decimal,
+    pub quantity:     Decimal,
     /// Execution price.
-    pub price: Decimal,
-    /// Realized `PnL` from closing/reducing a position (zero for new positions).
+    pub price:        Decimal,
+    /// Realized `PnL` from closing/reducing a position (zero for new
+    /// positions).
     #[builder(default)]
     pub realized_pnl: Decimal,
 }
@@ -49,20 +51,20 @@ pub enum OrderStatus {
 pub struct ExecutionReport {
     /// Broker-assigned order identifier.
     #[builder(into)]
-    pub order_id: String,
+    pub order_id:    String,
     /// Contract the order targets.
     #[builder(into)]
     pub contract_id: String,
     /// Trade direction.
-    pub side: Side,
+    pub side:        Side,
     /// Filled quantity.
-    pub quantity: Decimal,
+    pub quantity:    Decimal,
     /// Execution price.
-    pub price: Decimal,
+    pub price:       Decimal,
     /// Current order status.
-    pub status: OrderStatus,
+    pub status:      OrderStatus,
     /// When the order was filled.
-    pub filled_at: jiff::Timestamp,
+    pub filled_at:   jiff::Timestamp,
 }
 
 /// A currently held position.
@@ -70,28 +72,28 @@ pub struct ExecutionReport {
 pub struct Position {
     /// Contract identifier.
     #[builder(into)]
-    pub contract_id: String,
+    pub contract_id:     String,
     /// Position direction.
-    pub side: Side,
+    pub side:            Side,
     /// Position size.
-    pub quantity: Decimal,
+    pub quantity:        Decimal,
     /// Average entry price.
     pub avg_entry_price: Decimal,
     /// Unrealized profit/loss.
-    pub unrealized_pnl: Decimal,
+    pub unrealized_pnl:  Decimal,
 }
 
 /// Account-level information.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AccountInfo {
     /// Total equity including unrealized P&L.
-    pub total_equity: Decimal,
+    pub total_equity:   Decimal,
     /// Available cash for new orders.
     pub available_cash: Decimal,
     /// Currently held positions.
-    pub positions: Vec<Position>,
+    pub positions:      Vec<Position>,
     /// Realized profit/loss across closed positions.
-    pub realized_pnl: Decimal,
+    pub realized_pnl:   Decimal,
 }
 
 /// A currently open (unfilled) order.
@@ -99,20 +101,20 @@ pub struct AccountInfo {
 pub struct OpenOrder {
     /// Broker-assigned order identifier.
     #[builder(into)]
-    pub order_id: String,
+    pub order_id:       String,
     /// Contract this order targets.
     #[builder(into)]
-    pub contract_id: String,
+    pub contract_id:    String,
     /// Trade direction.
-    pub side: Side,
+    pub side:           Side,
     /// Order type.
-    pub order_type: OrderType,
+    pub order_type:     OrderType,
     /// Total requested quantity.
-    pub quantity: Decimal,
+    pub quantity:       Decimal,
     /// Limit price (for limit orders).
-    pub limit_price: Option<Decimal>,
+    pub limit_price:    Option<Decimal>,
     /// Current order status.
-    pub status: OrderStatus,
+    pub status:         OrderStatus,
     /// Average fill price so far.
     pub avg_fill_price: Option<Decimal>,
 }

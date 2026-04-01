@@ -10,9 +10,9 @@ use crate::source::{DataSource, RawSignal, SourceError};
 #[derive(Debug, Serialize)]
 struct RssEntryMetadata {
     /// Entry title.
-    title: String,
+    title:     String,
     /// Entry permalink.
-    link: String,
+    link:      String,
     /// Publication timestamp (RFC 3339).
     published: String,
 }
@@ -21,18 +21,16 @@ struct RssEntryMetadata {
 #[derive(Builder)]
 pub struct RssDataSource {
     /// Human-readable name for this source.
-    name: String,
+    name:   String,
     /// URL of the RSS/Atom feed.
-    url: String,
+    url:    String,
     /// HTTP client for fetching feeds.
     client: reqwest::Client,
 }
 
 #[async_trait]
 impl DataSource for RssDataSource {
-    fn name(&self) -> &str {
-        &self.name
-    }
+    fn name(&self) -> &str { &self.name }
 
     async fn poll(&self) -> Result<Vec<RawSignal>, SourceError> {
         let response = self
@@ -48,10 +46,9 @@ impl DataSource for RssDataSource {
             message: format!("reading body from {} failed: {e}", self.url),
         })?;
 
-        let feed =
-            feed_rs::parser::parse(&bytes[..]).map_err(|e| SourceError::Fetch {
-                message: format!("failed to parse feed from {}: {e}", self.url),
-            })?;
+        let feed = feed_rs::parser::parse(&bytes[..]).map_err(|e| SourceError::Fetch {
+            message: format!("failed to parse feed from {}: {e}", self.url),
+        })?;
 
         let signals = feed
             .entries

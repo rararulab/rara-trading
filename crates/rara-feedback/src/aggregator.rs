@@ -3,13 +3,10 @@
 
 use std::sync::Arc;
 
+use rara_domain::{event::EventType, feedback::StrategyMetrics};
+use rara_event_bus::{bus::EventBus, store::StoreError};
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
-
-use rara_domain::event::EventType;
-use rara_domain::feedback::StrategyMetrics;
-use rara_event_bus::bus::EventBus;
-use rara_event_bus::store::StoreError;
 
 /// Errors from metrics aggregation.
 #[derive(Debug, Snafu)]
@@ -34,9 +31,7 @@ pub struct MetricsAggregator {
 
 impl MetricsAggregator {
     /// Create a new aggregator backed by the given event bus.
-    pub const fn new(event_bus: Arc<EventBus>) -> Self {
-        Self { event_bus }
-    }
+    pub const fn new(event_bus: Arc<EventBus>) -> Self { Self { event_bus } }
 
     /// Aggregate trading events for `strategy_id` within the time window
     /// into [`StrategyMetrics`].

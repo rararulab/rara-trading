@@ -7,18 +7,16 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Logging configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LoggingConfig {
     /// Default log level (trace, debug, info, warn, error).
-    pub level: String,
+    pub level:         String,
     /// Path to log file directory. If set, JSON logs are written here.
-    pub log_dir: Option<String>,
+    pub log_dir:       Option<String>,
     /// Log format for stderr: "pretty" or "json".
     pub stderr_format: String,
 }
@@ -26,8 +24,8 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: "info".to_string(),
-            log_dir: None,
+            level:         "info".to_string(),
+            log_dir:       None,
             stderr_format: "pretty".to_string(),
         }
     }
@@ -93,9 +91,7 @@ pub fn init_logging(config: &LoggingConfig) -> Option<WorkerGuard> {
 
 /// Build an `EnvFilter` from `RUST_LOG`, falling back to the configured level.
 fn build_env_filter(default_level: &str) -> EnvFilter {
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(default_level)
-    })
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level))
 }
 
 /// Build a pretty-formatted stderr layer.
@@ -126,9 +122,7 @@ where
 ///
 /// Creates the log directory if it does not exist. Log files are
 /// automatically rotated daily with the prefix `rara-trading`.
-fn build_file_layer<S>(
-    dir: &str,
-) -> (impl Layer<S>, WorkerGuard)
+fn build_file_layer<S>(dir: &str) -> (impl Layer<S>, WorkerGuard)
 where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {

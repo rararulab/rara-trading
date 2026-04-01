@@ -6,15 +6,18 @@
 //! - `push` dispatches operations to the broker and records results
 
 use async_trait::async_trait;
+use rara_domain::trading::{
+    git::{
+        AddResult, CommitHash, CommitLogEntry, CommitPrepareResult, GitCommit, GitExportState,
+        GitState, GitStatus, OperationSummary, OrderStatusUpdate, PushResult, RejectResult,
+        SyncResult,
+    },
+    operation::{Operation, OperationResult, OperationStatus},
+};
 use sha2::{Digest, Sha256};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::broker::BrokerError;
-use rara_domain::trading::git::{
-    AddResult, CommitHash, CommitLogEntry, CommitPrepareResult, GitCommit, GitExportState,
-    GitState, GitStatus, OperationSummary, OrderStatusUpdate, PushResult, RejectResult, SyncResult,
-};
-use rara_domain::trading::operation::{Operation, OperationResult, OperationStatus};
 
 /// Errors from `TradingGit` operations.
 #[derive(Debug, Snafu)]
@@ -51,38 +54,38 @@ pub struct PendingOrder {
     /// Broker-assigned order ID.
     pub order_id: String,
     /// Trading symbol.
-    pub symbol: String,
+    pub symbol:   String,
 }
 
 /// Core git-like operation tracker for the UTA workflow.
 ///
-/// All state is held in memory. Use [`export_state`](TradingGit::export_state) /
-/// [`restore`](TradingGit::restore) for persistence.
+/// All state is held in memory. Use [`export_state`](TradingGit::export_state)
+/// / [`restore`](TradingGit::restore) for persistence.
 pub struct TradingGit {
     /// Operations staged but not yet committed.
-    staging: Vec<Operation>,
+    staging:         Vec<Operation>,
     /// Message of the committed-but-not-pushed batch.
     pending_message: Option<String>,
     /// Hash of the committed-but-not-pushed batch.
-    pending_hash: Option<CommitHash>,
+    pending_hash:    Option<CommitHash>,
     /// Immutable commit history.
-    commits: Vec<GitCommit>,
+    commits:         Vec<GitCommit>,
     /// Current HEAD commit hash.
-    head: Option<CommitHash>,
+    head:            Option<CommitHash>,
     /// Optional trading round number attached to new commits.
-    current_round: Option<u32>,
+    current_round:   Option<u32>,
 }
 
 impl TradingGit {
     /// Create a new, empty `TradingGit` instance.
     pub const fn new() -> Self {
         Self {
-            staging: Vec::new(),
+            staging:         Vec::new(),
             pending_message: None,
-            pending_hash: None,
-            commits: Vec::new(),
-            head: None,
-            current_round: None,
+            pending_hash:    None,
+            commits:         Vec::new(),
+            head:            None,
+            current_round:   None,
         }
     }
 
@@ -100,9 +103,7 @@ impl TradingGit {
     }
 
     /// Set the current trading round number for subsequent commits.
-    pub const fn set_current_round(&mut self, round: u32) {
-        self.current_round = Some(round);
-    }
+    pub const fn set_current_round(&mut self, round: u32) { self.current_round = Some(round); }
 
     /// Stage an operation for the next commit.
     pub fn add(&mut self, operation: Operation) -> AddResult {
@@ -194,13 +195,13 @@ impl TradingGit {
         let hash = generate_commit_hash(&message, &updates);
 
         let results = vec![OperationResult {
-            action: Operation::SyncOrders,
-            success: true,
-            order_id: None,
-            status: OperationStatus::Submitted,
-            filled_qty: None,
+            action:       Operation::SyncOrders,
+            success:      true,
+            order_id:     None,
+            status:       OperationStatus::Submitted,
+            filled_qty:   None,
             filled_price: None,
-            error: None,
+            error:        None,
         }];
 
         let commit = GitCommit {
@@ -283,13 +284,13 @@ impl TradingGit {
         let results: Vec<OperationResult> = operations
             .iter()
             .map(|op| OperationResult {
-                action: op.clone(),
-                success: false,
-                order_id: None,
-                status: OperationStatus::UserRejected,
-                filled_qty: None,
+                action:       op.clone(),
+                success:      false,
+                order_id:     None,
+                status:       OperationStatus::UserRejected,
+                filled_qty:   None,
                 filled_price: None,
-                error: Some(reason.to_string()),
+                error:        Some(reason.to_string()),
             })
             .collect();
 
@@ -318,11 +319,11 @@ impl TradingGit {
     /// Return the current staging area and commit state.
     pub fn status(&self) -> GitStatus {
         GitStatus {
-            staged: self.staging.clone(),
+            staged:          self.staging.clone(),
             pending_message: self.pending_message.clone(),
-            pending_hash: self.pending_hash.clone(),
-            head: self.head.clone(),
-            commit_count: self.commits.len(),
+            pending_hash:    self.pending_hash.clone(),
+            head:            self.head.clone(),
+            commit_count:    self.commits.len(),
         }
     }
 
@@ -331,19 +332,15 @@ impl TradingGit {
         self.commits
             .iter()
             .rev()
-            .filter(|c| {
-                symbol.is_none_or(|s| {
-                    c.operations.iter().any(|op| op.symbol() == Some(s))
-                })
-            })
+            .filter(|c| symbol.is_none_or(|s| c.operations.iter().any(|op| op.symbol() == Some(s))))
             .take(limit)
             .map(|c| CommitLogEntry {
-                hash: c.hash.clone(),
+                hash:        c.hash.clone(),
                 parent_hash: c.parent_hash.clone(),
-                message: c.message.clone(),
-                timestamp: c.timestamp.clone(),
-                round: c.round,
-                operations: build_operation_summaries(c),
+                message:     c.message.clone(),
+                timestamp:   c.timestamp.clone(),
+                round:       c.round,
+                operations:  build_operation_summaries(c),
             })
             .collect()
     }
@@ -356,7 +353,8 @@ impl TradingGit {
     /// Scan commit history for orders still in `Submitted` status.
     ///
     /// An order is considered pending if its most recent result across all
-    /// commits is `Submitted` (i.e. never transitioned to Filled/Cancelled/Rejected).
+    /// commits is `Submitted` (i.e. never transitioned to
+    /// Filled/Cancelled/Rejected).
     pub fn pending_order_ids(&self) -> Vec<PendingOrder> {
         use std::collections::HashMap;
 
@@ -366,11 +364,7 @@ impl TradingGit {
         for commit in &self.commits {
             for result in &commit.results {
                 if let Some(oid) = &result.order_id {
-                    let symbol = result
-                        .action
-                        .symbol()
-                        .unwrap_or("unknown")
-                        .to_string();
+                    let symbol = result.action.symbol().unwrap_or("unknown").to_string();
                     latest.insert(oid.clone(), (result.status, symbol));
                 }
             }
@@ -387,18 +381,17 @@ impl TradingGit {
     pub fn export_state(&self) -> GitExportState {
         GitExportState {
             commits: self.commits.clone(),
-            head: self.head.clone(),
+            head:    self.head.clone(),
         }
     }
 }
 
 impl Default for TradingGit {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
-/// Generate an 8-character hex commit hash from message + serialized content + timestamp.
+/// Generate an 8-character hex commit hash from message + serialized content +
+/// timestamp.
 fn generate_commit_hash(message: &str, content: &impl serde::Serialize) -> CommitHash {
     let mut hasher = Sha256::new();
     hasher.update(message.as_bytes());
@@ -425,9 +418,7 @@ fn build_operation_summaries(commit: &GitCommit) -> Vec<OperationSummary> {
                     order_type,
                     limit_price,
                 } => {
-                    let price_info = limit_price
-                        .map(|p| format!(" @ {p}"))
-                        .unwrap_or_default();
+                    let price_info = limit_price.map(|p| format!(" @ {p}")).unwrap_or_default();
                     (
                         contract.symbol.clone(),
                         order_type.to_string(),
@@ -486,12 +477,13 @@ fn build_operation_summaries(commit: &GitCommit) -> Vec<OperationSummary> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use rara_domain::{
+        contract::Contract,
+        trading::{Side, operation::OperationOrderType},
+    };
     use rust_decimal_macros::dec;
 
-    use rara_domain::contract::Contract;
-    use rara_domain::trading::operation::OperationOrderType;
-    use rara_domain::trading::Side;
+    use super::*;
 
     /// Always-successful dispatcher for testing.
     struct SuccessDispatcher;
@@ -500,13 +492,13 @@ mod tests {
     impl OperationDispatcher for SuccessDispatcher {
         async fn dispatch(&self, op: &Operation) -> OperationResult {
             OperationResult {
-                action: op.clone(),
-                success: true,
-                order_id: Some("ORD-001".to_string()),
-                status: OperationStatus::Submitted,
-                filled_qty: None,
+                action:       op.clone(),
+                success:      true,
+                order_id:     Some("ORD-001".to_string()),
+                status:       OperationStatus::Submitted,
+                filled_qty:   None,
                 filled_price: None,
-                error: None,
+                error:        None,
             }
         }
     }
@@ -523,25 +515,25 @@ mod tests {
 
     fn test_state() -> FixedState {
         FixedState(GitState {
-            net_liquidation: dec!(10000),
+            net_liquidation:  dec!(10000),
             total_cash_value: dec!(5000),
-            unrealized_pnl: dec!(100),
-            realized_pnl: dec!(200),
-            positions: vec![],
+            unrealized_pnl:   dec!(100),
+            realized_pnl:     dec!(200),
+            positions:        vec![],
         })
     }
 
     fn test_place_order() -> Operation {
         Operation::PlaceOrder {
-            contract: Contract::builder()
+            contract:    Contract::builder()
                 .symbol("BTCUSDT")
                 .exchange("binance")
                 .sec_type(rara_domain::contract::SecType::CryptoSpot)
                 .currency("USDT")
                 .build(),
-            side: Side::Buy,
-            order_type: OperationOrderType::Market,
-            quantity: dec!(0.1),
+            side:        Side::Buy,
+            order_type:  OperationOrderType::Market,
+            quantity:    dec!(0.1),
             limit_price: None,
         }
     }

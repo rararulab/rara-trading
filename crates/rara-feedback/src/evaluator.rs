@@ -1,9 +1,8 @@
 //! Strategy evaluation logic — maps metrics + sentinel context to a lifecycle
 //! decision.
 
-use rust_decimal::Decimal;
-
 use rara_domain::feedback::{FeedbackDecision, StrategyMetrics};
+use rust_decimal::Decimal;
 
 /// Evaluates a strategy's performance metrics and sentinel context to produce
 /// a [`FeedbackDecision`] controlling the strategy's lifecycle.
@@ -11,9 +10,9 @@ pub struct StrategyEvaluator {
     /// Minimum Sharpe ratio required to promote a strategy.
     promote_threshold: f64,
     /// Maximum drawdown that triggers demotion/retirement.
-    demote_drawdown: Decimal,
+    demote_drawdown:   Decimal,
     /// Minimum number of trades before a decision can be made.
-    min_trades: u32,
+    min_trades:        u32,
 }
 
 impl StrategyEvaluator {
@@ -51,8 +50,7 @@ impl StrategyEvaluator {
                 FeedbackDecision::Hold,
                 format!(
                     "insufficient trades: {} < {} minimum",
-                    metrics.trade_count,
-                    self.min_trades
+                    metrics.trade_count, self.min_trades
                 ),
             );
         }
@@ -62,8 +60,7 @@ impl StrategyEvaluator {
                 FeedbackDecision::Retire,
                 format!(
                     "excessive drawdown: {} > {} threshold — requesting retrain",
-                    metrics.max_drawdown,
-                    self.demote_drawdown
+                    metrics.max_drawdown, self.demote_drawdown
                 ),
             );
         }
@@ -73,8 +70,7 @@ impl StrategyEvaluator {
                 FeedbackDecision::Promote,
                 format!(
                     "strong performance: sharpe={:.2}, win_rate={:.2}",
-                    metrics.sharpe_ratio,
-                    metrics.win_rate
+                    metrics.sharpe_ratio, metrics.win_rate
                 ),
             );
         }
@@ -83,9 +79,7 @@ impl StrategyEvaluator {
             FeedbackDecision::Hold,
             format!(
                 "metrics within tolerance: sharpe={:.2}, win_rate={:.2}, drawdown={}",
-                metrics.sharpe_ratio,
-                metrics.win_rate,
-                metrics.max_drawdown
+                metrics.sharpe_ratio, metrics.win_rate, metrics.max_drawdown
             ),
         )
     }
@@ -97,9 +91,7 @@ mod tests {
 
     use super::*;
 
-    fn evaluator() -> StrategyEvaluator {
-        StrategyEvaluator::new(1.5, dec!(0.20), 10)
-    }
+    fn evaluator() -> StrategyEvaluator { StrategyEvaluator::new(1.5, dec!(0.20), 10) }
 
     #[test]
     fn critical_sentinel_forces_demote() {

@@ -3,11 +3,10 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-
 use rara_domain::trading::TradingCommit;
-use crate::broker::AccountInfo;
 
 use super::{Guard, GuardResult};
+use crate::broker::AccountInfo;
 
 /// Rejects commits containing actions on contracts not present in the allowed
 /// set.
@@ -27,9 +26,7 @@ impl SymbolWhitelist {
 
 #[async_trait]
 impl Guard for SymbolWhitelist {
-    fn name(&self) -> &'static str {
-        "SymbolWhitelist"
-    }
+    fn name(&self) -> &'static str { "SymbolWhitelist" }
 
     async fn check(&self, commit: &TradingCommit, _account: &AccountInfo) -> GuardResult {
         for action in &commit.actions {

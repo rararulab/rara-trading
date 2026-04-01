@@ -3,14 +3,18 @@
 
 use std::sync::Arc;
 
-use snafu::{ResultExt, Snafu};
-
-use rara_domain::event::{Event, EventType};
-use rara_domain::sentinel::SentinelSignal;
+use rara_domain::{
+    event::{Event, EventType},
+    sentinel::SentinelSignal,
+};
 use rara_event_bus::bus::EventBus;
 use rara_infra::llm::LlmClient;
-use crate::analyzer::{AnalyzerError, SignalAnalyzer};
-use crate::source::{DataSource, SourceError};
+use snafu::{ResultExt, Snafu};
+
+use crate::{
+    analyzer::{AnalyzerError, SignalAnalyzer},
+    source::{DataSource, SourceError},
+};
 
 /// Errors that can occur in the sentinel engine.
 #[derive(Debug, Snafu)]
@@ -22,7 +26,7 @@ pub enum SentinelError {
         /// Name of the failing source.
         source_name: String,
         /// The underlying source error.
-        source: SourceError,
+        source:      SourceError,
     },
     /// The analyzer failed to classify a signal.
     #[snafu(display("analyzer error: {source}"))]
@@ -42,9 +46,9 @@ pub enum SentinelError {
 /// with an LLM, and publishes actionable events to the event bus.
 pub struct SentinelEngine<L: LlmClient> {
     /// Registered data sources to poll.
-    sources: Vec<Box<dyn DataSource>>,
+    sources:   Vec<Box<dyn DataSource>>,
     /// LLM-backed signal analyzer.
-    analyzer: SignalAnalyzer<L>,
+    analyzer:  SignalAnalyzer<L>,
     /// Event bus for publishing detected signals.
     event_bus: Arc<EventBus>,
 }
@@ -101,24 +105,24 @@ impl<L: LlmClient> SentinelEngine<L> {
 mod tests {
     use std::sync::Arc;
 
+    use rara_agent::{
+        backend::{CliBackend, OutputFormat, PromptMode},
+        executor::CliExecutor,
+    };
+    use rara_domain::sentinel::{SignalSource, SignalType};
     use serde_json::json;
 
-    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use rara_agent::executor::CliExecutor;
-    use rara_domain::sentinel::{SignalSource, SignalType};
-    use crate::source::RawSignal;
-    use crate::sources::webhook::WebhookDataSource;
-
     use super::*;
+    use crate::{source::RawSignal, sources::webhook::WebhookDataSource};
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string(), format!("printf '{response}\\n'")],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         })
     }
 
@@ -129,16 +133,17 @@ mod tests {
 
         let raw = RawSignal {
             source_name: "webhook-news".to_owned(),
-            content: "Exchange hacked, funds drained".to_owned(),
-            metadata: json!({}),
-            timestamp: jiff::Timestamp::now(),
+            content:     "Exchange hacked, funds drained".to_owned(),
+            metadata:    json!({}),
+            timestamp:   jiff::Timestamp::now(),
         };
 
         let source = WebhookDataSource::new("webhook-news");
         source.push(raw).await;
 
         let executor = echo_executor(
-            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP\nSUMMARY: Exchange hack detected",
+            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP\nSUMMARY: Exchange hack \
+             detected",
         );
 
         let analyzer = SignalAnalyzer::new(executor);
@@ -161,9 +166,9 @@ mod tests {
 
         let raw = RawSignal {
             source_name: "webhook-news".to_owned(),
-            content: "Routine market update".to_owned(),
-            metadata: json!({}),
-            timestamp: jiff::Timestamp::now(),
+            content:     "Routine market update".to_owned(),
+            metadata:    json!({}),
+            timestamp:   jiff::Timestamp::now(),
         };
 
         let source = WebhookDataSource::new("webhook-news");
@@ -192,21 +197,22 @@ mod tests {
         // Simulate a trump-code signal via webhook
         let raw = RawSignal {
             source_name: "trump-code".to_owned(),
-            content: "Trump Code signals for 2026-03-25: TARIFF(x3), DEAL(x1). \
-                      Consensus: BULLISH. Posts today: 12. \
-                      Opus insight: Deal signals suggest resolution".to_owned(),
-            metadata: json!({
+            content:     "Trump Code signals for 2026-03-25: TARIFF(x3), DEAL(x1). Consensus: \
+                          BULLISH. Posts today: 12. Opus insight: Deal signals suggest resolution"
+                .to_owned(),
+            metadata:    json!({
                 "consensus": "BULLISH",
                 "signal_confidence": {"TARIFF": 0.65, "DEAL": 0.72},
             }),
-            timestamp: jiff::Timestamp::now(),
+            timestamp:   jiff::Timestamp::now(),
         };
 
         let source = WebhookDataSource::new("trump-code");
         source.push(raw).await;
 
         let executor = echo_executor(
-            "SEVERITY: Warning\nTYPE: PoliticalSignal\nCONTRACTS: SPY,SPX\nSUMMARY: Trump tariff signals with deal offset",
+            "SEVERITY: Warning\nTYPE: PoliticalSignal\nCONTRACTS: SPY,SPX\nSUMMARY: Trump tariff \
+             signals with deal offset",
         );
 
         let analyzer = SignalAnalyzer::new(executor);

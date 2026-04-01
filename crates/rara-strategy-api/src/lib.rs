@@ -1,7 +1,8 @@
 //! Strategy API types for WASM-compiled trading strategies.
 //!
-//! This crate defines the interface between the native backtester/trading engine
-//! and WASM-compiled strategies. All types use `f64` for WASM compatibility.
+//! This crate defines the interface between the native backtester/trading
+//! engine and WASM-compiled strategies. All types use `f64` for WASM
+//! compatibility.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,15 +15,15 @@ pub struct Candle {
     /// Unix timestamp in seconds.
     pub timestamp: i64,
     /// Opening price.
-    pub open: f64,
+    pub open:      f64,
     /// Highest price.
-    pub high: f64,
+    pub high:      f64,
     /// Lowest price.
-    pub low: f64,
+    pub low:       f64,
     /// Closing price.
-    pub close: f64,
+    pub close:     f64,
     /// Trading volume.
-    pub volume: f64,
+    pub volume:    f64,
 }
 
 /// Which side of the market.
@@ -40,7 +41,7 @@ pub enum Signal {
     /// Enter a position with given side and strength (0.0..=1.0).
     Entry {
         /// Which side to enter.
-        side: Side,
+        side:     Side,
         /// Signal strength from 0.0 to 1.0.
         strength: f64,
     },
@@ -54,7 +55,7 @@ pub enum Signal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskLevels {
     /// Price at which to cut losses.
-    pub stop_loss: f64,
+    pub stop_loss:   f64,
     /// Price at which to take profits.
     pub take_profit: f64,
 }
@@ -63,9 +64,9 @@ pub struct RiskLevels {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyMeta {
     /// Human-readable strategy name.
-    pub name: String,
+    pub name:        String,
     /// Strategy version (incremented on each iteration).
-    pub version: u32,
+    pub version:     u32,
     /// API version this strategy was compiled against.
     pub api_version: u32,
     /// Brief description of the strategy.

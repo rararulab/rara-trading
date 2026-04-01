@@ -18,13 +18,13 @@ pub enum Operation {
     /// Place a new order on the exchange.
     PlaceOrder {
         /// Target contract.
-        contract: Contract,
+        contract:    Contract,
         /// Buy or sell.
-        side: Side,
+        side:        Side,
         /// Order type (market, limit, etc.).
-        order_type: OperationOrderType,
+        order_type:  OperationOrderType,
         /// Order quantity.
-        quantity: Decimal,
+        quantity:    Decimal,
         /// Limit/trigger price (required for limit/stop orders).
         limit_price: Option<Decimal>,
     },
@@ -35,7 +35,7 @@ pub enum Operation {
         /// New quantity (if changing).
         quantity: Option<Decimal>,
         /// New price (if changing).
-        price: Option<Decimal>,
+        price:    Option<Decimal>,
     },
     /// Close an existing position.
     ClosePosition {
@@ -102,17 +102,17 @@ pub enum OperationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct OperationResult {
     /// Which action was attempted.
-    pub action: Operation,
+    pub action:       Operation,
     /// Whether the broker accepted the operation.
-    pub success: bool,
+    pub success:      bool,
     /// Broker-assigned order ID (if any).
-    pub order_id: Option<String>,
+    pub order_id:     Option<String>,
     /// Lifecycle status after dispatch.
-    pub status: OperationStatus,
+    pub status:       OperationStatus,
     /// Filled quantity (if partially/fully filled).
-    pub filled_qty: Option<Decimal>,
+    pub filled_qty:   Option<Decimal>,
     /// Average fill price.
     pub filled_price: Option<Decimal>,
     /// Error message on failure.
-    pub error: Option<String>,
+    pub error:        Option<String>,
 }

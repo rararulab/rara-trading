@@ -4,18 +4,27 @@
 //! which ignores candle events, this implementation stores OHLCV candle history
 //! so strategies can read historical candle data for technical analysis.
 
-use barter::engine::Processor;
-use barter::engine::state::instrument::data::InstrumentDataState;
-use barter::engine::state::order::in_flight_recorder::InFlightRequestRecorder;
-use barter::Timed;
-use barter_data::event::{DataKind, MarketEvent};
-use barter_data::subscription::book::OrderBookL1;
-use barter_execution::AccountEvent;
-use barter_execution::order::request::{OrderRequestCancel, OrderRequestOpen};
+use barter::{
+    Timed,
+    engine::{
+        Processor,
+        state::{
+            instrument::data::InstrumentDataState,
+            order::in_flight_recorder::InFlightRequestRecorder,
+        },
+    },
+};
+use barter_data::{
+    event::{DataKind, MarketEvent},
+    subscription::book::OrderBookL1,
+};
+use barter_execution::{
+    AccountEvent,
+    order::request::{OrderRequestCancel, OrderRequestOpen},
+};
+use rara_strategy_api::Candle as ApiCandle;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
-
-use rara_strategy_api::Candle as ApiCandle;
 
 /// Maximum number of candles to retain in history.
 ///
@@ -25,23 +34,22 @@ const MAX_CANDLE_HISTORY: usize = 10_000;
 /// Instrument data state that tracks candle history in addition to price.
 ///
 /// Mirrors [`DefaultInstrumentMarketData`](barter::engine::state::instrument::data::DefaultInstrumentMarketData)
-/// for L1 order book and last traded price tracking, but additionally accumulates
-/// OHLCV candles from `DataKind::Candle` events for strategy consumption.
+/// for L1 order book and last traded price tracking, but additionally
+/// accumulates OHLCV candles from `DataKind::Candle` events for strategy
+/// consumption.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CandleInstrumentData {
     /// Latest L1 order book snapshot.
-    pub l1: OrderBookL1,
+    pub l1:                OrderBookL1,
     /// Last traded price with timestamp.
     pub last_traded_price: Option<Timed<Decimal>>,
     /// Accumulated candle history, oldest first.
-    pub candles: Vec<ApiCandle>,
+    pub candles:           Vec<ApiCandle>,
 }
 
 impl CandleInstrumentData {
     /// Returns a slice of all accumulated candles, oldest first.
-    pub fn candle_history(&self) -> &[ApiCandle] {
-        &self.candles
-    }
+    pub fn candle_history(&self) -> &[ApiCandle] { &self.candles }
 }
 
 impl InstrumentDataState for CandleInstrumentData {
@@ -78,11 +86,11 @@ impl<InstrumentKey> Processor<&MarketEvent<InstrumentKey, DataKind>> for CandleI
             DataKind::Candle(candle) => {
                 let api_candle = ApiCandle {
                     timestamp: event.time_exchange.timestamp(),
-                    open: candle.open,
-                    high: candle.high,
-                    low: candle.low,
-                    close: candle.close,
-                    volume: candle.volume,
+                    open:      candle.open,
+                    high:      candle.high,
+                    low:       candle.low,
+                    close:     candle.close,
+                    volume:    candle.volume,
                 };
 
                 self.candles.push(api_candle);

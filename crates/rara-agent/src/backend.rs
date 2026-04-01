@@ -27,7 +27,8 @@ pub enum OutputFormat {
     /// Plain text output (default for most adapters).
     #[default]
     Text,
-    /// Newline-delimited JSON stream (Claude with `--output-format stream-json`).
+    /// Newline-delimited JSON stream (Claude with `--output-format
+    /// stream-json`).
     StreamJson,
     /// Newline-delimited JSON stream (Pi with `--mode json`).
     PiStreamJson,
@@ -67,13 +68,13 @@ pub enum PromptMode {
 /// the underlying file.
 pub struct CommandSpec {
     /// The command binary to execute.
-    pub command: String,
+    pub command:     String,
     /// Fully resolved argument list (includes prompt).
-    pub args: Vec<String>,
+    pub args:        Vec<String>,
     /// If set, this string should be written to the child's stdin.
     pub stdin_input: Option<String>,
     /// Temp file handle — kept alive so the agent can read from it.
-    _temp_file: Option<NamedTempFile>,
+    _temp_file:      Option<NamedTempFile>,
 }
 
 /// A CLI backend configuration for executing prompts.
@@ -86,17 +87,17 @@ pub struct CommandSpec {
 #[derive(Debug, Clone)]
 pub struct CliBackend {
     /// The command to execute.
-    pub command: String,
+    pub command:       String,
     /// Additional arguments before the prompt.
-    pub args: Vec<String>,
+    pub args:          Vec<String>,
     /// How to pass the prompt.
-    pub prompt_mode: PromptMode,
+    pub prompt_mode:   PromptMode,
     /// Argument flag for prompt (if `prompt_mode` is `Arg`).
-    pub prompt_flag: Option<String>,
+    pub prompt_flag:   Option<String>,
     /// Output format emitted by this backend.
     pub output_format: OutputFormat,
     /// Environment variables to set when spawning the process.
-    pub env_vars: Vec<(String, String)>,
+    pub env_vars:      Vec<(String, String)>,
 }
 
 impl CliBackend {
@@ -135,20 +136,21 @@ impl CliBackend {
     /// in non-interactive mode where it executes the prompt and exits.
     ///
     /// Emits `--output-format stream-json` for NDJSON streaming output.
-    /// Note: `--verbose` is required when using `--output-format stream-json` with `-p`.
+    /// Note: `--verbose` is required when using `--output-format stream-json`
+    /// with `-p`.
     pub fn claude() -> Self {
         Self {
-            command: "claude".to_string(),
-            args: vec![
+            command:       "claude".to_string(),
+            args:          vec![
                 "--dangerously-skip-permissions".to_string(),
                 "--verbose".to_string(),
                 "--output-format".to_string(),
                 "stream-json".to_string(),
             ],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-p".to_string()),
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-p".to_string()),
             output_format: OutputFormat::StreamJson,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -157,12 +159,12 @@ impl CliBackend {
     /// Runs Claude without `-p` flag, passing prompt as a positional argument.
     pub fn claude_interactive() -> Self {
         Self {
-            command: "claude".to_string(),
-            args: vec!["--dangerously-skip-permissions".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "claude".to_string(),
+            args:          vec!["--dangerously-skip-permissions".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -172,12 +174,12 @@ impl CliBackend {
     /// `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` env var.
     pub fn claude_interactive_teams() -> Self {
         Self {
-            command: "claude".to_string(),
-            args: vec!["--dangerously-skip-permissions".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "claude".to_string(),
+            args:          vec!["--dangerously-skip-permissions".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![(
+            env_vars:      vec![(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
                 "1".to_string(),
             )],
@@ -189,16 +191,16 @@ impl CliBackend {
     /// Uses `kiro-cli` in headless mode with all tools trusted.
     pub fn kiro() -> Self {
         Self {
-            command: "kiro-cli".to_string(),
-            args: vec![
+            command:       "kiro-cli".to_string(),
+            args:          vec![
                 "chat".to_string(),
                 "--no-interactive".to_string(),
                 "--trust-all-tools".to_string(),
             ],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -207,18 +209,18 @@ impl CliBackend {
     /// Uses `kiro-cli` with `--agent` flag to select a specific agent.
     pub fn kiro_with_agent(agent: String, extra_args: &[String]) -> Self {
         let mut backend = Self {
-            command: "kiro-cli".to_string(),
-            args: vec![
+            command:       "kiro-cli".to_string(),
+            args:          vec![
                 "chat".to_string(),
                 "--no-interactive".to_string(),
                 "--trust-all-tools".to_string(),
                 "--agent".to_string(),
                 agent,
             ],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
         backend.args.extend(extra_args.iter().cloned());
         backend
@@ -228,9 +230,7 @@ impl CliBackend {
     ///
     /// Uses `kiro-cli` with the ACP subcommand for structured JSON-RPC
     /// communication over stdio instead of PTY text scraping.
-    pub fn kiro_acp() -> Self {
-        Self::kiro_acp_with_options(None, None)
-    }
+    pub fn kiro_acp() -> Self { Self::kiro_acp_with_options(None, None) }
 
     /// Creates the Kiro ACP backend with an optional agent and/or model.
     pub fn kiro_acp_with_options(agent: Option<&str>, model: Option<&str>) -> Self {
@@ -256,39 +256,40 @@ impl CliBackend {
     /// Creates the Gemini backend.
     pub fn gemini() -> Self {
         Self {
-            command: "gemini".to_string(),
-            args: vec!["--yolo".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-p".to_string()),
+            command:       "gemini".to_string(),
+            args:          vec!["--yolo".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-p".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
     /// Gemini in interactive mode with initial prompt (uses `-i`, not `-p`).
     ///
-    /// **Critical quirk**: Gemini requires `-i` flag for interactive+prompt mode.
-    /// Using `-p` would make it run headless and exit after one response.
+    /// **Critical quirk**: Gemini requires `-i` flag for interactive+prompt
+    /// mode. Using `-p` would make it run headless and exit after one
+    /// response.
     pub fn gemini_interactive() -> Self {
         Self {
-            command: "gemini".to_string(),
-            args: vec!["--yolo".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-i".to_string()),
+            command:       "gemini".to_string(),
+            args:          vec!["--yolo".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-i".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
     /// Creates the Codex backend.
     pub fn codex() -> Self {
         Self {
-            command: "codex".to_string(),
-            args: vec!["exec".to_string(), "--yolo".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "codex".to_string(),
+            args:          vec!["exec".to_string(), "--yolo".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -298,24 +299,24 @@ impl CliBackend {
     /// flags, allowing interactive TUI mode.
     pub fn codex_interactive() -> Self {
         Self {
-            command: "codex".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "codex".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
     /// Creates the Amp backend.
     pub fn amp() -> Self {
         Self {
-            command: "amp".to_string(),
-            args: vec!["--dangerously-allow-all".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-x".to_string()),
+            command:       "amp".to_string(),
+            args:          vec!["--dangerously-allow-all".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-x".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -325,26 +326,27 @@ impl CliBackend {
     /// requiring user confirmation for tool usage.
     pub fn amp_interactive() -> Self {
         Self {
-            command: "amp".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-x".to_string()),
+            command:       "amp".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-x".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
     /// Creates the Copilot backend for autonomous mode.
     ///
-    /// Uses GitHub Copilot CLI with `--allow-all-tools` for automated tool approval.
+    /// Uses GitHub Copilot CLI with `--allow-all-tools` for automated tool
+    /// approval.
     pub fn copilot() -> Self {
         Self {
-            command: "copilot".to_string(),
-            args: vec!["--allow-all-tools".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-p".to_string()),
+            command:       "copilot".to_string(),
+            args:          vec!["--allow-all-tools".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-p".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -354,12 +356,12 @@ impl CliBackend {
     /// requiring user confirmation for tool usage.
     pub fn copilot_interactive() -> Self {
         Self {
-            command: "copilot".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("-p".to_string()),
+            command:       "copilot".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("-p".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -369,12 +371,12 @@ impl CliBackend {
     /// Copilot's native TUI to render.
     pub fn copilot_tui() -> Self {
         Self {
-            command: "copilot".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "copilot".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -384,12 +386,12 @@ impl CliBackend {
     /// positional argument after the subcommand.
     pub fn opencode() -> Self {
         Self {
-            command: "opencode".to_string(),
-            args: vec!["run".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "opencode".to_string(),
+            args:          vec!["run".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -400,12 +402,12 @@ impl CliBackend {
     /// this launches the interactive TUI and injects the prompt.
     pub fn opencode_interactive() -> Self {
         Self {
-            command: "opencode".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: Some("--prompt".to_string()),
+            command:       "opencode".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   Some("--prompt".to_string()),
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -415,17 +417,17 @@ impl CliBackend {
     /// Emits `PiStreamJson` output format for structured event parsing.
     pub fn pi() -> Self {
         Self {
-            command: "pi".to_string(),
-            args: vec![
+            command:       "pi".to_string(),
+            args:          vec![
                 "-p".to_string(),
                 "--mode".to_string(),
                 "json".to_string(),
                 "--no-session".to_string(),
             ],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::PiStreamJson,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -435,12 +437,12 @@ impl CliBackend {
     /// positional argument.
     pub fn pi_interactive() -> Self {
         Self {
-            command: "pi".to_string(),
-            args: vec!["--no-session".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "pi".to_string(),
+            args:          vec!["--no-session".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -451,12 +453,12 @@ impl CliBackend {
     /// `build_command()`).
     pub fn roo() -> Self {
         Self {
-            command: "roo".to_string(),
-            args: vec!["--print".to_string(), "--ephemeral".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "roo".to_string(),
+            args:          vec!["--print".to_string(), "--ephemeral".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -466,19 +468,20 @@ impl CliBackend {
     /// as a positional argument.
     pub fn roo_interactive() -> Self {
         Self {
-            command: "roo".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "roo".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
     /// Creates a custom backend from configuration.
     ///
     /// # Errors
-    /// Returns [`BackendError::CustomBackendRequiresCommand`] if no command is specified.
+    /// Returns [`BackendError::CustomBackendRequiresCommand`] if no command is
+    /// specified.
     pub fn custom(config: &AgentConfig) -> Result<Self> {
         let command = config
             .command
@@ -526,10 +529,7 @@ impl CliBackend {
     ///
     /// # Errors
     /// Returns error if the backend name is invalid.
-    pub fn from_name_with_args(
-        name: &str,
-        extra_args: &[String],
-    ) -> Result<Self> {
+    pub fn from_name_with_args(name: &str, extra_args: &[String]) -> Result<Self> {
         let mut backend = Self::from_name(name)?;
         backend.args.extend(extra_args.iter().cloned());
         if backend.command == "codex" {
@@ -544,7 +544,8 @@ impl CliBackend {
     /// session with an initial prompt.
     ///
     /// # Errors
-    /// Returns [`BackendError::UnknownBackend`] if the backend name is not recognized.
+    /// Returns [`BackendError::UnknownBackend`] if the backend name is not
+    /// recognized.
     pub fn for_interactive_prompt(backend_name: &str) -> Result<Self> {
         match backend_name {
             "claude" => Ok(Self::claude_interactive()),
@@ -569,12 +570,12 @@ impl CliBackend {
     /// Kiro's TUI while still passing an initial prompt.
     pub fn kiro_interactive() -> Self {
         Self {
-            command: "kiro-cli".to_string(),
-            args: vec!["chat".to_string(), "--trust-all-tools".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "kiro-cli".to_string(),
+            args:          vec!["chat".to_string(), "--trust-all-tools".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         }
     }
 
@@ -622,7 +623,8 @@ impl CliBackend {
             args = self.filter_args_for_interactive(args);
         }
 
-        // Handle prompt passing: Roo uses --prompt-file, all others use temp file for large prompts
+        // Handle prompt passing: Roo uses --prompt-file, all others use temp file for
+        // large prompts
         let (stdin_input, temp_file) = match self.prompt_mode {
             PromptMode::Arg => {
                 // Roo headless: always use --prompt-file for all prompts
@@ -633,16 +635,12 @@ impl CliBackend {
                         match NamedTempFile::new() {
                             Ok(mut file) => {
                                 if let Err(e) = file.write_all(prompt.as_bytes()) {
-                                    tracing::warn!(
-                                        "Failed to write prompt to temp file: {e}"
-                                    );
+                                    tracing::warn!("Failed to write prompt to temp file: {e}");
                                     (prompt.to_string(), None)
                                 } else {
                                     let path = file.path().display().to_string();
                                     (
-                                        format!(
-                                            "Please read and execute the task in {path}"
-                                        ),
+                                        format!("Please read and execute the task in {path}"),
                                         Some(file),
                                     )
                                 }

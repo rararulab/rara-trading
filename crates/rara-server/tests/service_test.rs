@@ -3,20 +3,21 @@
 //! Each test spins up a real tonic server on a random port, connects a real
 //! gRPC client, and exercises the actual RPC behaviour.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use rara_domain::event::{Event, EventType};
+use rara_event_bus::bus::EventBus;
+use rara_server::{
+    rara_proto::{
+        Empty, EventFilter, rara_service_client::RaraServiceClient,
+        rara_service_server::RaraServiceServer,
+    },
+    service::RaraServiceImpl,
+};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
 use tonic::transport::Server;
-
-use rara_domain::event::{Event, EventType};
-use rara_event_bus::bus::EventBus;
-use rara_server::rara_proto::rara_service_client::RaraServiceClient;
-use rara_server::rara_proto::rara_service_server::RaraServiceServer;
-use rara_server::rara_proto::{Empty, EventFilter};
-use rara_server::service::RaraServiceImpl;
 
 /// Start a real tonic gRPC server on a random port and return the endpoint URL.
 async fn start_test_server(service: RaraServiceImpl) -> String {
@@ -53,10 +54,7 @@ async fn get_system_status_returns_uptime() {
     let status = response.into_inner();
 
     // Uptime should be formatted as HH:MM:SS
-    assert!(
-        !status.uptime.is_empty(),
-        "uptime must be non-empty"
-    );
+    assert!(!status.uptime.is_empty(), "uptime must be non-empty");
     assert!(
         status.uptime.contains(':'),
         "uptime should be HH:MM:SS format, got: {}",
@@ -93,8 +91,12 @@ async fn stream_events_delivers_published_events() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Publish two events
-    let seq1 = bus.publish(&make_event(EventType::TradingOrderSubmitted, "test-1")).unwrap();
-    let seq2 = bus.publish(&make_event(EventType::ResearchHypothesisCreated, "test-2")).unwrap();
+    let seq1 = bus
+        .publish(&make_event(EventType::TradingOrderSubmitted, "test-1"))
+        .unwrap();
+    let seq2 = bus
+        .publish(&make_event(EventType::ResearchHypothesisCreated, "test-2"))
+        .unwrap();
 
     // Receive them in order
     let msg1 = tokio::time::timeout(Duration::from_secs(2), stream.next())
@@ -138,11 +140,15 @@ async fn stream_events_filters_by_topic() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Publish a trading event (should be filtered out) and a research event (should pass)
+    // Publish a trading event (should be filtered out) and a research event (should
+    // pass)
     bus.publish(&make_event(EventType::TradingOrderFilled, "trading-src"))
         .unwrap();
     let research_seq = bus
-        .publish(&make_event(EventType::ResearchExperimentCompleted, "research-src"))
+        .publish(&make_event(
+            EventType::ResearchExperimentCompleted,
+            "research-src",
+        ))
         .unwrap();
 
     // We should only receive the research event
@@ -159,7 +165,10 @@ async fn stream_events_filters_by_topic() {
     // Verify the trading event was filtered: publish another research event and
     // confirm it arrives next (proving trading event was skipped, not delayed).
     let seq2 = bus
-        .publish(&make_event(EventType::ResearchStrategyCandidate, "research-src-2"))
+        .publish(&make_event(
+            EventType::ResearchStrategyCandidate,
+            "research-src-2",
+        ))
         .unwrap();
 
     let msg2 = tokio::time::timeout(Duration::from_secs(2), stream.next())

@@ -3,9 +3,8 @@
 
 use std::path::Path;
 
-use tokio::sync::broadcast;
-
 use rara_domain::event::Event;
+use tokio::sync::broadcast;
 
 use crate::store::{EventStore, Result};
 
@@ -18,11 +17,12 @@ pub struct EventBus {
     /// Persistent backing store.
     store: EventStore,
     /// Broadcast sender for real-time sequence number notifications.
-    tx: broadcast::Sender<u64>,
+    tx:    broadcast::Sender<u64>,
 }
 
 impl EventBus {
-    /// Open (or create) an event bus backed by a sled database at the given path.
+    /// Open (or create) an event bus backed by a sled database at the given
+    /// path.
     pub fn open(path: &Path) -> Result<Self> {
         let store = EventStore::open(path)?;
         let (tx, _) = broadcast::channel(1024);
@@ -40,21 +40,16 @@ impl EventBus {
     }
 
     /// Subscribe to real-time sequence number notifications.
-    pub fn subscribe(&self) -> broadcast::Receiver<u64> {
-        self.tx.subscribe()
-    }
+    pub fn subscribe(&self) -> broadcast::Receiver<u64> { self.tx.subscribe() }
 
     /// Access the underlying store for catch-up reads and offset management.
-    pub const fn store(&self) -> &EventStore {
-        &self.store
-    }
+    pub const fn store(&self) -> &EventStore { &self.store }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use rara_domain::event::EventType;
+    use serde_json::json;
 
     use super::*;
 

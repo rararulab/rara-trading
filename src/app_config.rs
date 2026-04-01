@@ -13,11 +13,11 @@ static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
 #[serde(default)]
 pub struct AppConfig {
     /// Agent backend configuration.
-    pub agent: AgentConfig,
+    pub agent:    AgentConfig,
     /// Database configuration.
     pub database: DatabaseConfig,
     /// Trading engine configuration.
-    pub trading: TradingConfig,
+    pub trading:  TradingConfig,
     /// Research loop configuration.
     pub research: ResearchConfig,
     /// Feedback evaluation configuration.
@@ -25,7 +25,7 @@ pub struct AppConfig {
     /// Sentinel monitoring configuration.
     pub sentinel: SentinelConfig,
     /// gRPC server configuration.
-    pub server: ServerConfig,
+    pub server:   ServerConfig,
 }
 
 /// Database connection configuration.
@@ -49,9 +49,9 @@ impl Default for DatabaseConfig {
 #[serde(default)]
 pub struct TradingConfig {
     /// Maximum position size per contract.
-    pub max_position_size: f64,
+    pub max_position_size:        f64,
     /// Maximum total drawdown percentage before halting.
-    pub max_drawdown_pct: f64,
+    pub max_drawdown_pct:         f64,
     /// Maximum number of concurrent positions.
     pub max_concurrent_positions: u32,
 }
@@ -59,8 +59,8 @@ pub struct TradingConfig {
 impl Default for TradingConfig {
     fn default() -> Self {
         Self {
-            max_position_size: 1.0,
-            max_drawdown_pct: 5.0,
+            max_position_size:        1.0,
+            max_drawdown_pct:         5.0,
             max_concurrent_positions: 3,
         }
     }
@@ -71,22 +71,22 @@ impl Default for TradingConfig {
 #[serde(default)]
 pub struct ResearchConfig {
     /// Number of iterations per research run.
-    pub iterations: u32,
+    pub iterations:          u32,
     /// Timeframes to backtest against.
-    pub timeframes: Vec<String>,
+    pub timeframes:          Vec<String>,
     /// Maximum compile retries per hypothesis.
     pub max_compile_retries: u32,
     /// Delay in seconds between research cycles in daemon mode.
-    pub cycle_delay_secs: u64,
+    pub cycle_delay_secs:    u64,
 }
 
 impl Default for ResearchConfig {
     fn default() -> Self {
         Self {
-            iterations: 5,
-            timeframes: vec!["1h".to_string(), "4h".to_string(), "1d".to_string()],
+            iterations:          5,
+            timeframes:          vec!["1h".to_string(), "4h".to_string(), "1d".to_string()],
             max_compile_retries: 3,
-            cycle_delay_secs: 30,
+            cycle_delay_secs:    30,
         }
     }
 }
@@ -96,28 +96,29 @@ impl Default for ResearchConfig {
 #[serde(default)]
 pub struct FeedbackConfig {
     /// Minimum Sharpe ratio for promotion.
-    pub min_sharpe_for_promotion: f64,
+    pub min_sharpe_for_promotion:    f64,
     /// Minimum win rate for promotion.
-    pub min_win_rate: f64,
+    pub min_win_rate:                f64,
     /// Minimum trade count before evaluation.
-    pub min_trades: u32,
+    pub min_trades:                  u32,
     /// Maximum drawdown percentage for retirement.
     pub max_drawdown_for_retirement: f64,
     /// Interval in seconds between feedback evaluation ticks.
-    pub eval_interval_secs: u64,
-    /// Minimum new trades since last evaluation before re-evaluating a strategy.
-    pub min_trades_between_evals: u32,
+    pub eval_interval_secs:          u64,
+    /// Minimum new trades since last evaluation before re-evaluating a
+    /// strategy.
+    pub min_trades_between_evals:    u32,
 }
 
 impl Default for FeedbackConfig {
     fn default() -> Self {
         Self {
-            min_sharpe_for_promotion: 1.0,
-            min_win_rate: 0.45,
-            min_trades: 30,
+            min_sharpe_for_promotion:    1.0,
+            min_win_rate:                0.45,
+            min_trades:                  30,
             max_drawdown_for_retirement: 20.0,
-            eval_interval_secs: 3600,
-            min_trades_between_evals: 100,
+            eval_interval_secs:          3600,
+            min_trades_between_evals:    100,
         }
     }
 }
@@ -127,15 +128,15 @@ impl Default for FeedbackConfig {
 #[serde(default)]
 pub struct SentinelConfig {
     /// Whether sentinel monitoring is enabled.
-    pub enabled: bool,
+    pub enabled:             bool,
     /// Interval in seconds between sentinel poll cycles.
     pub check_interval_secs: u64,
     /// RSS/Atom feed URLs to monitor for market-moving news.
-    pub rss_feeds: Vec<RssFeedEntry>,
+    pub rss_feeds:           Vec<RssFeedEntry>,
     /// Whether the trump-code political signal source is enabled.
-    pub trump_code_enabled: bool,
+    pub trump_code_enabled:  bool,
     /// Base URL of the trump-code API service.
-    pub trump_code_url: String,
+    pub trump_code_url:      String,
 }
 
 /// A single RSS/Atom feed entry for sentinel monitoring.
@@ -144,17 +145,17 @@ pub struct RssFeedEntry {
     /// Human-readable name for this feed.
     pub name: String,
     /// URL of the RSS/Atom feed.
-    pub url: String,
+    pub url:  String,
 }
 
 impl Default for SentinelConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled:             false,
             check_interval_secs: 30,
-            rss_feeds: Vec::new(),
-            trump_code_enabled: false,
-            trump_code_url: "https://trumpcode.washinmura.jp".to_string(),
+            rss_feeds:           Vec::new(),
+            trump_code_enabled:  false,
+            trump_code_url:      "https://trumpcode.washinmura.jp".to_string(),
         }
     }
 }
@@ -166,14 +167,14 @@ pub struct ServerConfig {
     /// gRPC server listen address.
     pub listen_addr: String,
     /// gRPC server port.
-    pub port: u16,
+    pub port:        u16,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             listen_addr: "127.0.0.1".to_string(),
-            port: 50051,
+            port:        50051,
         }
     }
 }
@@ -219,7 +220,8 @@ fn apply_env_overrides(cfg: &mut AppConfig) {
     {
         cfg.server.port = port;
     }
-    // RARA_BROKER removed — broker is now configured per-account in accounts.toml
+    // RARA_BROKER removed — broker is now configured per-account in
+    // accounts.toml
 }
 
 /// Save config to TOML file.

@@ -9,31 +9,28 @@ use crate::source::{DataSource, RawSignal, SourceError};
 /// Useful for webhook endpoints or API-push integrations.
 pub struct WebhookDataSource {
     /// Human-readable name for this source.
-    name: String,
+    name:   String,
     /// Internal buffer of signals waiting to be drained.
     buffer: Mutex<Vec<RawSignal>>,
 }
 
 impl WebhookDataSource {
-    /// Create a new webhook data source with the given name and an empty buffer.
+    /// Create a new webhook data source with the given name and an empty
+    /// buffer.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            name:   name.into(),
             buffer: Mutex::new(Vec::new()),
         }
     }
 
     /// Push a raw signal into the internal buffer for the next poll cycle.
-    pub async fn push(&self, signal: RawSignal) {
-        self.buffer.lock().await.push(signal);
-    }
+    pub async fn push(&self, signal: RawSignal) { self.buffer.lock().await.push(signal); }
 }
 
 #[async_trait]
 impl DataSource for WebhookDataSource {
-    fn name(&self) -> &str {
-        &self.name
-    }
+    fn name(&self) -> &str { &self.name }
 
     async fn poll(&self) -> Result<Vec<RawSignal>, SourceError> {
         let drained = self.buffer.lock().await.drain(..).collect();

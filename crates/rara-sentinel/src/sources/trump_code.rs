@@ -12,22 +12,22 @@ use crate::source::{DataSource, RawSignal, SourceError};
 #[derive(Debug, Deserialize)]
 pub struct SignalsResponse {
     /// Date string for the current analysis window.
-    pub date: String,
+    pub date:              String,
     /// Active signal types detected today.
-    pub signals: Vec<String>,
+    pub signals:           Vec<String>,
     /// Number of posts analyzed.
-    pub posts: u32,
+    pub posts:             u32,
     /// Overall market consensus derived from signals.
-    pub consensus: String,
+    pub consensus:         String,
     /// Per-day signal breakdown keyed by date string.
-    pub recent_days: HashMap<String, Vec<DaySignal>>,
+    pub recent_days:       HashMap<String, Vec<DaySignal>>,
     /// Confidence scores per signal type (0.0–1.0).
     pub signal_confidence: HashMap<String, f64>,
     /// Playbook summary with notable patterns.
-    pub playbook_summary: PlaybookSummary,
+    pub playbook_summary:  PlaybookSummary,
     /// Optional long-form insight from Opus analysis.
     #[serde(default)]
-    pub opus_insight: String,
+    pub opus_insight:      String,
 }
 
 /// A single signal type and its occurrence count for a given day.
@@ -37,16 +37,16 @@ pub struct DaySignal {
     #[serde(rename = "type")]
     pub signal_type: String,
     /// How many times this signal was detected.
-    pub count: u32,
+    pub count:       u32,
 }
 
 /// Notable pattern summaries from the playbook analysis.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlaybookSummary {
     /// The most dangerous signal pattern observed.
-    pub most_dangerous: String,
+    pub most_dangerous:   String,
     /// The most profitable signal pattern observed.
-    pub most_profitable: String,
+    pub most_profitable:  String,
     /// The biggest surprise in the data.
     pub biggest_surprise: String,
 }
@@ -55,19 +55,19 @@ pub struct PlaybookSummary {
 #[derive(Debug, Serialize)]
 pub struct TrumpCodeMetadata<'a> {
     /// Date of the signal day.
-    pub date: &'a str,
+    pub date:              &'a str,
     /// Overall directional consensus.
-    pub consensus: &'a str,
+    pub consensus:         &'a str,
     /// Number of posts analyzed today.
-    pub posts_today: u32,
+    pub posts_today:       u32,
     /// Per-signal-type confidence scores.
     pub signal_confidence: &'a HashMap<String, f64>,
     /// Playbook pattern summaries.
-    pub playbook: &'a PlaybookSummary,
+    pub playbook:          &'a PlaybookSummary,
     /// Claude Opus deep analysis insight.
-    pub opus_insight: &'a str,
+    pub opus_insight:      &'a str,
     /// Individual signal observations for this day.
-    pub day_signals: &'a [DaySignal],
+    pub day_signals:       &'a [DaySignal],
 }
 
 impl SignalsResponse {
@@ -108,17 +108,17 @@ impl SignalsResponse {
                 );
 
                 let metadata = TrumpCodeMetadata {
-                    date: &date,
-                    consensus: &consensus,
-                    posts_today: posts,
+                    date:              &date,
+                    consensus:         &consensus,
+                    posts_today:       posts,
                     signal_confidence: &signal_confidence,
-                    playbook: &playbook,
-                    opus_insight: &opus_insight,
-                    day_signals: &day_signals,
+                    playbook:          &playbook,
+                    opus_insight:      &opus_insight,
+                    day_signals:       &day_signals,
                 };
 
-                let metadata = serde_json::to_value(&metadata)
-                    .expect("TrumpCodeMetadata must serialize");
+                let metadata =
+                    serde_json::to_value(&metadata).expect("TrumpCodeMetadata must serialize");
 
                 RawSignal {
                     source_name: "trump-code".to_owned(),
@@ -138,15 +138,13 @@ pub struct TrumpCodeDataSource {
     #[builder(default = "https://trumpcode.washinmura.jp".to_owned())]
     pub base_url: String,
     /// HTTP client for API requests.
-    pub client: reqwest::Client,
+    pub client:   reqwest::Client,
 }
 
 #[async_trait]
 impl DataSource for TrumpCodeDataSource {
     #[allow(clippy::unnecessary_literal_bound)]
-    fn name(&self) -> &str {
-        "trump-code"
-    }
+    fn name(&self) -> &str { "trump-code" }
 
     async fn poll(&self) -> Result<Vec<RawSignal>, SourceError> {
         let url = format!("{}/api/signals", self.base_url);

@@ -3,29 +3,28 @@
 //! Handles crossterm input events, periodic status polling via gRPC, and
 //! terminal setup/teardown.
 
-use std::io;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{io, path::PathBuf, time::Duration};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
+use rara_server::rara_proto::{Empty, rara_service_client::RaraServiceClient};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use snafu::ResultExt;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
-use rara_server::rara_proto::rara_service_client::RaraServiceClient;
-use rara_server::rara_proto::Empty;
-
-use crate::app::{App, AppPhase, ConnectionStatus, EventFilter, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_RESEARCH, TRADING_TAB};
-use crate::error::{IoSnafu, Result};
-use crate::server_process::ServerProcess;
-use crate::tabs;
-use crate::ui;
+use crate::{
+    app::{
+        App, AppPhase, ConnectionStatus, EVENTS_TAB_INDEX, EventFilter, STRATEGIES_TAB,
+        TAB_RESEARCH, TRADING_TAB,
+    },
+    error::{IoSnafu, Result},
+    server_process::ServerProcess,
+    tabs, ui,
+};
 
 /// Duration between status poll ticks.
 const TICK_RATE: Duration = Duration::from_millis(1000);
@@ -91,7 +90,8 @@ pub async fn run(server_addr: Option<&str>, promoted_dir: PathBuf) -> Result<()>
 ///
 /// During the startup phase, only quit keys are accepted and the loop
 /// periodically attempts to connect to the gRPC server with a health check.
-/// Once the server is confirmed ready, transitions to the normal dashboard phase.
+/// Once the server is confirmed ready, transitions to the normal dashboard
+/// phase.
 async fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -100,7 +100,9 @@ async fn event_loop(
 ) -> Result<()> {
     while app.running {
         // Render
-        terminal.draw(|frame| ui::render(frame, app)).context(IoSnafu)?;
+        terminal
+            .draw(|frame| ui::render(frame, app))
+            .context(IoSnafu)?;
 
         // Poll crossterm events (non-blocking with timeout)
         if event::poll(POLL_TIMEOUT).context(IoSnafu)?
@@ -127,12 +129,15 @@ async fn event_loop(
                 warn!("gRPC server did not become ready after {attempts} attempts, giving up");
                 app.phase = AppPhase::StartingServer {
                     message: format!(
-                        "Server failed to start after {MAX_STARTUP_ATTEMPTS} attempts. Press q to quit."
+                        "Server failed to start after {MAX_STARTUP_ATTEMPTS} attempts. Press q to \
+                         quit."
                     ),
                     attempts,
                 };
                 // Render one final frame, then just handle quit keys
-                terminal.draw(|frame| ui::render(frame, app)).context(IoSnafu)?;
+                terminal
+                    .draw(|frame| ui::render(frame, app))
+                    .context(IoSnafu)?;
                 loop {
                     if event::poll(POLL_TIMEOUT).context(IoSnafu)?
                         && let Event::Key(key) = event::read().context(IoSnafu)?
@@ -157,13 +162,13 @@ async fn event_loop(
                         *client = Some(c);
                     } else {
                         app.phase = AppPhase::StartingServer {
-                            message: "Server connected, waiting for ready...".to_string(),
+                            message:  "Server connected, waiting for ready...".to_string(),
                             attempts: attempts + 1,
                         };
                     }
                 } else {
                     app.phase = AppPhase::StartingServer {
-                        message: "Connecting to gRPC server...".to_string(),
+                        message:  "Connecting to gRPC server...".to_string(),
                         attempts: attempts + 1,
                     };
                 }
@@ -343,10 +348,7 @@ fn handle_strategies_key(app: &mut App, key: KeyCode) {
 }
 
 /// Poll the gRPC server for system status, handling reconnection on failure.
-async fn poll_status(
-    app: &mut App,
-    client: &mut Option<RaraServiceClient<Channel>>,
-) -> Result<()> {
+async fn poll_status(app: &mut App, client: &mut Option<RaraServiceClient<Channel>>) -> Result<()> {
     if let Some(c) = client.as_mut() {
         match c.get_system_status(Empty {}).await {
             Ok(response) => {

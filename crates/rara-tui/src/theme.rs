@@ -37,60 +37,40 @@ pub const IRIS: Color = Color::Rgb(196, 167, 231);
 
 /// Style for positive indicators (connected, `PnL`+, promoted).
 #[must_use]
-pub fn positive() -> Style {
-    Style::default().fg(FOAM)
-}
+pub fn positive() -> Style { Style::default().fg(FOAM) }
 
 /// Style for negative indicators (disconnected, `PnL`-, demoted).
 #[must_use]
-pub fn negative() -> Style {
-    Style::default().fg(LOVE)
-}
+pub fn negative() -> Style { Style::default().fg(LOVE) }
 
 /// Style for warning indicators (reconnecting, hold).
 #[must_use]
-pub fn warning() -> Style {
-    Style::default().fg(GOLD)
-}
+pub fn warning() -> Style { Style::default().fg(GOLD) }
 
 /// Style for informational elements (links, IDs).
 #[must_use]
-pub fn info() -> Style {
-    Style::default().fg(PINE)
-}
+pub fn info() -> Style { Style::default().fg(PINE) }
 
 /// Style for primary text.
 #[must_use]
-pub fn text() -> Style {
-    Style::default().fg(TEXT)
-}
+pub fn text() -> Style { Style::default().fg(TEXT) }
 
 /// Style for muted/secondary text.
 #[must_use]
-pub fn muted() -> Style {
-    Style::default().fg(MUTED)
-}
+pub fn muted() -> Style { Style::default().fg(MUTED) }
 
 /// Style for emphasized/active elements (selected tab, title).
 #[must_use]
-pub fn emphasis() -> Style {
-    Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
-}
+pub fn emphasis() -> Style { Style::default().fg(TEXT).add_modifier(Modifier::BOLD) }
 
 /// Style for highlighted elements.
 #[must_use]
-pub fn highlight() -> Style {
-    Style::default().fg(ROSE)
-}
+pub fn highlight() -> Style { Style::default().fg(ROSE) }
 
 /// Style for the status bar background.
 #[must_use]
-pub fn status_bar_bg() -> Style {
-    Style::default().bg(SURFACE).fg(TEXT)
-}
+pub fn status_bar_bg() -> Style { Style::default().bg(SURFACE).fg(TEXT) }
 
 /// Style for the footer/help bar.
 #[must_use]
-pub fn footer() -> Style {
-    Style::default().bg(SURFACE).fg(SUBTLE)
-}
+pub fn footer() -> Style { Style::default().bg(SURFACE).fg(SUBTLE) }

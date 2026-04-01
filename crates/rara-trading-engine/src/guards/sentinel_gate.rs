@@ -3,12 +3,11 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
+use rara_domain::trading::TradingCommit;
 use tokio::sync::RwLock;
 
-use rara_domain::trading::TradingCommit;
-use crate::broker::AccountInfo;
-
 use super::{Guard, GuardResult};
+use crate::broker::AccountInfo;
 
 /// Rejects commits targeting contracts that have been blocked due to critical
 /// sentinel signals.
@@ -40,16 +39,12 @@ impl SentinelGate {
 }
 
 impl Default for SentinelGate {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[async_trait]
 impl Guard for SentinelGate {
-    fn name(&self) -> &'static str {
-        "SentinelGate"
-    }
+    fn name(&self) -> &'static str { "SentinelGate" }
 
     async fn check(&self, commit: &TradingCommit, _account: &AccountInfo) -> GuardResult {
         let blocked = self.blocked.read().await;

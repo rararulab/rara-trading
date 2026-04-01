@@ -11,11 +11,11 @@ use super::binance_ws::{BinanceWsClient, RawKline, WsError};
 #[derive(Debug, Clone)]
 pub struct ReconnectConfig {
     /// Initial backoff delay after first failure.
-    pub initial_delay: Duration,
+    pub initial_delay:             Duration,
     /// Maximum backoff delay cap.
-    pub max_delay: Duration,
+    pub max_delay:                 Duration,
     /// Backoff multiplier applied after each consecutive failure.
-    pub multiplier: f64,
+    pub multiplier:                f64,
     /// Number of consecutive failures before logging an alert.
     pub max_failures_before_alert: u32,
 }
@@ -23,9 +23,9 @@ pub struct ReconnectConfig {
 impl Default for ReconnectConfig {
     fn default() -> Self {
         Self {
-            initial_delay: Duration::from_secs(1),
-            max_delay: Duration::from_secs(60),
-            multiplier: 2.0,
+            initial_delay:             Duration::from_secs(1),
+            max_delay:                 Duration::from_secs(60),
+            multiplier:                2.0,
             max_failures_before_alert: 10,
         }
     }
@@ -50,7 +50,7 @@ pub struct ReconnectingWsClient {
     /// Reconnection configuration.
     pub config: ReconnectConfig,
     /// Broadcast sender for klines -- survives reconnects.
-    sender: broadcast::Sender<RawKline>,
+    sender:     broadcast::Sender<RawKline>,
 }
 
 impl ReconnectingWsClient {
@@ -65,9 +65,7 @@ impl ReconnectingWsClient {
     }
 
     /// Subscribe to receive klines. The returned receiver survives reconnects.
-    pub fn subscribe(&self) -> broadcast::Receiver<RawKline> {
-        self.sender.subscribe()
-    }
+    pub fn subscribe(&self) -> broadcast::Receiver<RawKline> { self.sender.subscribe() }
 
     /// Run the reconnecting stream loop for the given subscriptions.
     ///

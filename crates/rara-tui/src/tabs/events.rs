@@ -3,14 +3,18 @@
 //! Displays system events in a `tail -f` style view with topic-based color
 //! coding, pause/resume auto-scroll, keyboard navigation, and text search.
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
-use ratatui::Frame;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
+};
 
-use crate::app::{EventFilter, EventsState};
-use crate::theme;
+use crate::{
+    app::{EventFilter, EventsState},
+    theme,
+};
 
 /// Map a topic string to its display color.
 fn topic_color(topic: &str) -> ratatui::style::Color {
@@ -187,9 +191,9 @@ pub fn render(frame: &mut Frame, state: &EventsState, area: Rect) {
     let detail_height = if state.detail_expanded { 10 } else { 0 };
 
     let chunks = Layout::vertical([
-        Constraint::Length(1),                    // filter bar
-        Constraint::Min(5),                       // event list
-        Constraint::Length(detail_height),         // detail pane
+        Constraint::Length(1),             // filter bar
+        Constraint::Min(5),                // event list
+        Constraint::Length(detail_height), // detail pane
     ])
     .split(area);
 
@@ -202,6 +206,4 @@ pub fn render(frame: &mut Frame, state: &EventsState, area: Rect) {
 }
 
 /// Count of events matching current filters (used for navigation bounds).
-pub fn filtered_count(state: &EventsState) -> usize {
-    filtered_events(state).len()
-}
+pub fn filtered_count(state: &EventsState) -> usize { filtered_events(state).len() }

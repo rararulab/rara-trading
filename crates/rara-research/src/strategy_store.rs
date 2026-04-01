@@ -1,14 +1,14 @@
 //! Sled-backed persistence for research strategies.
 //!
 //! Stores [`ResearchStrategy`] metadata in sled and compiled artifacts
-//! on the filesystem. Provides CRUD operations for strategy lifecycle management.
+//! on the filesystem. Provides CRUD operations for strategy lifecycle
+//! management.
 
 use std::path::{Path, PathBuf};
 
+use rara_domain::research::{ResearchStrategy, ResearchStrategyStatus};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
-
-use rara_domain::research::{ResearchStrategy, ResearchStrategyStatus};
 
 /// Errors from strategy store operations.
 #[derive(Debug, Snafu)]
@@ -37,7 +37,7 @@ pub type Result<T> = std::result::Result<T, StrategyStoreError>;
 /// Sled-backed store for research strategy metadata and artifacts.
 pub struct StrategyStore {
     /// sled tree for strategy metadata (id -> JSON).
-    strategies: sled::Tree,
+    strategies:   sled::Tree,
     /// Filesystem directory for compiled artifacts.
     artifact_dir: PathBuf,
 }
@@ -102,7 +102,10 @@ impl StrategyStore {
     }
 
     /// List all strategies, optionally filtered by status.
-    pub fn list(&self, status_filter: Option<ResearchStrategyStatus>) -> Result<Vec<ResearchStrategy>> {
+    pub fn list(
+        &self,
+        status_filter: Option<ResearchStrategyStatus>,
+    ) -> Result<Vec<ResearchStrategy>> {
         self.strategies
             .iter()
             .map(|item| {

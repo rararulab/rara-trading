@@ -31,7 +31,7 @@ pub struct Contract {
     pub exchange: String,
     /// Exchange-native symbol, e.g. `"BTCUSDT"`.
     #[builder(into)]
-    pub symbol: String,
+    pub symbol:   String,
     /// Security type classification.
     pub sec_type: SecType,
     /// Quote currency code, e.g. `"USDT"`.
@@ -41,7 +41,5 @@ pub struct Contract {
 
 impl Contract {
     /// Returns a unique identifier in the format `"{exchange}-{symbol}"`.
-    pub fn id(&self) -> String {
-        format!("{}-{}", self.exchange, self.symbol)
-    }
+    pub fn id(&self) -> String { format!("{}-{}", self.exchange, self.symbol) }
 }

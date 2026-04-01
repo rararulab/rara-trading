@@ -3,16 +3,15 @@
 //! Covers the stage → commit → push pipeline, reject workflow,
 //! health tracking, and `AccountManager` multi-account aggregation.
 
+use rara_domain::{
+    contract::{Contract, SecType},
+    trading::{Side, operation::OperationOrderType},
+};
+use rara_trading_engine::{
+    brokers::paper::PaperBroker, health::BrokerHealth, uta::UnifiedTradingAccount,
+};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-
-use rara_domain::contract::{Contract, SecType};
-use rara_domain::trading::operation::OperationOrderType;
-use rara_domain::trading::Side;
-
-use rara_trading_engine::brokers::paper::PaperBroker;
-use rara_trading_engine::health::BrokerHealth;
-use rara_trading_engine::uta::UnifiedTradingAccount;
 
 fn btc_contract() -> Contract {
     Contract::builder()
@@ -92,7 +91,10 @@ async fn full_lifecycle_stage_commit_push_log() {
     assert!(log[0].message.contains("buy BTC + ETH"));
 
     // Show by hash should return the same commit
-    let shown = uta.show(&push.hash).await.expect("commit should be retrievable by hash");
+    let shown = uta
+        .show(&push.hash)
+        .await
+        .expect("commit should be retrievable by hash");
     assert_eq!(shown.operations.len(), 2);
 
     // Export should contain 1 commit
@@ -117,7 +119,9 @@ async fn account_manager_multi_account() {
     assert_eq!(manager.size(), 2);
 
     // resolve_one should find by id
-    let found = manager.resolve_one("acct-btc").expect("should find acct-btc");
+    let found = manager
+        .resolve_one("acct-btc")
+        .expect("should find acct-btc");
     assert_eq!(found.id, "acct-btc");
 
     // resolve_one should fail on unknown
@@ -149,15 +153,27 @@ async fn reject_workflow() {
 
     // Commit but reject instead of pushing
     uta.commit("risky trade").await.expect("should commit");
-    let reject = uta.reject("risk limit exceeded").await.expect("reject should succeed");
+    let reject = uta
+        .reject("risk limit exceeded")
+        .await
+        .expect("reject should succeed");
 
     assert_eq!(reject.operation_count, 1);
-    assert!(reject.message.contains("REJECTED"), "message should indicate rejection");
-    assert!(reject.message.contains("risk limit exceeded"), "message should include reason");
+    assert!(
+        reject.message.contains("REJECTED"),
+        "message should indicate rejection"
+    );
+    assert!(
+        reject.message.contains("risk limit exceeded"),
+        "message should include reason"
+    );
 
     // Verify no positions were opened on the broker
     let positions = uta.get_positions().await.expect("should get positions");
-    assert!(positions.is_empty(), "rejected orders must not create positions");
+    assert!(
+        positions.is_empty(),
+        "rejected orders must not create positions"
+    );
 
     // Log should show 1 commit with UserRejected status
     let log = uta.log(10, None).await;
@@ -181,7 +197,10 @@ async fn health_tracking_with_broker() {
     assert!(!uta.is_disabled().await);
 
     // Successful broker query should keep it healthy
-    let _account = uta.get_account().await.expect("account_info should succeed");
+    let _account = uta
+        .get_account()
+        .await
+        .expect("account_info should succeed");
     assert_eq!(uta.health().await, BrokerHealth::Healthy);
 
     // A full stage-commit-push cycle also keeps health healthy
@@ -199,5 +218,8 @@ async fn health_tracking_with_broker() {
     let info = uta.health_info().await;
     assert_eq!(info.status, BrokerHealth::Healthy);
     assert_eq!(info.consecutive_failures, 0);
-    assert!(info.last_success_at.is_some(), "should have recorded a success timestamp");
+    assert!(
+        info.last_success_at.is_some(),
+        "should have recorded a success timestamp"
+    );
 }
