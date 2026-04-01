@@ -1,7 +1,7 @@
 //! Signal generation loop — connects candle stream to strategy execution.
 //!
 //! Receives [`AggregatedCandle`]s from a broadcast channel, feeds them to every
-//! loaded WASM strategy, converts resulting [`Signal`]s into
+//! loaded WASM strategy, converts resulting [`StrategyOutput`]s into
 //! [`TradingCommit`]s, and executes them through the [`TradingEngine`].
 
 use std::sync::Arc;
@@ -9,12 +9,15 @@ use std::sync::Arc;
 use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
 use rara_market_data::stream::aggregator::AggregatedCandle;
 use rara_research::strategy_executor::StrategyHandle;
-use rara_strategy_api::{Candle, Signal};
 use rust_decimal::Decimal;
 use snafu::Snafu;
+use strategy_api::{Candle, StrategyOutput};
 use tokio::sync::broadcast;
 
 use crate::engine::TradingEngine;
+
+/// Score threshold below which the strategy output is treated as "hold".
+const SCORE_THRESHOLD: f64 = 0.1;
 
 /// Errors from the signal processing loop.
 #[derive(Debug, Snafu)]
@@ -43,7 +46,7 @@ pub type Result<T> = std::result::Result<T, SignalLoopError>;
 /// A loaded strategy ready for live signal generation.
 ///
 /// Wraps a [`StrategyHandle`] with the metadata needed to construct
-/// [`TradingCommit`]s from its signals.
+/// [`TradingCommit`]s from its outputs.
 pub struct LoadedStrategy {
     /// Strategy name (from WASM metadata).
     pub name:          String,
@@ -57,38 +60,33 @@ pub struct LoadedStrategy {
     pub handle:        Box<dyn StrategyHandle>,
 }
 
-/// Convert a strategy [`Signal`] into a list of [`StagedAction`]s.
+/// Convert a [`StrategyOutput`] into a list of [`StagedAction`]s.
 ///
-/// Returns an empty vec for [`Signal::Hold`], which means "do nothing".
-fn signal_to_actions(signal: &Signal, strategy: &LoadedStrategy) -> Vec<StagedAction> {
-    match signal {
-        Signal::Entry { side, .. } => {
-            let domain_side = match side {
-                rara_strategy_api::Side::Long => Side::Buy,
-                rara_strategy_api::Side::Short => Side::Sell,
-            };
-            vec![
-                StagedAction::builder()
-                    .action_type(ActionType::PlaceOrder)
-                    .contract_id(&strategy.contract_id)
-                    .side(domain_side)
-                    .quantity(strategy.position_size)
-                    .order_type(OrderType::Market)
-                    .build(),
-            ]
-        }
-        Signal::Exit => {
-            vec![
-                StagedAction::builder()
-                    .action_type(ActionType::ClosePosition)
-                    .contract_id(&strategy.contract_id)
-                    .side(Side::Sell)
-                    .quantity(strategy.position_size)
-                    .order_type(OrderType::Market)
-                    .build(),
-            ]
-        }
-        Signal::Hold => vec![],
+/// Uses the directional score to determine side: positive = Buy, negative =
+/// Sell. Scores within the threshold are treated as "hold" (empty actions).
+fn output_to_actions(output: &StrategyOutput, strategy: &LoadedStrategy) -> Vec<StagedAction> {
+    if output.score > SCORE_THRESHOLD {
+        vec![
+            StagedAction::builder()
+                .action_type(ActionType::PlaceOrder)
+                .contract_id(&strategy.contract_id)
+                .side(Side::Buy)
+                .quantity(strategy.position_size)
+                .order_type(OrderType::Market)
+                .build(),
+        ]
+    } else if output.score < -SCORE_THRESHOLD {
+        vec![
+            StagedAction::builder()
+                .action_type(ActionType::PlaceOrder)
+                .contract_id(&strategy.contract_id)
+                .side(Side::Sell)
+                .quantity(strategy.position_size)
+                .order_type(OrderType::Market)
+                .build(),
+        ]
+    } else {
+        vec![]
     }
 }
 
@@ -147,8 +145,8 @@ async fn process_candle(
             continue;
         }
 
-        let signal = match strategy.handle.on_candles(std::slice::from_ref(api_candle)) {
-            Ok(sig) => sig,
+        let output = match strategy.handle.on_candles(std::slice::from_ref(api_candle)) {
+            Ok(out) => out,
             Err(e) => {
                 tracing::error!(
                     strategy = strategy.name,
@@ -159,7 +157,7 @@ async fn process_candle(
             }
         };
 
-        let actions = signal_to_actions(&signal, strategy);
+        let actions = output_to_actions(&output, strategy);
         if actions.is_empty() {
             continue;
         }
@@ -167,7 +165,7 @@ async fn process_candle(
         tracing::info!(
             strategy = strategy.name,
             symbol = candle.symbol,
-            signal = ?signal,
+            score = output.score,
             action_count = actions.len(),
             "signal generated"
         );

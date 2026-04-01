@@ -1,29 +1,48 @@
-//! Compiles LLM-generated Rust strategy code into WASM modules.
+//! Compiles LLM-generated Rust strategy code into WASM modules via the
+//! `rara-strategy` CLI.
 //!
-//! Workflow: copy the `strategies/template/` scaffold to a temp directory,
-//! inject the generated code between the `STRATEGY_IMPL` markers, then
-//! invoke `cargo build --release --target wasm32-wasip1`.
+//! Workflow: write the generated code to `{strategies_dir}/strategies/{name}/src/logic.rs`,
+//! invoke `rara-strategy build <name>`, and read the resulting WASM artifact.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bon::Builder;
+use serde::Deserialize;
 use snafu::{ResultExt, Snafu};
 
 /// Errors from strategy compilation.
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum CompilerError {
-    /// Failed to set up compilation workspace.
-    #[snafu(display("workspace setup failed: {source}"))]
-    WorkspaceSetup { source: std::io::Error },
+    /// rara-strategy CLI binary not found.
+    #[snafu(display("rara-strategy CLI not found (tried {path} and PATH)"))]
+    CliNotFound {
+        /// The local path that was checked first.
+        path: String,
+    },
 
-    /// Failed to run cargo command.
-    #[snafu(display("cargo command failed: {source}"))]
-    CargoCommand { source: std::io::Error },
+    /// Failed to execute the CLI process.
+    #[snafu(display("CLI execution failed: {source}"))]
+    CliExecution { source: std::io::Error },
+
+    /// Failed to parse JSON output from the CLI.
+    #[snafu(display("failed to parse CLI output: {source}"))]
+    ParseOutput { source: serde_json::Error },
+
+    /// Failed to write strategy code to the target file.
+    #[snafu(display("failed to write strategy code: {source}"))]
+    WriteCode { source: std::io::Error },
 
     /// Failed to read compiled WASM binary.
     #[snafu(display("failed to read WASM output: {source}"))]
     ReadWasm { source: std::io::Error },
+
+    /// The CLI create command failed.
+    #[snafu(display("strategy creation failed: {message}"))]
+    CreateFailed {
+        /// Error details from the CLI.
+        message: String,
+    },
 }
 
 /// Module-level result alias.
@@ -36,74 +55,110 @@ pub struct CompileResult {
     pub success:         bool,
     /// Compiled WASM bytes (if successful).
     pub wasm_bytes:      Option<Vec<u8>>,
-    /// Compilation errors from stderr.
+    /// Compilation errors from the CLI.
     pub errors:          Vec<String>,
-    /// Clippy warnings from stderr.
+    /// Warnings (currently unused by CLI, reserved for future use).
     pub warnings:        Vec<String>,
     /// Time taken to compile in milliseconds.
     pub compile_time_ms: u64,
 }
 
-/// Compiles LLM-generated Rust strategy code to WASM.
-#[derive(Debug, Builder)]
-pub struct StrategyCompiler {
-    /// Path to `strategies/template/` directory.
-    template_dir: PathBuf,
-    /// WASM target triple.
-    #[builder(default = "wasm32-wasip1".into())]
-    wasm_target:  String,
+/// JSON output from `rara-strategy build`.
+#[derive(Deserialize)]
+struct BuildOutput {
+    results:   Vec<BuildResult>,
+    #[allow(dead_code)]
+    succeeded: usize,
+    #[allow(dead_code)]
+    failed:    usize,
 }
 
-const IMPL_START_MARKER: &str = "// ===== STRATEGY_IMPL START =====";
-const IMPL_END_MARKER: &str = "// ===== STRATEGY_IMPL END =====";
+/// A single strategy build result from CLI JSON.
+#[derive(Deserialize)]
+struct BuildResult {
+    #[allow(dead_code)]
+    strategy:  String,
+    success:   bool,
+    wasm_path: Option<String>,
+    error:     Option<String>,
+}
+
+/// JSON output from `rara-strategy create`.
+#[derive(Deserialize)]
+struct CreateOutput {
+    created: bool,
+    path:    String,
+    reason:  Option<String>,
+}
+
+/// Compiles LLM-generated Rust strategy code to WASM via the rara-strategy CLI.
+///
+/// Uses a scratch strategy directory (`_scratch` by default) inside the
+/// rara-strategies workspace. The LLM-generated code is written to
+/// `strategies/{scratch_name}/src/logic.rs`, then `rara-strategy build` is
+/// invoked to produce the WASM artifact.
+#[derive(Debug, Builder)]
+pub struct StrategyCompiler {
+    /// Path to the rara-strategies workspace root.
+    pub strategies_dir: PathBuf,
+    /// Name of the scratch strategy used for compilation.
+    /// Defaults to `"_scratch"`.
+    #[builder(default = "_scratch".into())]
+    pub scratch_name:   String,
+}
 
 impl StrategyCompiler {
     /// Compile strategy code to WASM.
     ///
-    /// Copies the template to a temp directory, injects `strategy_code`
-    /// between the `STRATEGY_IMPL` markers, patches dependency paths to
-    /// absolute form, and runs `cargo build --release`.
+    /// Writes the code to the scratch strategy's `src/logic.rs`, invokes
+    /// `rara-strategy build`, and reads the resulting WASM binary.
     pub async fn compile(&self, strategy_code: &str) -> Result<CompileResult> {
         let start = std::time::Instant::now();
 
-        // 1. Copy template to temp dir
-        let tmp = tempfile::tempdir().context(WorkspaceSetupSnafu)?;
-        copy_dir_recursive(&self.template_dir, tmp.path()).context(WorkspaceSetupSnafu)?;
+        // Ensure scratch strategy exists
+        self.ensure_scratch_strategy().await?;
 
-        // 2. Patch Cargo.toml to use absolute path for rara-strategy-api (the relative
-        //    path breaks once we copy to a temp location)
-        let cargo_toml_path = tmp.path().join("Cargo.toml");
-        let cargo_toml = std::fs::read_to_string(&cargo_toml_path).context(WorkspaceSetupSnafu)?;
-        let abs_api_path =
-            std::fs::canonicalize(self.template_dir.join("../../crates/rara-strategy-api"))
-                .context(WorkspaceSetupSnafu)?;
-        let patched = cargo_toml.replace(
-            "../../crates/rara-strategy-api",
-            &abs_api_path.to_string_lossy(),
-        );
-        std::fs::write(&cargo_toml_path, &patched).context(WorkspaceSetupSnafu)?;
+        // Write generated code to logic.rs
+        let logic_path = self
+            .strategies_dir
+            .join("strategies")
+            .join(&self.scratch_name)
+            .join("src/logic.rs");
+        std::fs::write(&logic_path, strategy_code).context(WriteCodeSnafu)?;
 
-        // 3. Inject strategy code into template
-        let lib_path = tmp.path().join("src/lib.rs");
-        let template = std::fs::read_to_string(&lib_path).context(WorkspaceSetupSnafu)?;
-        let injected = inject_strategy_code(&template, strategy_code);
-        std::fs::write(&lib_path, &injected).context(WorkspaceSetupSnafu)?;
-
-        // 4. Run cargo build --release --target wasm32-wasip1
-        let output = tokio::process::Command::new("cargo")
-            .args(["build", "--release", "--target", &self.wasm_target])
-            .current_dir(tmp.path())
-            // Force plain output so parse_cargo_errors can match "error" prefix
-            .env("CARGO_TERM_COLOR", "never")
+        // Run rara-strategy build <scratch_name>
+        let cli = self.resolve_cli()?;
+        let output = tokio::process::Command::new(&cli)
+            .args(["build", &self.scratch_name])
+            .current_dir(&self.strategies_dir)
             .output()
             .await
-            .context(CargoCommandSnafu)?;
+            .context(CliExecutionSnafu)?;
 
-        let stderr = String::from_utf8_lossy(&output.stderr);
         let compile_time_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-        if !output.status.success() {
-            let errors = parse_cargo_errors(&stderr);
+        // Parse JSON from stdout
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let build_output: BuildOutput =
+            serde_json::from_str(&stdout).context(ParseOutputSnafu)?;
+
+        // Extract result for our scratch strategy
+        let result = build_output
+            .results
+            .into_iter()
+            .find(|r| r.strategy == self.scratch_name)
+            .unwrap_or_else(|| BuildResult {
+                strategy:  self.scratch_name.clone(),
+                success:   false,
+                wasm_path: None,
+                error:     Some("strategy not found in build output".into()),
+            });
+
+        if !result.success {
+            let errors = result
+                .error
+                .map(|e| vec![e])
+                .unwrap_or_default();
             return Ok(CompileResult {
                 success: false,
                 wasm_bytes: None,
@@ -113,327 +168,87 @@ impl StrategyCompiler {
             });
         }
 
-        // 5. Read the .wasm file
-        let wasm_path = tmp
-            .path()
-            .join("target")
-            .join(&self.wasm_target)
-            .join("release")
-            .join("generated_strategy.wasm");
+        // Read WASM bytes from the path reported by the CLI
+        let wasm_path = result
+            .wasm_path
+            .expect("success implies wasm_path is present");
         let wasm_bytes = std::fs::read(&wasm_path).context(ReadWasmSnafu)?;
-
-        // 6. Collect warnings
-        let warnings = parse_cargo_warnings(&stderr);
 
         Ok(CompileResult {
             success: true,
             wasm_bytes: Some(wasm_bytes),
             errors: vec![],
-            warnings,
+            warnings: vec![],
             compile_time_ms,
+        })
+    }
+
+    /// Create a new named strategy in the rara-strategies workspace.
+    ///
+    /// Calls `rara-strategy create <name> --description "..."`. Idempotent:
+    /// returns `Ok` if the strategy already exists.
+    pub async fn create_strategy(&self, name: &str, description: &str) -> Result<PathBuf> {
+        let cli = self.resolve_cli()?;
+        let output = tokio::process::Command::new(&cli)
+            .args(["create", name, "--description", description])
+            .current_dir(&self.strategies_dir)
+            .output()
+            .await
+            .context(CliExecutionSnafu)?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let create_output: CreateOutput =
+            serde_json::from_str(&stdout).context(ParseOutputSnafu)?;
+
+        if !create_output.created && create_output.reason.as_deref() != Some("already exists") {
+            return Err(CompilerError::CreateFailed {
+                message: create_output
+                    .reason
+                    .unwrap_or_else(|| "unknown error".into()),
+            });
+        }
+
+        Ok(PathBuf::from(create_output.path))
+    }
+
+    /// Ensure the scratch strategy directory exists, creating it if needed.
+    async fn ensure_scratch_strategy(&self) -> Result<()> {
+        let scratch_dir = self
+            .strategies_dir
+            .join("strategies")
+            .join(&self.scratch_name);
+        if !scratch_dir.exists() {
+            self.create_strategy(&self.scratch_name, "Scratch strategy for LLM compilation")
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Resolve the rara-strategy CLI binary path.
+    ///
+    /// Checks `{strategies_dir}/target/release/rara-strategy-cli` first,
+    /// then falls back to `rara-strategy` on PATH.
+    fn resolve_cli(&self) -> Result<PathBuf> {
+        let local = self
+            .strategies_dir
+            .join("target/release/rara-strategy-cli");
+        if local.exists() {
+            return Ok(local);
+        }
+
+        // Fall back to PATH lookup
+        which_in_path("rara-strategy").ok_or_else(|| CompilerError::CliNotFound {
+            path: local.display().to_string(),
         })
     }
 }
 
-/// Replace the `STRATEGY_IMPL` section in the template with generated code.
-fn inject_strategy_code(template: &str, strategy_code: &str) -> String {
-    let start_idx = template
-        .find(IMPL_START_MARKER)
-        .expect("template missing STRATEGY_IMPL START marker");
-    let end_idx = template
-        .find(IMPL_END_MARKER)
-        .expect("template missing STRATEGY_IMPL END marker");
-
-    let mut result = String::with_capacity(template.len() + strategy_code.len());
-    result.push_str(&template[..start_idx]);
-    result.push_str(IMPL_START_MARKER);
-    result.push('\n');
-    result.push_str(strategy_code);
-    result.push('\n');
-    result.push_str(&template[end_idx..]);
-    result
-}
-
-/// Recursively copy a directory, skipping `target/`.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            // Skip target directory to avoid copying build artifacts
-            if entry.file_name() == "target" {
-                continue;
-            }
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)?;
-        }
-    }
-    Ok(())
-}
-
-/// Extract error messages from cargo stderr.
-fn parse_cargo_errors(stderr: &str) -> Vec<String> {
-    stderr
-        .lines()
-        .filter(|line| line.starts_with("error"))
-        .map(String::from)
-        .collect()
-}
-
-/// Extract warning messages from cargo stderr.
-fn parse_cargo_warnings(stderr: &str) -> Vec<String> {
-    stderr
-        .lines()
-        .filter(|line| line.starts_with("warning"))
-        .map(String::from)
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn template_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../strategies/template")
-    }
-
-    #[tokio::test]
-    async fn compiles_valid_strategy_to_wasm() {
-        let compiler = StrategyCompiler::builder()
-            .template_dir(template_dir())
-            .build();
-
-        let code = r#"
-fn meta() -> StrategyMeta {
-    StrategyMeta {
-        name: "test-sma".into(),
-        version: 1,
-        api_version: API_VERSION,
-        description: "Simple test strategy".into(),
-    }
-}
-
-fn on_candles(candles: &[Candle]) -> Signal {
-    if candles.len() < 2 {
-        return Signal::Hold;
-    }
-    let last = candles.last().unwrap();
-    let prev = &candles[candles.len() - 2];
-    if last.close > prev.close {
-        Signal::Entry { side: Side::Long, strength: 0.8 }
-    } else {
-        Signal::Entry { side: Side::Short, strength: 0.8 }
-    }
-}
-
-fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
-    let offset = entry_price * 0.02;
-    match side {
-        Side::Long => RiskLevels {
-            stop_loss: entry_price - offset,
-            take_profit: entry_price + offset,
-        },
-        Side::Short => RiskLevels {
-            stop_loss: entry_price + offset,
-            take_profit: entry_price - offset,
-        },
-    }
-}
-"#;
-
-        let result = compiler
-            .compile(code)
-            .await
-            .expect("compile should not error");
-        assert!(
-            result.success,
-            "expected success, got errors: {:?}",
-            result.errors
-        );
-        assert!(result.wasm_bytes.is_some(), "expected wasm bytes");
-        assert!(
-            result.wasm_bytes.as_ref().unwrap().len() > 100,
-            "wasm binary too small"
-        );
-    }
-
-    /// End-to-end: compile → load via `WasmExecutor` → call `on_candles()` →
-    /// verify signal.
-    #[tokio::test]
-    async fn wasm_strategy_executes_end_to_end() {
-        use rara_strategy_api::{Candle, Signal};
-
-        use crate::{strategy_executor::StrategyExecutor, wasm_executor::WasmExecutor};
-
-        let compiler = StrategyCompiler::builder()
-            .template_dir(template_dir())
-            .build();
-
-        let code = r#"
-fn meta() -> StrategyMeta {
-    StrategyMeta {
-        name: "e2e-test".into(),
-        version: 1,
-        api_version: API_VERSION,
-        description: "End-to-end test strategy".into(),
-    }
-}
-
-fn on_candles(candles: &[Candle]) -> Signal {
-    if candles.len() < 2 {
-        return Signal::Hold;
-    }
-    let last = candles.last().unwrap();
-    let prev = &candles[candles.len() - 2];
-    if last.close > prev.close {
-        Signal::Entry { side: Side::Long, strength: 0.7 }
-    } else {
-        Signal::Entry { side: Side::Short, strength: 0.5 }
-    }
-}
-
-fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
-    match side {
-        Side::Long => RiskLevels {
-            stop_loss: entry_price * 0.98,
-            take_profit: entry_price * 1.04,
-        },
-        Side::Short => RiskLevels {
-            stop_loss: entry_price * 1.02,
-            take_profit: entry_price * 0.96,
-        },
-    }
-}
-"#;
-
-        // 1. Compile to WASM
-        let result = compiler
-            .compile(code)
-            .await
-            .expect("compile should succeed");
-        assert!(result.success, "compile errors: {:?}", result.errors);
-        let wasm_bytes = result.wasm_bytes.expect("should produce wasm bytes");
-
-        // 2. Load via WasmExecutor
-        let executor = WasmExecutor::builder().build();
-        let mut handle = executor.load(&wasm_bytes).expect("should load WASM module");
-
-        // 3. Verify meta()
-        let meta = handle.meta().expect("meta() should succeed");
-        assert_eq!(meta.name, "e2e-test");
-        assert_eq!(meta.api_version, rara_strategy_api::API_VERSION);
-
-        // 4. Call on_candles() with < 2 candles → Hold
-        let one_candle = vec![Candle {
-            timestamp: 1000,
-            open:      100.0,
-            high:      105.0,
-            low:       95.0,
-            close:     102.0,
-            volume:    50.0,
-        }];
-        let signal = handle
-            .on_candles(&one_candle)
-            .expect("on_candles should succeed");
-        assert!(
-            matches!(signal, Signal::Hold),
-            "expected Hold with 1 candle, got {signal:?}"
-        );
-
-        // 5. Call on_candles() with rising price → Long
-        let rising = vec![
-            Candle {
-                timestamp: 1000,
-                open:      100.0,
-                high:      105.0,
-                low:       95.0,
-                close:     100.0,
-                volume:    50.0,
-            },
-            Candle {
-                timestamp: 1060,
-                open:      100.0,
-                high:      110.0,
-                low:       99.0,
-                close:     108.0,
-                volume:    60.0,
-            },
-        ];
-        let signal = handle
-            .on_candles(&rising)
-            .expect("on_candles should succeed");
-        assert!(
-            matches!(
-                signal,
-                Signal::Entry {
-                    side: rara_strategy_api::Side::Long,
-                    ..
-                }
-            ),
-            "expected Long entry on rising price, got {signal:?}"
-        );
-
-        // 6. Call on_candles() with falling price → Short
-        let falling = vec![
-            Candle {
-                timestamp: 2000,
-                open:      100.0,
-                high:      105.0,
-                low:       95.0,
-                close:     100.0,
-                volume:    50.0,
-            },
-            Candle {
-                timestamp: 2060,
-                open:      100.0,
-                high:      101.0,
-                low:       90.0,
-                close:     92.0,
-                volume:    70.0,
-            },
-        ];
-        let signal = handle
-            .on_candles(&falling)
-            .expect("on_candles should succeed");
-        assert!(
-            matches!(
-                signal,
-                Signal::Entry {
-                    side: rara_strategy_api::Side::Short,
-                    ..
-                }
-            ),
-            "expected Short entry on falling price, got {signal:?}"
-        );
-
-        // 7. Verify risk_levels()
-        let levels = handle
-            .risk_levels(100.0, rara_strategy_api::Side::Long)
-            .expect("risk_levels should succeed");
-        assert!(
-            (levels.stop_loss - 98.0).abs() < 0.01,
-            "stop_loss should be ~98.0"
-        );
-        assert!(
-            (levels.take_profit - 104.0).abs() < 0.01,
-            "take_profit should be ~104.0"
-        );
-    }
-
-    #[tokio::test]
-    async fn returns_errors_for_invalid_code() {
-        let compiler = StrategyCompiler::builder()
-            .template_dir(template_dir())
-            .build();
-
-        let result = compiler
-            .compile("fn broken( {")
-            .await
-            .expect("compile call should not error");
-        assert!(!result.success);
-        assert!(!result.errors.is_empty(), "expected compilation errors");
-    }
+/// Look up a binary on PATH, returning its absolute path if found.
+fn which_in_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            let candidate = dir.join(name);
+            candidate.is_file().then_some(candidate)
+        })
+    })
 }

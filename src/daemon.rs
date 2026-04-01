@@ -193,13 +193,13 @@ async fn build_research_loop(
     event_bus: Arc<EventBus>,
     contract: &str,
 ) -> error::Result<ResearchLoop> {
-    let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
+    let strategies_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rara-strategies");
     let prompts_dir =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/rara-research/src/prompts");
 
     let trace = Trace::open(trace_path).context(TraceSnafu)?;
     let compiler = StrategyCompiler::builder()
-        .template_dir(template_dir)
+        .strategies_dir(strategies_dir)
         .build();
     let prompt_renderer =
         PromptRenderer::load_from_dir(&prompts_dir).context(PromptRendererSnafu)?;

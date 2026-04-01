@@ -4223,7 +4223,6 @@ dependencies = [
  "rara-event-bus",
  "rara-infra",
  "rara-market-data",
- "rara-strategy-api",
  "reqwest 0.13.2",
  "rust_decimal",
  "rust_decimal_macros",
@@ -4232,6 +4231,7 @@ dependencies = [
  "sled",
  "smol_str",
  "snafu",
+ "strategy-api",
  "tempfile",
  "tokio",
  "toml 0.8.23",
@@ -4283,14 +4283,6 @@ dependencies = [
  "tonic-build",
  "tracing",
  "which",
-]
-
-[[package]]
-name = "rara-strategy-api"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4352,7 +4344,6 @@ dependencies = [
  "rara-event-bus",
  "rara-market-data",
  "rara-research",
- "rara-strategy-api",
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
@@ -4360,6 +4351,7 @@ dependencies = [
  "sha2",
  "smol_str",
  "snafu",
+ "strategy-api",
  "strum 0.27.2",
  "tempfile",
  "tokio",
@@ -5543,6 +5535,14 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "strategy-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "stringprep"

@@ -31,11 +31,79 @@ impl StrategyCoder {
     pub fn new(llm: Arc<dyn LlmClient>) -> Self { Self { llm } }
 
     /// Generate strategy code based on a hypothesis and additional context.
+    ///
+    /// The generated code must conform to the rara-strategies v2 format:
+    /// - `pub fn meta() -> StrategyMeta`
+    /// - `pub fn on_candles(candles: &[Candle]) -> StrategyOutput`
     pub async fn generate_code(&self, hypothesis: &Hypothesis, context: &str) -> Result<String> {
         let prompt = format!(
-            "Generate trading strategy code for this hypothesis:\nHypothesis: {}\nReason: \
-             {}\nContext: {context}\n\nReturn only the strategy code.",
-            hypothesis.text, hypothesis.reason
+            r#"Generate a Rust trading strategy module that implements the rara-strategies v2 API.
+
+## Required interface
+
+The module must define exactly two public functions:
+
+```rust
+pub fn meta() -> StrategyMeta {{
+    StrategyMeta {{
+        name: "<strategy-name>".into(),
+        version: 1,
+        api_version: API_VERSION,
+        description: "<brief description>".into(),
+    }}
+}}
+
+pub fn on_candles(candles: &[Candle]) -> StrategyOutput {{
+    // Analyze candles and return a score + factor values
+    StrategyOutput {{
+        score: 0.0,   // -1.0 (bearish) to +1.0 (bullish)
+        factors: BTreeMap::new(),  // named factor values
+    }}
+}}
+```
+
+## Available imports
+
+```rust
+use std::collections::BTreeMap;
+use factor_lib::{{Factor, sma::SmaFactor, ema::EmaFactor, rsi::RsiFactor, ...}};
+use strategy_api::{{API_VERSION, Candle, StrategyMeta, StrategyOutput}};
+```
+
+## Available factors from `factor_lib`
+
+- `SmaFactor::new(period)` — Simple Moving Average
+- `EmaFactor::new(period)` — Exponential Moving Average
+- `RsiFactor::new(period)` — Relative Strength Index
+- `MomentumFactor::new(period)` — Price momentum
+- `VolatilityFactor::new(period)` — Volatility (std dev)
+- `VolumeFactor::new(period)` — Volume moving average
+- `MeanReversionFactor::new(period)` — Mean reversion z-score
+
+All factors implement `fn last(&self, candles: &[Candle]) -> f64` and
+`fn compute(&self, candles: &[Candle]) -> Vec<f64>`.
+
+## Hypothesis
+
+{hypothesis_text}
+
+Reason: {hypothesis_reason}
+
+## Context
+
+{context}
+
+## Rules
+
+- Return ONLY the Rust code (no markdown fences, no explanation)
+- The score must be in [-1.0, 1.0]
+- Handle insufficient data gracefully (return score 0.0 with empty factors)
+- Include all necessary `use` statements at the top
+- Do NOT define main() or lib-level attributes
+"#,
+            hypothesis_text = hypothesis.text,
+            hypothesis_reason = hypothesis.reason,
+            context = context,
         );
 
         self.llm.complete(&prompt).await.context(LlmSnafu)
@@ -49,11 +117,35 @@ impl StrategyCoder {
         hypothesis: &Hypothesis,
     ) -> Result<String> {
         let prompt = format!(
-            "Fix the following Rust strategy code compilation errors.\n\nHypothesis: \
-             {}\n\nCurrent code:\n```rust\n{code}\n```\n\nCompilation errors:\n{}\n\nReturn only \
-             the corrected Rust code.",
-            hypothesis.text,
-            errors.join("\n")
+            r"Fix the following Rust strategy code that failed to compile.
+
+## Required interface (rara-strategies v2)
+
+The code must define:
+- `pub fn meta() -> StrategyMeta`
+- `pub fn on_candles(candles: &[Candle]) -> StrategyOutput`
+
+Use `strategy_api::` (not `rara_strategy_api::`).
+Return `StrategyOutput {{ score, factors }}` (not `Signal`).
+
+## Hypothesis
+
+{hypothesis_text}
+
+## Current code
+
+```rust
+{code}
+```
+
+## Compilation errors
+
+{errors}
+
+Return ONLY the corrected Rust code (no markdown fences, no explanation).
+",
+            hypothesis_text = hypothesis.text,
+            errors = errors.join("\n"),
         );
 
         self.llm.complete(&prompt).await.context(LlmSnafu)

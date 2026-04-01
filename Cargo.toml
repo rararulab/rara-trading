@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research", "crates/rara-strategy-api", "crates/rara-market-data", "crates/rara-server", "crates/rara-tui"]
+members = [".", "crates/rara-domain", "crates/rara-event-bus", "crates/rara-agent", "crates/rara-infra", "crates/rara-trading-engine", "crates/rara-feedback", "crates/rara-sentinel", "crates/rara-research", "crates/rara-market-data", "crates/rara-server", "crates/rara-tui"]
 resolver = "3"
 
 [workspace.package]
@@ -40,7 +40,7 @@ rara-trading-engine = { path = "crates/rara-trading-engine" }
 rara-feedback = { path = "crates/rara-feedback" }
 rara-sentinel = { path = "crates/rara-sentinel" }
 rara-research = { path = "crates/rara-research" }
-rara-strategy-api = { path = "crates/rara-strategy-api" }
+strategy-api = { path = "../rara-strategies/crates/strategy-api" }
 rara-market-data = { path = "crates/rara-market-data" }
 rara-server = { path = "crates/rara-server" }
 rara-tui = { path = "crates/rara-tui" }

@@ -35,14 +35,18 @@ use barter_instrument::{
     instrument::InstrumentIndex,
 };
 use rara_domain::timeframe::Timeframe;
-use rara_strategy_api::{Candle as ApiCandle, Signal};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
+use strategy_api::{Candle as ApiCandle, StrategyOutput};
 use tracing::warn;
 
 use crate::{candle_instrument_data::CandleInstrumentData, strategy_executor::StrategyHandle};
 
 /// Maximum number of aggregated candles retained in history.
 const MAX_AGGREGATED_HISTORY: usize = 500;
+
+/// Score threshold for generating orders. Scores within [-threshold, +threshold]
+/// are treated as "hold" — no orders generated.
+const SCORE_THRESHOLD: f64 = 0.3;
 
 /// Engine state type alias using our candle-aware instrument data.
 pub type BacktestEngineState = EngineState<DefaultGlobalData, CandleInstrumentData>;
@@ -74,8 +78,8 @@ struct StrategyInner {
     history:         Vec<ApiCandle>,
     /// Number of candles already consumed from `CandleInstrumentData`.
     processed_count: usize,
-    /// Most recent signal from the WASM strategy.
-    current_signal:  Option<Signal>,
+    /// Most recent strategy output from the WASM strategy.
+    current_output:  Option<StrategyOutput>,
 }
 
 impl BarterStrategy {
@@ -93,7 +97,7 @@ impl BarterStrategy {
                 buffer: Vec::new(),
                 history: Vec::new(),
                 processed_count: 0,
-                current_signal: None,
+                current_output: None,
             }),
         }
     }
@@ -182,7 +186,7 @@ impl AlgoStrategy for BarterStrategy {
                     // Clone history to avoid conflicting borrows on inner
                     let history_snapshot = inner.history.clone();
                     match inner.handle.on_candles(&history_snapshot) {
-                        Ok(signal) => inner.current_signal = Some(signal),
+                        Ok(output) => inner.current_output = Some(output),
                         Err(err) => {
                             warn!(%err, "strategy on_candles failed");
                         }
@@ -192,64 +196,57 @@ impl AlgoStrategy for BarterStrategy {
 
             inner.processed_count = new_count;
 
-            // Convert current signal to order requests
-            if let Some(ref signal) = inner.current_signal {
+            // Convert strategy output score to order requests.
+            // score > threshold  -> bullish (Buy)
+            // score < -threshold -> bearish (Sell)
+            // otherwise          -> hold, no orders
+            if let Some(ref output) = inner.current_output {
                 let price = instrument_state.data.price();
 
-                match signal {
-                    Signal::Entry { side, strength } => {
-                        if let Some(price) = price {
-                            let order_side = match side {
-                                rara_strategy_api::Side::Long => Side::Buy,
-                                rara_strategy_api::Side::Short => Side::Sell,
-                            };
-                            let quantity = Decimal::from_f64(*strength).unwrap_or(Decimal::ONE);
+                if output.score > SCORE_THRESHOLD
+                    && let Some(price) = price
+                {
+                    let quantity =
+                        Decimal::from_f64(output.score.abs()).unwrap_or(Decimal::ONE);
 
-                            open_orders.push(OrderRequestOpen {
-                                key:   OrderKey {
-                                    exchange:   instrument_state.instrument.exchange,
-                                    instrument: instrument_state.key,
-                                    strategy:   self.id.clone(),
-                                    cid:        ClientOrderId::random(),
-                                },
-                                state: RequestOpen {
-                                    side: order_side,
-                                    price,
-                                    quantity,
-                                    kind: OrderKind::Market,
-                                    time_in_force: TimeInForce::ImmediateOrCancel,
-                                },
-                            });
-                        }
-                    }
-                    Signal::Exit => {
-                        // Close position by placing opposite-side market order
-                        if let Some(position) = instrument_state.position.current.as_ref()
-                            && let Some(price) = price
-                        {
-                            let exit_side = match position.side {
-                                Side::Buy => Side::Sell,
-                                Side::Sell => Side::Buy,
-                            };
-                            open_orders.push(OrderRequestOpen {
-                                key:   OrderKey {
-                                    exchange:   instrument_state.instrument.exchange,
-                                    instrument: instrument_state.key,
-                                    strategy:   self.id.clone(),
-                                    cid:        ClientOrderId::random(),
-                                },
-                                state: RequestOpen {
-                                    side: exit_side,
-                                    price,
-                                    quantity: position.quantity_abs,
-                                    kind: OrderKind::Market,
-                                    time_in_force: TimeInForce::ImmediateOrCancel,
-                                },
-                            });
-                        }
-                    }
-                    Signal::Hold => {}
+                    open_orders.push(OrderRequestOpen {
+                        key:   OrderKey {
+                            exchange:   instrument_state.instrument.exchange,
+                            instrument: instrument_state.key,
+                            strategy:   self.id.clone(),
+                            cid:        ClientOrderId::random(),
+                        },
+                        state: RequestOpen {
+                            side: Side::Buy,
+                            price,
+                            quantity,
+                            kind: OrderKind::Market,
+                            time_in_force: TimeInForce::ImmediateOrCancel,
+                        },
+                    });
+                } else if output.score < -SCORE_THRESHOLD
+                    && let Some(price) = price
+                {
+                    let quantity =
+                        Decimal::from_f64(output.score.abs()).unwrap_or(Decimal::ONE);
+
+                    open_orders.push(OrderRequestOpen {
+                        key:   OrderKey {
+                            exchange:   instrument_state.instrument.exchange,
+                            instrument: instrument_state.key,
+                            strategy:   self.id.clone(),
+                            cid:        ClientOrderId::random(),
+                        },
+                        state: RequestOpen {
+                            side: Side::Sell,
+                            price,
+                            quantity,
+                            kind: OrderKind::Market,
+                            time_in_force: TimeInForce::ImmediateOrCancel,
+                        },
+                    });
                 }
+                // score within [-threshold, +threshold] -> hold, no orders
             }
         }
 
