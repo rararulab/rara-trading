@@ -151,6 +151,28 @@ impl MarketStore {
             .collect())
     }
 
+    /// Get the earliest stored candle timestamp for an instrument+interval.
+    ///
+    /// Returns `None` if no data exists. Used by fetchers to detect
+    /// head gaps when the requested start precedes existing data.
+    pub async fn min_ts(
+        &self,
+        instrument_id: &str,
+        interval: &str,
+    ) -> Result<Option<DateTime<Utc>>> {
+        let row = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+            "SELECT min(ts) FROM candles
+             WHERE instrument_id = $1 AND interval = $2",
+        )
+        .bind(instrument_id)
+        .bind(interval)
+        .fetch_one(&self.pool)
+        .await
+        .context(DatabaseSnafu)?;
+
+        Ok(row)
+    }
+
     /// Get the latest stored candle timestamp for an instrument+interval.
     ///
     /// Returns `None` if no data exists. Used by fetchers to resume

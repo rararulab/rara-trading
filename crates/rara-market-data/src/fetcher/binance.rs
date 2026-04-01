@@ -2,7 +2,8 @@
 //!
 //! Uses the official `binance-sdk` crate to access the public Binance API.
 //! Paginates at 1000 candles per request (~16.6 hours of 1m data).
-//! Resumes from the latest stored candle via `MAX(ts)` query.
+//! Detects both head gaps (start < stored min) and tail gaps (stored max < end)
+//! so re-runs with an earlier start date correctly backfill missing history.
 
 use async_trait::async_trait;
 use binance_sdk::common::config::ConfigurationRestApi;
@@ -124,6 +125,10 @@ impl BinanceFetcher {
     }
 
     /// Core fetch loop shared by trait impl and progress variant.
+    ///
+    /// Handles two gaps: a **head gap** (requested start < stored `min_ts`)
+    /// and a **tail gap** (stored `max_ts` < requested end). Previous logic
+    /// only checked `max_ts`, silently skipping all data before `min_ts`.
     async fn fetch_core(
         &self,
         store: &MarketStore,
@@ -141,24 +146,55 @@ impl BinanceFetcher {
             .timestamp_millis()
             - 1;
 
-        // Resume from last stored candle + 1 minute
-        let resume_ms = store
-            .max_ts(instrument_id, "1m")
-            .await
-            .context(StoreSnafu)?
-            .map_or(i64::MIN, |ts| ts.timestamp_millis() + 60_000);
-
-        let fetch_start_ms = range_start_ms.max(resume_ms);
-        if fetch_start_ms > range_end_ms {
-            info!("binance: already up to date, nothing to fetch");
-            return Ok(0);
-        }
+        let stored_min = store.min_ts(instrument_id, "1m").await.context(StoreSnafu)?;
+        let stored_max = store.max_ts(instrument_id, "1m").await.context(StoreSnafu)?;
 
         let mut total = 0usize;
-        let mut cursor_ms = fetch_start_ms;
 
-        while cursor_ms <= range_end_ms {
-            let page = self.fetch_page(cursor_ms, range_end_ms).await?;
+        // Head gap: requested start is before earliest stored candle
+        if let Some(min_ts) = stored_min {
+            let min_ms = min_ts.timestamp_millis();
+            if range_start_ms < min_ms {
+                let head_end = min_ms - 1; // up to just before the first stored candle
+                info!(
+                    "binance: head gap detected, fetching {range_start_ms} → {head_end}"
+                );
+                total += self
+                    .fetch_range(store, instrument_id, range_start_ms, head_end, on_progress)
+                    .await?;
+            }
+        }
+
+        // Tail gap: resume from last stored candle + 1 minute (or from start if no data)
+        let tail_start = stored_max.map_or(range_start_ms, |ts| ts.timestamp_millis() + 60_000);
+        if tail_start <= range_end_ms {
+            total += self
+                .fetch_range(store, instrument_id, tail_start, range_end_ms, on_progress)
+                .await?;
+        }
+
+        if total == 0 {
+            info!("binance: already up to date, nothing to fetch");
+        } else {
+            info!(total, "binance: fetch complete");
+        }
+        Ok(total)
+    }
+
+    /// Fetch and store candles for a contiguous millisecond range.
+    async fn fetch_range(
+        &self,
+        store: &MarketStore,
+        instrument_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        on_progress: &(dyn Fn(usize) + Send + Sync),
+    ) -> Result<usize> {
+        let mut total = 0usize;
+        let mut cursor_ms = start_ms;
+
+        while cursor_ms <= end_ms {
+            let page = self.fetch_page(cursor_ms, end_ms).await?;
             if page.is_empty() {
                 break;
             }
@@ -183,7 +219,6 @@ impl BinanceFetcher {
             on_progress(written);
         }
 
-        info!(total, "binance: fetch complete");
         Ok(total)
     }
 }
