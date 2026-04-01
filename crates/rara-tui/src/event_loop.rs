@@ -1,7 +1,8 @@
 //! Terminal event loop driving the TUI application.
 //!
-//! Handles crossterm input events, periodic status polling via gRPC, and
-//! terminal setup/teardown.
+//! Handles crossterm input events, periodic status polling via gRPC,
+//! real-time event streaming via `StreamEvents`, and terminal
+//! setup/teardown.
 
 use std::{io, path::PathBuf, time::Duration};
 
@@ -10,9 +11,12 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use rara_server::rara_proto::{Empty, rara_service_client::RaraServiceClient};
+use rara_server::rara_proto::{
+    Empty, EventFilter as ProtoEventFilter, EventMessage, rara_service_client::RaraServiceClient,
+};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use snafu::ResultExt;
+use tokio::sync::mpsc;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
@@ -34,6 +38,9 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Maximum connection attempts before giving up during startup.
 const MAX_STARTUP_ATTEMPTS: u32 = 60;
+
+/// Channel buffer size for streamed events.
+const EVENT_CHANNEL_SIZE: usize = 256;
 
 /// Run the TUI event loop.
 ///
@@ -86,18 +93,23 @@ pub async fn run(server_addr: Option<&str>, promoted_dir: PathBuf) -> Result<()>
     result
 }
 
-/// Core event loop: poll input, tick status, render.
+/// Core event loop: poll input, tick status, receive streamed events, render.
 ///
 /// During the startup phase, only quit keys are accepted and the loop
 /// periodically attempts to connect to the gRPC server with a health check.
 /// Once the server is confirmed ready, transitions to the normal dashboard
-/// phase.
+/// phase and spawns the event stream subscriber.
 async fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     client: &mut Option<RaraServiceClient<Channel>>,
     last_poll: &mut std::time::Instant,
 ) -> Result<()> {
+    // Channel for receiving streamed events from the background task
+    let (event_tx, mut event_rx) = mpsc::channel::<EventMessage>(EVENT_CHANNEL_SIZE);
+    // Track the stream task so we can detect when it dies and respawn
+    let mut stream_task: Option<tokio::task::JoinHandle<()>> = None;
+
     while app.running {
         // Render
         terminal
@@ -118,6 +130,19 @@ async fn event_loop(
                 }
                 AppPhase::Ready => handle_key(app, key.code),
             }
+        }
+
+        // Drain any streamed events from the background task
+        while let Ok(msg) = event_rx.try_recv() {
+            app.push_event(msg);
+        }
+
+        // Check if the stream task has died and needs respawning
+        if let Some(handle) = &stream_task
+            && handle.is_finished()
+        {
+            warn!("event stream task ended, will respawn on next status poll");
+            stream_task = None;
         }
 
         // Startup phase: try to connect to gRPC server
@@ -159,6 +184,10 @@ async fn event_loop(
                         info!("gRPC server is ready");
                         app.connection_status = ConnectionStatus::Connected;
                         app.phase = AppPhase::Ready;
+
+                        // Spawn event stream subscriber
+                        stream_task = Some(spawn_event_stream(c.clone(), event_tx.clone()));
+
                         *client = Some(c);
                     } else {
                         app.phase = AppPhase::StartingServer {
@@ -180,10 +209,68 @@ async fn event_loop(
         if last_poll.elapsed() >= TICK_RATE {
             *last_poll = std::time::Instant::now();
             poll_status(app, client).await?;
+
+            // Respawn event stream if it died and we have a live client
+            if stream_task.is_none()
+                && let Some(c) = client.as_ref()
+            {
+                info!("respawning event stream subscriber");
+                stream_task = Some(spawn_event_stream(c.clone(), event_tx.clone()));
+            }
         }
     }
 
+    // Cancel the stream task on exit
+    if let Some(handle) = stream_task.take() {
+        handle.abort();
+    }
+
     Ok(())
+}
+
+/// Spawn a background task that subscribes to the gRPC event stream.
+///
+/// Received [`EventMessage`]s are forwarded through `tx`. The task runs
+/// until the stream ends, the channel is closed, or an error occurs.
+fn spawn_event_stream(
+    mut client: RaraServiceClient<Channel>,
+    tx: mpsc::Sender<EventMessage>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let request = ProtoEventFilter {
+            topic: String::new(), // subscribe to all topics
+        };
+
+        let stream_result = client.stream_events(request).await;
+        let mut stream = match stream_result {
+            Ok(response) => response.into_inner(),
+            Err(status) => {
+                warn!("failed to start event stream: {status}");
+                return;
+            }
+        };
+
+        info!("event stream connected, receiving events");
+
+        loop {
+            match stream.message().await {
+                Ok(Some(msg)) => {
+                    if tx.send(msg).await.is_err() {
+                        // Receiver dropped — TUI is shutting down
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    info!("event stream ended (server closed)");
+                    break;
+                }
+                Err(status) => {
+                    warn!("event stream error: {status}");
+                    break;
+                }
+            }
+        }
+    })
 }
 
 /// Handle a key press event, dispatching to tab-specific handlers when needed.
