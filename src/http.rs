@@ -9,7 +9,11 @@ static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 pub fn client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                env!("CARGO_PKG_NAME"),
+                "/",
+                env!("CARGO_PKG_VERSION")
+            ))
             .timeout(Duration::from_secs(30))
             .build()
             .expect("HTTP client initialization should not fail")
@@ -23,7 +27,11 @@ pub fn client() -> &'static reqwest::Client {
 pub fn download_client() -> &'static reqwest::Client {
     DOWNLOAD_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                env!("CARGO_PKG_NAME"),
+                "/",
+                env!("CARGO_PKG_VERSION")
+            ))
             .connect_timeout(Duration::from_secs(30))
             .no_gzip()
             .no_brotli()

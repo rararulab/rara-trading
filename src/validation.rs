@@ -11,18 +11,16 @@ use snafu::{ResultExt, Snafu};
 pub enum ValidationError {
     /// Database connection failed.
     #[snafu(display(
-        "database connection failed: {source}\n\n\
-         Fix: check that PostgreSQL/TimescaleDB is running and the URL is correct.\n  \
-         Current URL: {url}\n  \
-         Override with: RARA_DB_URL=postgres://user:pass@host:5432/db"
+        "database connection failed: {source}\n\nFix: check that PostgreSQL/TimescaleDB is \
+         running and the URL is correct.\n  Current URL: {url}\n  Override with: \
+         RARA_DB_URL=postgres://user:pass@host:5432/db"
     ))]
     DatabaseConnection { url: String, source: sqlx::Error },
 
     /// LLM backend not available in PATH.
     #[snafu(display(
-        "LLM backend '{backend}' is not available\n\n\
-         Fix: ensure the agent backend is installed and accessible in PATH.\n  \
-         Override with: RARA_LLM_BACKEND=claude"
+        "LLM backend '{backend}' is not available\n\nFix: ensure the agent backend is installed \
+         and accessible in PATH.\n  Override with: RARA_LLM_BACKEND=claude"
     ))]
     LlmBackendUnavailable { backend: String },
 }
@@ -44,7 +42,8 @@ pub async fn validate_database(url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Validate LLM backend availability by checking whether the command exists in PATH.
+/// Validate LLM backend availability by checking whether the command exists in
+/// PATH.
 pub fn validate_llm_backend(backend: &str) -> Result<()> {
     match which::which(backend) {
         Ok(_) => Ok(()),

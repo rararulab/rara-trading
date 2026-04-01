@@ -1,21 +1,22 @@
 //! Paper trading broker — immediately fills all orders at a configurable
 //! price for use in paper trading mode.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
+use rara_domain::trading::{Side, StagedAction};
 use rust_decimal::Decimal;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use std::collections::HashMap;
-
-use rara_domain::trading::{Side, StagedAction};
-
-use crate::account_config::{BrokerConfig, PaperBrokerConfig};
-use crate::broker::{
-    AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
-};
-use crate::broker_registry::{
-    BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
+use crate::{
+    account_config::{BrokerConfig, PaperBrokerConfig},
+    broker::{
+        AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
+    },
+    broker_registry::{
+        BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
+    },
 };
 
 /// A paper trading broker that fills every order immediately at a fixed price.
@@ -24,7 +25,7 @@ pub struct PaperBroker {
     /// be updated between trades (e.g. to simulate changing market prices).
     fill_price: Mutex<Decimal>,
     /// Internal position state.
-    positions: Mutex<Vec<Position>>,
+    positions:  Mutex<Vec<Position>>,
     /// Record of all executions.
     executions: Mutex<Vec<ExecutionReport>>,
 }
@@ -32,18 +33,20 @@ pub struct PaperBroker {
 /// Build the broker registry entry for the paper trading broker.
 pub fn registry_entry() -> BrokerRegistryEntry {
     BrokerRegistryEntry {
-        type_key: "paper",
-        name: "Paper Trading",
-        description: "Simulated fills with no real money — great for testing strategies.",
+        type_key:      "paper",
+        name:          "Paper Trading",
+        description:   "Simulated fills with no real money — great for testing strategies.",
         config_fields: || {
-            vec![ConfigField::builder()
-                .name("fill_price")
-                .field_type(ConfigFieldType::Number)
-                .label("Fill price")
-                .required(false)
-                .sensitive(false)
-                .description("Fixed price for all simulated fills (0 = use market price).")
-                .build()]
+            vec![
+                ConfigField::builder()
+                    .name("fill_price")
+                    .field_type(ConfigFieldType::Number)
+                    .label("Fill price")
+                    .required(false)
+                    .sensitive(false)
+                    .description("Fixed price for all simulated fills (0 = use market price).")
+                    .build(),
+            ]
         },
         create_broker: |fields: &HashMap<String, String>| {
             let fill_price = parse_fill_price(fields)?;
@@ -59,7 +62,8 @@ pub fn registry_entry() -> BrokerRegistryEntry {
     }
 }
 
-/// Parse the `fill_price` field from a config map, defaulting to zero (market price).
+/// Parse the `fill_price` field from a config map, defaulting to zero (market
+/// price).
 fn parse_fill_price(fields: &HashMap<String, String>) -> Result<Decimal, BrokerRegistryError> {
     fields
         .get("fill_price")
@@ -69,7 +73,7 @@ fn parse_fill_price(fields: &HashMap<String, String>) -> Result<Decimal, BrokerR
             |v| {
                 v.parse::<Decimal>().map_err(|e| {
                     InvalidValueSnafu {
-                        field: "fill_price".to_string(),
+                        field:  "fill_price".to_string(),
                         reason: e.to_string(),
                     }
                     .build()
@@ -83,7 +87,7 @@ impl PaperBroker {
     pub fn new(fill_price: Decimal) -> Self {
         Self {
             fill_price: Mutex::new(fill_price),
-            positions: Mutex::new(Vec::new()),
+            positions:  Mutex::new(Vec::new()),
             executions: Mutex::new(Vec::new()),
         }
     }
@@ -91,9 +95,7 @@ impl PaperBroker {
     /// Update the fill price for subsequent orders.
     ///
     /// Useful for simulating price movement between trades in tests.
-    pub async fn set_fill_price(&self, price: Decimal) {
-        *self.fill_price.lock().await = price;
-    }
+    pub async fn set_fill_price(&self, price: Decimal) { *self.fill_price.lock().await = price; }
 }
 
 #[async_trait]
@@ -146,9 +148,8 @@ impl Broker for PaperBroker {
                                 Side::Buy => Decimal::ONE,
                                 Side::Sell => -Decimal::ONE,
                             };
-                            realized_pnl = (fill_price - pos.avg_entry_price)
-                                * close_qty
-                                * side_multiplier;
+                            realized_pnl =
+                                (fill_price - pos.avg_entry_price) * close_qty * side_multiplier;
 
                             if action.quantity >= pos.quantity {
                                 // Full close or flip: remainder opens a new position
@@ -212,9 +213,8 @@ impl Broker for PaperBroker {
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal_macros::dec;
-
     use rara_domain::trading::{ActionType, OrderType, Side, StagedAction};
+    use rust_decimal_macros::dec;
 
     use super::*;
 

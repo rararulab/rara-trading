@@ -1,8 +1,11 @@
 //! Sequential guard pipeline that short-circuits on the first rejection.
 
 use rara_domain::trading::TradingCommit;
-use crate::broker::AccountInfo;
-use crate::guards::{Guard, GuardResult};
+
+use crate::{
+    broker::AccountInfo,
+    guards::{Guard, GuardResult},
+};
 
 /// Runs a sequence of guards, stopping at the first rejection.
 pub struct GuardPipeline {
@@ -12,9 +15,7 @@ pub struct GuardPipeline {
 
 impl GuardPipeline {
     /// Create a new pipeline from the given guards.
-    pub fn new(guards: Vec<Box<dyn Guard>>) -> Self {
-        Self { guards }
-    }
+    pub fn new(guards: Vec<Box<dyn Guard>>) -> Self { Self { guards } }
 
     /// Run all guards in order. Returns the first rejection, or `Allow` if
     /// all guards pass.
@@ -32,26 +33,26 @@ impl GuardPipeline {
 
 #[cfg(test)]
 mod tests {
+    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
     use rust_decimal::Decimal;
 
-    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
-    use crate::broker::AccountInfo;
-    use crate::guards::symbol_whitelist::SymbolWhitelist;
-
     use super::*;
+    use crate::{broker::AccountInfo, guards::symbol_whitelist::SymbolWhitelist};
 
     fn test_commit() -> TradingCommit {
         TradingCommit::builder()
             .message("test commit")
             .strategy_id("strat-1")
             .strategy_version(1)
-            .actions(vec![StagedAction::builder()
-                .action_type(ActionType::PlaceOrder)
-                .contract_id("BTC-USD")
-                .side(Side::Buy)
-                .quantity(Decimal::ONE)
-                .order_type(OrderType::Market)
-                .build()])
+            .actions(vec![
+                StagedAction::builder()
+                    .action_type(ActionType::PlaceOrder)
+                    .contract_id("BTC-USD")
+                    .side(Side::Buy)
+                    .quantity(Decimal::ONE)
+                    .order_type(OrderType::Market)
+                    .build(),
+            ])
             .build()
     }
 
@@ -66,9 +67,9 @@ mod tests {
 
     #[tokio::test]
     async fn pipeline_allows_when_all_guards_pass() {
-        let pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(
-            vec!["BTC-USD".to_string()],
-        ))]);
+        let pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![
+            "BTC-USD".to_string(),
+        ]))]);
 
         let result = pipeline.run(&test_commit(), &test_account()).await;
         assert!(matches!(result, GuardResult::Allow));

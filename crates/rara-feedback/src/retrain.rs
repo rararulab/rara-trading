@@ -4,14 +4,12 @@
 use std::sync::Arc;
 
 use bon::Builder;
+use rara_domain::event::{Event, EventType};
+use rara_event_bus::{bus::EventBus, store::StoreError};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
-
-use rara_domain::event::{Event, EventType};
-use rara_event_bus::bus::EventBus;
-use rara_event_bus::store::StoreError;
 
 /// Event payload for a confirmed strategy.
 #[derive(Debug, Serialize)]
@@ -19,9 +17,9 @@ struct ConfirmedPayload {
     /// Experiment identifier.
     experiment_id: String,
     /// Paper trading Sharpe ratio.
-    sharpe_ratio: f64,
+    sharpe_ratio:  f64,
     /// Paper trading maximum drawdown (decimal string).
-    max_drawdown: String,
+    max_drawdown:  String,
 }
 
 /// Event payload for a retrain request.
@@ -30,11 +28,11 @@ struct RetrainRequestedPayload {
     /// Experiment identifier.
     experiment_id: String,
     /// Reason(s) for requesting retraining.
-    reason: String,
+    reason:        String,
     /// Paper trading Sharpe ratio.
-    sharpe_ratio: f64,
+    sharpe_ratio:  f64,
     /// Paper trading maximum drawdown (decimal string).
-    max_drawdown: String,
+    max_drawdown:  String,
 }
 
 /// Errors from retrain evaluation.
@@ -73,38 +71,28 @@ pub struct PaperMetrics {
     /// Maximum drawdown observed during paper trading.
     max_drawdown: Decimal,
     /// Total profit and loss (`PnL`).
-    pnl: Decimal,
+    pnl:          Decimal,
     /// Win rate as a fraction (0.0 – 1.0).
-    win_rate: f64,
+    win_rate:     f64,
     /// Total number of trades executed.
-    trade_count: u32,
+    trade_count:  u32,
 }
 
 impl PaperMetrics {
     /// Returns the Sharpe ratio.
-    pub const fn sharpe_ratio(&self) -> f64 {
-        self.sharpe_ratio
-    }
+    pub const fn sharpe_ratio(&self) -> f64 { self.sharpe_ratio }
 
     /// Returns the maximum drawdown.
-    pub const fn max_drawdown(&self) -> Decimal {
-        self.max_drawdown
-    }
+    pub const fn max_drawdown(&self) -> Decimal { self.max_drawdown }
 
     /// Returns the total `PnL`.
-    pub const fn pnl(&self) -> Decimal {
-        self.pnl
-    }
+    pub const fn pnl(&self) -> Decimal { self.pnl }
 
     /// Returns the win rate.
-    pub const fn win_rate(&self) -> f64 {
-        self.win_rate
-    }
+    pub const fn win_rate(&self) -> f64 { self.win_rate }
 
     /// Returns the trade count.
-    pub const fn trade_count(&self) -> u32 {
-        self.trade_count
-    }
+    pub const fn trade_count(&self) -> u32 { self.trade_count }
 }
 
 /// Metrics from the original backtest that serve as the baseline for
@@ -116,24 +104,18 @@ pub struct BacktestBaseline {
     /// Maximum drawdown from the original backtest.
     max_drawdown: Decimal,
     /// Total `PnL` from the original backtest.
-    pnl: Decimal,
+    pnl:          Decimal,
 }
 
 impl BacktestBaseline {
     /// Returns the baseline Sharpe ratio.
-    pub const fn sharpe_ratio(&self) -> f64 {
-        self.sharpe_ratio
-    }
+    pub const fn sharpe_ratio(&self) -> f64 { self.sharpe_ratio }
 
     /// Returns the baseline maximum drawdown.
-    pub const fn max_drawdown(&self) -> Decimal {
-        self.max_drawdown
-    }
+    pub const fn max_drawdown(&self) -> Decimal { self.max_drawdown }
 
     /// Returns the baseline `PnL`.
-    pub const fn pnl(&self) -> Decimal {
-        self.pnl
-    }
+    pub const fn pnl(&self) -> Decimal { self.pnl }
 }
 
 /// Evaluates paper trading results against thresholds and the original
@@ -144,17 +126,17 @@ impl BacktestBaseline {
 #[derive(Builder)]
 pub struct RetrainChecker {
     /// The event bus used to publish retrain/confirmed events.
-    event_bus: Arc<EventBus>,
+    event_bus:              Arc<EventBus>,
     /// Absolute Sharpe floor — retrain if paper Sharpe drops below this.
     #[builder(default = 0.5)]
-    sharpe_threshold: f64,
+    sharpe_threshold:       f64,
     /// Absolute drawdown ceiling — retrain if paper drawdown exceeds this.
     #[builder(default = Decimal::new(20, 2))]
     max_drawdown_threshold: Decimal,
     /// Fraction of original backtest Sharpe — retrain if paper Sharpe falls
     /// below this fraction of the baseline (e.g. 0.5 = 50% degradation).
     #[builder(default = 0.5)]
-    degradation_factor: f64,
+    degradation_factor:     f64,
 }
 
 impl RetrainChecker {
@@ -180,8 +162,8 @@ impl RetrainChecker {
                 .payload(
                     serde_json::to_value(ConfirmedPayload {
                         experiment_id: experiment_id.to_string(),
-                        sharpe_ratio: paper_metrics.sharpe_ratio(),
-                        max_drawdown: paper_metrics.max_drawdown().to_string(),
+                        sharpe_ratio:  paper_metrics.sharpe_ratio(),
+                        max_drawdown:  paper_metrics.max_drawdown().to_string(),
                     })
                     .expect("ConfirmedPayload must serialize"),
                 )
@@ -200,9 +182,9 @@ impl RetrainChecker {
                 .payload(
                     serde_json::to_value(RetrainRequestedPayload {
                         experiment_id: experiment_id.to_string(),
-                        reason: combined_reason.clone(),
-                        sharpe_ratio: paper_metrics.sharpe_ratio(),
-                        max_drawdown: paper_metrics.max_drawdown().to_string(),
+                        reason:        combined_reason.clone(),
+                        sharpe_ratio:  paper_metrics.sharpe_ratio(),
+                        max_drawdown:  paper_metrics.max_drawdown().to_string(),
                     })
                     .expect("RetrainRequestedPayload must serialize"),
                 )
@@ -220,11 +202,7 @@ impl RetrainChecker {
 
     /// Check all degradation conditions and return a list of reasons (empty
     /// if the strategy is healthy).
-    fn check_degradation(
-        &self,
-        paper: &PaperMetrics,
-        baseline: &BacktestBaseline,
-    ) -> Vec<String> {
+    fn check_degradation(&self, paper: &PaperMetrics, baseline: &BacktestBaseline) -> Vec<String> {
         let mut reasons = Vec::new();
 
         if paper.sharpe_ratio() < self.sharpe_threshold {

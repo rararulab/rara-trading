@@ -1,19 +1,18 @@
 //! Signal generation loop — connects candle stream to strategy execution.
 //!
 //! Receives [`AggregatedCandle`]s from a broadcast channel, feeds them to every
-//! loaded WASM strategy, converts resulting [`Signal`]s into [`TradingCommit`]s,
-//! and executes them through the [`TradingEngine`].
+//! loaded WASM strategy, converts resulting [`Signal`]s into
+//! [`TradingCommit`]s, and executes them through the [`TradingEngine`].
 
 use std::sync::Arc;
-
-use rust_decimal::Decimal;
-use snafu::Snafu;
-use tokio::sync::broadcast;
 
 use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
 use rara_market_data::stream::aggregator::AggregatedCandle;
 use rara_research::strategy_executor::StrategyHandle;
 use rara_strategy_api::{Candle, Signal};
+use rust_decimal::Decimal;
+use snafu::Snafu;
+use tokio::sync::broadcast;
 
 use crate::engine::TradingEngine;
 
@@ -25,7 +24,7 @@ pub enum SignalLoopError {
     #[snafu(display("strategy '{name}' signal error: {source}"))]
     StrategySignal {
         /// Strategy name that failed.
-        name: String,
+        name:   String,
         /// Underlying executor error.
         source: rara_research::strategy_executor::ExecutorError,
     },
@@ -47,15 +46,15 @@ pub type Result<T> = std::result::Result<T, SignalLoopError>;
 /// [`TradingCommit`]s from its signals.
 pub struct LoadedStrategy {
     /// Strategy name (from WASM metadata).
-    pub name: String,
+    pub name:          String,
     /// Strategy version (from WASM metadata).
-    pub version: u32,
+    pub version:       u32,
     /// Contract this strategy trades (e.g., "BTCUSDT").
-    pub contract_id: String,
+    pub contract_id:   String,
     /// Position size per signal.
     pub position_size: Decimal,
     /// The WASM strategy handle for signal generation.
-    pub handle: Box<dyn StrategyHandle>,
+    pub handle:        Box<dyn StrategyHandle>,
 }
 
 /// Convert a strategy [`Signal`] into a list of [`StagedAction`]s.
@@ -68,22 +67,26 @@ fn signal_to_actions(signal: &Signal, strategy: &LoadedStrategy) -> Vec<StagedAc
                 rara_strategy_api::Side::Long => Side::Buy,
                 rara_strategy_api::Side::Short => Side::Sell,
             };
-            vec![StagedAction::builder()
-                .action_type(ActionType::PlaceOrder)
-                .contract_id(&strategy.contract_id)
-                .side(domain_side)
-                .quantity(strategy.position_size)
-                .order_type(OrderType::Market)
-                .build()]
+            vec![
+                StagedAction::builder()
+                    .action_type(ActionType::PlaceOrder)
+                    .contract_id(&strategy.contract_id)
+                    .side(domain_side)
+                    .quantity(strategy.position_size)
+                    .order_type(OrderType::Market)
+                    .build(),
+            ]
         }
         Signal::Exit => {
-            vec![StagedAction::builder()
-                .action_type(ActionType::ClosePosition)
-                .contract_id(&strategy.contract_id)
-                .side(Side::Sell)
-                .quantity(strategy.position_size)
-                .order_type(OrderType::Market)
-                .build()]
+            vec![
+                StagedAction::builder()
+                    .action_type(ActionType::ClosePosition)
+                    .contract_id(&strategy.contract_id)
+                    .side(Side::Sell)
+                    .quantity(strategy.position_size)
+                    .order_type(OrderType::Market)
+                    .build(),
+            ]
         }
         Signal::Hold => vec![],
     }
@@ -93,11 +96,11 @@ fn signal_to_actions(signal: &Signal, strategy: &LoadedStrategy) -> Vec<StagedAc
 const fn to_api_candle(candle: &AggregatedCandle) -> Candle {
     Candle {
         timestamp: candle.ts.timestamp(),
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
+        open:      candle.open,
+        high:      candle.high,
+        low:       candle.low,
+        close:     candle.close,
+        volume:    candle.volume,
     }
 }
 
@@ -112,10 +115,7 @@ pub async fn run_signal_loop(
     engine: Arc<TradingEngine>,
     mut strategies: Vec<LoadedStrategy>,
 ) {
-    tracing::info!(
-        strategy_count = strategies.len(),
-        "signal loop started"
-    );
+    tracing::info!(strategy_count = strategies.len(), "signal loop started");
 
     loop {
         match candle_rx.recv().await {

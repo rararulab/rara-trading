@@ -2,8 +2,7 @@
 //!
 //! Templates use `{variable}` placeholders that are substituted at render time.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use snafu::{ResultExt, Snafu};
 
@@ -33,7 +32,7 @@ pub enum PromptError {
     #[snafu(display("missing variable '{name}' in template '{template}'"))]
     MissingVariable {
         /// Name of the missing variable.
-        name: String,
+        name:     String,
         /// Name of the template being rendered.
         template: String,
     },
@@ -51,7 +50,7 @@ struct TemplateFile {
 /// The `[template]` section of a TOML file.
 #[derive(serde::Deserialize)]
 struct TemplateContent {
-    name: String,
+    name:   String,
     prompt: String,
 }
 
@@ -66,7 +65,8 @@ pub struct PromptRenderer {
 impl PromptRenderer {
     /// Load all `.toml` templates from the given directory.
     ///
-    /// Each file must contain a `[template]` section with `name` and `prompt` fields.
+    /// Each file must contain a `[template]` section with `name` and `prompt`
+    /// fields.
     pub fn load_from_dir(dir: &Path) -> Result<Self> {
         let mut templates = HashMap::new();
 
@@ -92,28 +92,19 @@ impl PromptRenderer {
     /// Create a renderer from an in-memory map of templates.
     ///
     /// Useful for testing without filesystem access.
-    pub const fn from_map(templates: HashMap<String, String>) -> Self {
-        Self { templates }
-    }
+    pub const fn from_map(templates: HashMap<String, String>) -> Self { Self { templates } }
 
     /// Render a named template with the given variable substitutions.
     ///
     /// Escaped braces (`{{` / `}}`) are preserved as literal `{` / `}`.
     /// Missing variables produce an error.
-    pub fn render(
-        &self,
-        template_name: &str,
-        vars: &HashMap<String, String>,
-    ) -> Result<String> {
-        let template = self
-            .templates
-            .get(template_name)
-            .ok_or_else(|| {
-                TemplateNotFoundSnafu {
-                    name: template_name.to_owned(),
-                }
-                .build()
-            })?;
+    pub fn render(&self, template_name: &str, vars: &HashMap<String, String>) -> Result<String> {
+        let template = self.templates.get(template_name).ok_or_else(|| {
+            TemplateNotFoundSnafu {
+                name: template_name.to_owned(),
+            }
+            .build()
+        })?;
 
         substitute(template, vars, template_name)
     }
@@ -127,7 +118,8 @@ impl PromptRenderer {
 /// Perform `{variable}` substitution on a template string.
 ///
 /// `{{` and `}}` are treated as escaped literal braces.
-/// Unmatched `{name}` placeholders with no corresponding variable produce an error.
+/// Unmatched `{name}` placeholders with no corresponding variable produce an
+/// error.
 fn substitute(
     template: &str,
     vars: &HashMap<String, String>,
@@ -156,7 +148,7 @@ fn substitute(
                         Some(value) => result.push_str(value),
                         None => {
                             return Err(MissingVariableSnafu {
-                                name: var_name,
+                                name:     var_name,
                                 template: template_name.to_owned(),
                             }
                             .build());
@@ -307,7 +299,10 @@ prompt = "Hello {who}!"
 
         let mut vars = HashMap::new();
         vars.insert("hypothesis".to_owned(), "Use RSI crossover".to_owned());
-        vars.insert("strategy_trait".to_owned(), "trait TradingStrategy { ... }".to_owned());
+        vars.insert(
+            "strategy_trait".to_owned(),
+            "trait TradingStrategy { ... }".to_owned(),
+        );
         vars.insert("prior_code".to_owned(), "fn old() {}".to_owned());
         vars.insert("compile_errors".to_owned(), "none".to_owned());
 
@@ -323,7 +318,10 @@ prompt = "Hello {who}!"
 
         let mut vars = HashMap::new();
         vars.insert("hypothesis".to_owned(), "Mean reversion works".to_owned());
-        vars.insert("backtest_result".to_owned(), "Sharpe: 2.0, PnL: 500".to_owned());
+        vars.insert(
+            "backtest_result".to_owned(),
+            "Sharpe: 2.0, PnL: 500".to_owned(),
+        );
         vars.insert("sota_result".to_owned(), "Sharpe: 1.5, PnL: 300".to_owned());
         vars.insert("strategy_code".to_owned(), "fn strategy() {}".to_owned());
 

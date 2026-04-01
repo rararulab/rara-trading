@@ -4,10 +4,9 @@
 //! and persistence so the research loop is runtime-agnostic.
 
 use async_trait::async_trait;
+use rara_domain::research::{Hypothesis, ResearchStrategy, ResearchStrategyStatus};
 use snafu::Snafu;
 use uuid::Uuid;
-
-use rara_domain::research::{Hypothesis, ResearchStrategy, ResearchStrategyStatus};
 
 use crate::strategy_executor::StrategyHandle;
 

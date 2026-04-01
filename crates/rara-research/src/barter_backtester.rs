@@ -4,43 +4,46 @@
 //! engine with a compiled strategy, and extracts performance metrics into
 //! our domain `BacktestResult`.
 
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use async_trait::async_trait;
-use barter::backtest::market_data::MarketDataInMemory;
-use barter::backtest::{BacktestArgsConstant, BacktestArgsDynamic, run_backtests};
-use barter::engine::state::EngineState;
-use barter::engine::state::global::DefaultGlobalData;
-use barter::engine::state::trading::TradingState;
-use barter::risk::DefaultRiskManager;
-use barter::statistic::time::Daily;
-use barter::system::config::ExecutionConfig;
-use barter_data::event::{DataKind, MarketEvent};
-use barter_data::streams::reconnect::Event as ReconnectEvent;
-use barter_data::subscription::candle::Candle;
-use barter_execution::balance::Balance;
-use barter_execution::client::mock::MockExecutionConfig;
-use barter_execution::UnindexedAccountSnapshot;
-use barter_instrument::asset::name::AssetNameExchange;
-use barter_instrument::asset::Asset;
-use barter_instrument::exchange::ExchangeId;
-use barter_instrument::index::IndexedInstruments;
-use barter_instrument::instrument::{Instrument, InstrumentIndex};
-use barter_instrument::Underlying;
+use barter::{
+    backtest::{
+        BacktestArgsConstant, BacktestArgsDynamic, market_data::MarketDataInMemory, run_backtests,
+    },
+    engine::state::{EngineState, global::DefaultGlobalData, trading::TradingState},
+    risk::DefaultRiskManager,
+    statistic::time::Daily,
+    system::config::ExecutionConfig,
+};
+use barter_data::{
+    event::{DataKind, MarketEvent},
+    streams::reconnect::Event as ReconnectEvent,
+    subscription::candle::Candle,
+};
+use barter_execution::{
+    UnindexedAccountSnapshot, balance::Balance, client::mock::MockExecutionConfig,
+};
+use barter_instrument::{
+    Underlying,
+    asset::{Asset, name::AssetNameExchange},
+    exchange::ExchangeId,
+    index::IndexedInstruments,
+    instrument::{Instrument, InstrumentIndex},
+};
 use bon::Builder;
 use chrono::NaiveDate;
+use rara_domain::{research::BacktestResult, timeframe::Timeframe};
+use rara_market_data::store::MarketStore;
 use rust_decimal::Decimal;
 use smol_str::SmolStr;
 
-use rara_domain::research::BacktestResult;
-use rara_domain::timeframe::Timeframe;
-use rara_market_data::store::MarketStore;
-
-use crate::backtester::{BacktestError, Backtester};
-use crate::candle_instrument_data::CandleInstrumentData;
-use crate::strategy_executor::StrategyHandle;
-use crate::barter_strategy::{BacktestEngineState, BarterStrategy};
+use crate::{
+    backtester::{BacktestError, Backtester},
+    barter_strategy::{BacktestEngineState, BarterStrategy},
+    candle_instrument_data::CandleInstrumentData,
+    strategy_executor::StrategyHandle,
+};
 
 /// Risk manager type parameterized over our engine state.
 type BtRisk = DefaultRiskManager<BacktestEngineState>;
@@ -53,15 +56,15 @@ type BtRisk = DefaultRiskManager<BacktestEngineState>;
 #[derive(Builder)]
 pub struct BarterBacktester {
     /// `TimescaleDB` market data store.
-    pub store: MarketStore,
+    pub store:           MarketStore,
     /// Initial capital for the simulated account.
     pub initial_capital: Decimal,
     /// Trading fees as a percentage (e.g., 0.1 for 0.1%).
-    pub fees_percent: Decimal,
+    pub fees_percent:    Decimal,
     /// Backtest window start date.
-    pub backtest_start: NaiveDate,
+    pub backtest_start:  NaiveDate,
     /// Backtest window end date.
-    pub backtest_end: NaiveDate,
+    pub backtest_end:    NaiveDate,
 }
 
 impl fmt::Debug for BarterBacktester {
@@ -75,30 +78,27 @@ impl fmt::Debug for BarterBacktester {
     }
 }
 
-/// Extract performance metrics from a barter `TradingSummary` into our domain `BacktestResult`.
+/// Extract performance metrics from a barter `TradingSummary` into our domain
+/// `BacktestResult`.
 ///
-/// Aggregates `PnL`, Sharpe ratio, max drawdown, and win rate across all instruments
-/// in the trading summary, tagging the result with the given timeframe.
+/// Aggregates `PnL`, Sharpe ratio, max drawdown, and win rate across all
+/// instruments in the trading summary, tagging the result with the given
+/// timeframe.
 fn extract_metrics(
     trading_summary: &barter::statistic::summary::TradingSummary<Daily>,
     timeframe: Timeframe,
 ) -> BacktestResult {
-    let (total_pnl, sharpe, max_dd, win_rate_val, trade_count) = trading_summary
-        .instruments
-        .values()
-        .fold(
+    let (total_pnl, sharpe, max_dd, win_rate_val, trade_count) =
+        trading_summary.instruments.values().fold(
             (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, None, 0u32),
             |(pnl, _sharpe, max_dd, win_rate, trades), tear_sheet| {
                 let sheet_pnl = pnl + tear_sheet.pnl;
                 let sheet_sharpe = tear_sheet.sharpe_ratio.value;
 
-                let sheet_max_dd = tear_sheet
-                    .pnl_drawdown_max
-                    .as_ref()
-                    .map_or(max_dd, |dd| {
-                        let dd_val = dd.0.value.abs();
-                        if dd_val > max_dd { dd_val } else { max_dd }
-                    });
+                let sheet_max_dd = tear_sheet.pnl_drawdown_max.as_ref().map_or(max_dd, |dd| {
+                    let dd_val = dd.0.value.abs();
+                    if dd_val > max_dd { dd_val } else { max_dd }
+                });
 
                 let sheet_win_rate = tear_sheet.win_rate.as_ref().map(|wr| wr.value);
 
@@ -118,9 +118,7 @@ fn extract_metrics(
         );
 
     let sharpe_f64 = sharpe.try_into().unwrap_or(0.0f64);
-    let win_rate_f64: f64 = win_rate_val
-        .and_then(|v| v.try_into().ok())
-        .unwrap_or(0.0);
+    let win_rate_f64: f64 = win_rate_val.and_then(|v| v.try_into().ok()).unwrap_or(0.0);
 
     BacktestResult::builder()
         .pnl(total_pnl)
@@ -134,12 +132,11 @@ fn extract_metrics(
 
 /// Build an `Instrument` for a given contract ID using simulated exchange.
 ///
-/// For MVP, all instruments are treated as spot instruments on a simulated exchange.
+/// For MVP, all instruments are treated as spot instruments on a simulated
+/// exchange.
 fn build_instrument(contract_id: &str) -> Instrument<ExchangeId, Asset> {
     // Parse contract_id as "base_quote" (e.g., "btc_usdt") or use as-is
-    let (base, quote) = contract_id
-        .split_once('_')
-        .unwrap_or((contract_id, "usdt"));
+    let (base, quote) = contract_id.split_once('_').unwrap_or((contract_id, "usdt"));
 
     Instrument::spot(
         ExchangeId::Simulated,
@@ -171,13 +168,11 @@ impl BarterBacktester {
         let instruments = IndexedInstruments::new(vec![instrument]);
 
         // Build the initial account snapshot with configured capital
-        let (_, quote_name) = contract_id
-            .split_once('_')
-            .unwrap_or((contract_id, "usdt"));
+        let (_, quote_name) = contract_id.split_once('_').unwrap_or((contract_id, "usdt"));
 
         let initial_state = UnindexedAccountSnapshot {
-            exchange: ExchangeId::Simulated,
-            balances: vec![barter_execution::balance::AssetBalance::new(
+            exchange:    ExchangeId::Simulated,
+            balances:    vec![barter_execution::balance::AssetBalance::new(
                 AssetNameExchange::from(quote_name),
                 Balance::new(self.initial_capital, self.initial_capital),
                 chrono::Utc::now(),
@@ -192,13 +187,12 @@ impl BarterBacktester {
             self.fees_percent,
         ));
 
-        let engine_state: BacktestEngineState = EngineState::builder(
-            &instruments,
-            DefaultGlobalData,
-            |_| CandleInstrumentData::default(),
-        )
-        .trading_state(TradingState::Enabled)
-        .build();
+        let engine_state: BacktestEngineState =
+            EngineState::builder(&instruments, DefaultGlobalData, |_| {
+                CandleInstrumentData::default()
+            })
+            .trading_state(TradingState::Enabled)
+            .build();
 
         let args_constant = Arc::new(BacktestArgsConstant {
             instruments,
@@ -221,13 +215,11 @@ impl BarterBacktester {
                 message: format!("barter backtest engine error: {e}"),
             })?;
 
-        let summary = multi_summary
-            .summaries
-            .into_iter()
-            .next()
-            .ok_or_else(|| BacktestError::ExecutionFailed {
+        let summary = multi_summary.summaries.into_iter().next().ok_or_else(|| {
+            BacktestError::ExecutionFailed {
                 message: "no backtest summary produced".to_string(),
-            })?;
+            }
+        })?;
 
         Ok(extract_metrics(&summary.trading_summary, timeframe))
     }
@@ -243,12 +235,7 @@ impl Backtester for BarterBacktester {
     ) -> Result<BacktestResult, BacktestError> {
         let candle_rows = self
             .store
-            .query_candles(
-                contract_id,
-                "1m",
-                self.backtest_start,
-                self.backtest_end,
-            )
+            .query_candles(contract_id, "1m", self.backtest_start, self.backtest_end)
             .await
             .map_err(|e| BacktestError::ExecutionFailed {
                 message: format!("failed to query market data: {e}"),
@@ -264,21 +251,21 @@ impl Backtester for BarterBacktester {
             .iter()
             .map(|row| {
                 let candle = Candle {
-                    close_time: row.ts,
-                    open: row.open,
-                    high: row.high,
-                    low: row.low,
-                    close: row.close,
-                    volume: row.volume,
+                    close_time:  row.ts,
+                    open:        row.open,
+                    high:        row.high,
+                    low:         row.low,
+                    close:       row.close,
+                    volume:      row.volume,
                     trade_count: u64::from(row.trade_count.cast_unsigned()),
                 };
 
                 ReconnectEvent::Item(MarketEvent {
                     time_exchange: row.ts,
                     time_received: row.ts,
-                    exchange: ExchangeId::Simulated,
-                    instrument: InstrumentIndex(0),
-                    kind: DataKind::Candle(candle),
+                    exchange:      ExchangeId::Simulated,
+                    instrument:    InstrumentIndex(0),
+                    kind:          DataKind::Candle(candle),
                 })
             })
             .collect();

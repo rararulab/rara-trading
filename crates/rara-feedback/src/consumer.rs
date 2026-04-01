@@ -4,16 +4,15 @@
 //! events, and maintains per-strategy running metric accumulators with
 //! consumer-offset persistence so restarts don't reprocess old events.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
+use rara_domain::{
+    event::{Event, EventType},
+    feedback::StrategyMetrics,
+};
+use rara_event_bus::{bus::EventBus, store::StoreError};
 use rust_decimal::Decimal;
 use snafu::{ResultExt, Snafu};
-
-use rara_domain::event::{Event, EventType};
-use rara_domain::feedback::StrategyMetrics;
-use rara_event_bus::bus::EventBus;
-use rara_event_bus::store::StoreError;
 
 /// Errors from the feedback consumer.
 #[derive(Debug, Snafu)]
@@ -45,21 +44,21 @@ const BATCH_SIZE: usize = 100;
 #[derive(Debug, Clone)]
 pub struct StrategyAccumulator {
     /// Strategy identifier.
-    pub strategy_id: String,
+    pub strategy_id:    String,
     /// Total number of filled trades.
-    pub trade_count: u32,
+    pub trade_count:    u32,
     /// Number of winning trades (realized `PnL` > 0).
     pub winning_trades: u32,
     /// Number of losing trades (realized `PnL` <= 0).
-    pub losing_trades: u32,
+    pub losing_trades:  u32,
     /// Running total realized `PnL`.
-    pub total_pnl: Decimal,
+    pub total_pnl:      Decimal,
     /// Peak cumulative equity for drawdown calculation.
-    pub peak_equity: Decimal,
+    pub peak_equity:    Decimal,
     /// Maximum drawdown observed so far.
-    pub max_drawdown: Decimal,
+    pub max_drawdown:   Decimal,
     /// Individual trade returns for Sharpe calculation.
-    pub returns: Vec<f64>,
+    pub returns:        Vec<f64>,
 }
 
 impl StrategyAccumulator {
@@ -108,7 +107,8 @@ impl StrategyAccumulator {
     /// Compute the Sharpe ratio from accumulated returns.
     ///
     /// Uses sample standard deviation (n-1 denominator). Returns 0.0 when
-    /// fewer than 2 trades have been recorded or when all returns are identical.
+    /// fewer than 2 trades have been recorded or when all returns are
+    /// identical.
     pub fn sharpe_ratio(&self) -> f64 {
         if self.returns.len() < 2 {
             return 0.0;
@@ -151,7 +151,7 @@ impl StrategyAccumulator {
 /// only processes new events on each poll.
 pub struct FeedbackConsumer {
     /// Event bus to consume from.
-    event_bus: Arc<EventBus>,
+    event_bus:    Arc<EventBus>,
     /// Per-strategy running accumulators.
     accumulators: HashMap<String, StrategyAccumulator>,
 }
@@ -167,7 +167,10 @@ impl FeedbackConsumer {
 
     /// Get current metrics for all tracked strategies.
     pub fn all_metrics(&self) -> Vec<StrategyMetrics> {
-        self.accumulators.values().map(StrategyAccumulator::to_metrics).collect()
+        self.accumulators
+            .values()
+            .map(StrategyAccumulator::to_metrics)
+            .collect()
     }
 
     /// Get current metrics for all tracked strategies, paired with their IDs.
@@ -180,7 +183,9 @@ impl FeedbackConsumer {
 
     /// Get metrics for a specific strategy, if any fills have been recorded.
     pub fn strategy_metrics(&self, strategy_id: &str) -> Option<StrategyMetrics> {
-        self.accumulators.get(strategy_id).map(StrategyAccumulator::to_metrics)
+        self.accumulators
+            .get(strategy_id)
+            .map(StrategyAccumulator::to_metrics)
     }
 
     /// Poll for new trading events and update accumulators.
@@ -233,7 +238,8 @@ impl FeedbackConsumer {
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
 
-        // Extract realized_pnl from payload — try string first (Decimal-safe), then number
+        // Extract realized_pnl from payload — try string first (Decimal-safe), then
+        // number
         let pnl = event
             .payload
             .get("realized_pnl")
@@ -283,11 +289,10 @@ impl FeedbackConsumer {
 mod tests {
     use std::sync::Arc;
 
-    use rust_decimal_macros::dec;
-    use serde_json::json;
-
     use rara_domain::event::{Event, EventType};
     use rara_event_bus::bus::EventBus;
+    use rust_decimal_macros::dec;
+    use serde_json::json;
 
     use super::*;
 

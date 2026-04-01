@@ -33,13 +33,13 @@ pub type Result<T> = std::result::Result<T, CompilerError>;
 #[derive(Debug)]
 pub struct CompileResult {
     /// Whether compilation succeeded.
-    pub success: bool,
+    pub success:         bool,
     /// Compiled WASM bytes (if successful).
-    pub wasm_bytes: Option<Vec<u8>>,
+    pub wasm_bytes:      Option<Vec<u8>>,
     /// Compilation errors from stderr.
-    pub errors: Vec<String>,
+    pub errors:          Vec<String>,
     /// Clippy warnings from stderr.
-    pub warnings: Vec<String>,
+    pub warnings:        Vec<String>,
     /// Time taken to compile in milliseconds.
     pub compile_time_ms: u64,
 }
@@ -51,7 +51,7 @@ pub struct StrategyCompiler {
     template_dir: PathBuf,
     /// WASM target triple.
     #[builder(default = "wasm32-wasip1".into())]
-    wasm_target: String,
+    wasm_target:  String,
 }
 
 const IMPL_START_MARKER: &str = "// ===== STRATEGY_IMPL START =====";
@@ -70,15 +70,13 @@ impl StrategyCompiler {
         let tmp = tempfile::tempdir().context(WorkspaceSetupSnafu)?;
         copy_dir_recursive(&self.template_dir, tmp.path()).context(WorkspaceSetupSnafu)?;
 
-        // 2. Patch Cargo.toml to use absolute path for rara-strategy-api
-        //    (the relative path breaks once we copy to a temp location)
+        // 2. Patch Cargo.toml to use absolute path for rara-strategy-api (the relative
+        //    path breaks once we copy to a temp location)
         let cargo_toml_path = tmp.path().join("Cargo.toml");
-        let cargo_toml =
-            std::fs::read_to_string(&cargo_toml_path).context(WorkspaceSetupSnafu)?;
-        let abs_api_path = std::fs::canonicalize(
-            self.template_dir.join("../../crates/rara-strategy-api"),
-        )
-        .context(WorkspaceSetupSnafu)?;
+        let cargo_toml = std::fs::read_to_string(&cargo_toml_path).context(WorkspaceSetupSnafu)?;
+        let abs_api_path =
+            std::fs::canonicalize(self.template_dir.join("../../crates/rara-strategy-api"))
+                .context(WorkspaceSetupSnafu)?;
         let patched = cargo_toml.replace(
             "../../crates/rara-strategy-api",
             &abs_api_path.to_string_lossy(),
@@ -246,8 +244,15 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
 }
 "#;
 
-        let result = compiler.compile(code).await.expect("compile should not error");
-        assert!(result.success, "expected success, got errors: {:?}", result.errors);
+        let result = compiler
+            .compile(code)
+            .await
+            .expect("compile should not error");
+        assert!(
+            result.success,
+            "expected success, got errors: {:?}",
+            result.errors
+        );
         assert!(result.wasm_bytes.is_some(), "expected wasm bytes");
         assert!(
             result.wasm_bytes.as_ref().unwrap().len() > 100,
@@ -255,12 +260,13 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
         );
     }
 
-    /// End-to-end: compile → load via `WasmExecutor` → call `on_candles()` → verify signal.
+    /// End-to-end: compile → load via `WasmExecutor` → call `on_candles()` →
+    /// verify signal.
     #[tokio::test]
     async fn wasm_strategy_executes_end_to_end() {
-        use crate::strategy_executor::StrategyExecutor;
-        use crate::wasm_executor::WasmExecutor;
         use rara_strategy_api::{Candle, Signal};
+
+        use crate::{strategy_executor::StrategyExecutor, wasm_executor::WasmExecutor};
 
         let compiler = StrategyCompiler::builder()
             .template_dir(template_dir())
@@ -304,7 +310,10 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
 "#;
 
         // 1. Compile to WASM
-        let result = compiler.compile(code).await.expect("compile should succeed");
+        let result = compiler
+            .compile(code)
+            .await
+            .expect("compile should succeed");
         assert!(result.success, "compile errors: {:?}", result.errors);
         let wasm_bytes = result.wasm_bytes.expect("should produce wasm bytes");
 
@@ -320,34 +329,83 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
         // 4. Call on_candles() with < 2 candles → Hold
         let one_candle = vec![Candle {
             timestamp: 1000,
-            open: 100.0,
-            high: 105.0,
-            low: 95.0,
-            close: 102.0,
-            volume: 50.0,
+            open:      100.0,
+            high:      105.0,
+            low:       95.0,
+            close:     102.0,
+            volume:    50.0,
         }];
-        let signal = handle.on_candles(&one_candle).expect("on_candles should succeed");
-        assert!(matches!(signal, Signal::Hold), "expected Hold with 1 candle, got {signal:?}");
+        let signal = handle
+            .on_candles(&one_candle)
+            .expect("on_candles should succeed");
+        assert!(
+            matches!(signal, Signal::Hold),
+            "expected Hold with 1 candle, got {signal:?}"
+        );
 
         // 5. Call on_candles() with rising price → Long
         let rising = vec![
-            Candle { timestamp: 1000, open: 100.0, high: 105.0, low: 95.0, close: 100.0, volume: 50.0 },
-            Candle { timestamp: 1060, open: 100.0, high: 110.0, low: 99.0, close: 108.0, volume: 60.0 },
+            Candle {
+                timestamp: 1000,
+                open:      100.0,
+                high:      105.0,
+                low:       95.0,
+                close:     100.0,
+                volume:    50.0,
+            },
+            Candle {
+                timestamp: 1060,
+                open:      100.0,
+                high:      110.0,
+                low:       99.0,
+                close:     108.0,
+                volume:    60.0,
+            },
         ];
-        let signal = handle.on_candles(&rising).expect("on_candles should succeed");
+        let signal = handle
+            .on_candles(&rising)
+            .expect("on_candles should succeed");
         assert!(
-            matches!(signal, Signal::Entry { side: rara_strategy_api::Side::Long, .. }),
+            matches!(
+                signal,
+                Signal::Entry {
+                    side: rara_strategy_api::Side::Long,
+                    ..
+                }
+            ),
             "expected Long entry on rising price, got {signal:?}"
         );
 
         // 6. Call on_candles() with falling price → Short
         let falling = vec![
-            Candle { timestamp: 2000, open: 100.0, high: 105.0, low: 95.0, close: 100.0, volume: 50.0 },
-            Candle { timestamp: 2060, open: 100.0, high: 101.0, low: 90.0, close: 92.0, volume: 70.0 },
+            Candle {
+                timestamp: 2000,
+                open:      100.0,
+                high:      105.0,
+                low:       95.0,
+                close:     100.0,
+                volume:    50.0,
+            },
+            Candle {
+                timestamp: 2060,
+                open:      100.0,
+                high:      101.0,
+                low:       90.0,
+                close:     92.0,
+                volume:    70.0,
+            },
         ];
-        let signal = handle.on_candles(&falling).expect("on_candles should succeed");
+        let signal = handle
+            .on_candles(&falling)
+            .expect("on_candles should succeed");
         assert!(
-            matches!(signal, Signal::Entry { side: rara_strategy_api::Side::Short, .. }),
+            matches!(
+                signal,
+                Signal::Entry {
+                    side: rara_strategy_api::Side::Short,
+                    ..
+                }
+            ),
             "expected Short entry on falling price, got {signal:?}"
         );
 
@@ -355,8 +413,14 @@ fn risk_levels(entry_price: f64, side: Side) -> RiskLevels {
         let levels = handle
             .risk_levels(100.0, rara_strategy_api::Side::Long)
             .expect("risk_levels should succeed");
-        assert!((levels.stop_loss - 98.0).abs() < 0.01, "stop_loss should be ~98.0");
-        assert!((levels.take_profit - 104.0).abs() < 0.01, "take_profit should be ~104.0");
+        assert!(
+            (levels.stop_loss - 98.0).abs() < 0.01,
+            "stop_loss should be ~98.0"
+        );
+        assert!(
+            (levels.take_profit - 104.0).abs() < 0.01,
+            "take_profit should be ~104.0"
+        );
     }
 
     #[tokio::test]

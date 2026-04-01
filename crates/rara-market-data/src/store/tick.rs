@@ -10,15 +10,15 @@ use super::{DatabaseSnafu, MarketStore, Result};
 #[derive(Debug, Clone)]
 pub struct TickRow {
     /// Trade timestamp (UTC).
-    pub ts: DateTime<Utc>,
+    pub ts:            DateTime<Utc>,
     /// Instrument identifier.
     pub instrument_id: String,
     /// Trade price.
-    pub price: f64,
+    pub price:         f64,
     /// Trade amount.
-    pub amount: f64,
+    pub amount:        f64,
     /// Trade side: 0 = buy, 1 = sell.
-    pub side: i16,
+    pub side:          i16,
 }
 
 impl MarketStore {
@@ -36,7 +36,8 @@ impl MarketStore {
 
         let result = sqlx::query(
             "INSERT INTO ticks (ts, instrument_id, price, amount, side)
-             SELECT * FROM UNNEST($1::timestamptz[], $2::text[], $3::float8[], $4::float8[], $5::int2[])",
+             SELECT * FROM UNNEST($1::timestamptz[], $2::text[], $3::float8[], $4::float8[], \
+             $5::int2[])",
         )
         .bind(&ts)
         .bind(&instrument_ids)

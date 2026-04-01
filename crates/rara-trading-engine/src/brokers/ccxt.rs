@@ -3,27 +3,59 @@
 //! Wraps the `ccxt-rust` library to provide a unified broker interface
 //! across multiple cryptocurrency exchanges (Binance, OKX, Bybit).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use bon::Builder;
-use rust_decimal::Decimal;
-use tracing::{debug, instrument, warn};
-
 use ccxt_rust::prelude::{
     Amount, Binance, BinanceBuilder, Bybit, BybitBuilder, Okx, OkxBuilder,
     OrderSide as CcxtOrderSide, OrderStatus as CcxtOrderStatus, OrderType as CcxtOrderType, Price,
 };
-
 use rara_domain::trading::{ActionType, OrderType, Side, StagedAction};
-use crate::account_config::{BrokerConfig, CcxtBrokerConfig};
-use crate::broker::{
-    AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
+use rust_decimal::Decimal;
+use tracing::{debug, instrument, warn};
+
+use crate::{
+    account_config::{BrokerConfig, CcxtBrokerConfig},
+    broker::{
+        AccountInfo, Broker, BrokerError, ExecutionReport, OrderResult, OrderStatus, Position,
+    },
+    broker_registry::{
+        BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
+        MissingFieldSnafu, SelectOption,
+    },
 };
-use crate::broker_registry::{
-    BrokerRegistryEntry, BrokerRegistryError, ConfigField, ConfigFieldType, InvalidValueSnafu,
-    MissingFieldSnafu, SelectOption,
-};
+
+/// Default interval between order status polls.
+const DEFAULT_POLL_INTERVAL_MS: u64 = 1000;
+
+/// Default maximum number of polling attempts before returning last known
+/// status.
+const DEFAULT_MAX_POLL_RETRIES: u32 = 30;
+
+/// Configuration for order status polling after submission.
+///
+/// Controls how frequently and how long the broker will poll an exchange
+/// for a terminal order status (filled, cancelled, expired, rejected)
+/// after placing an order.
+#[derive(Debug, Clone, Builder)]
+pub struct OrderPollConfig {
+    /// Interval between poll attempts in milliseconds.
+    #[builder(default = DEFAULT_POLL_INTERVAL_MS)]
+    pub poll_interval_ms: u64,
+    /// Maximum number of poll attempts before returning last known status.
+    #[builder(default = DEFAULT_MAX_POLL_RETRIES)]
+    pub max_retries:      u32,
+}
+
+impl Default for OrderPollConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: DEFAULT_POLL_INTERVAL_MS,
+            max_retries:      DEFAULT_MAX_POLL_RETRIES,
+        }
+    }
+}
 
 /// Supported exchange identifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,12 +82,13 @@ impl ExchangeId {
     }
 }
 
-/// Parsed CCXT config fields shared between `create_broker` and `create_config`.
+/// Parsed CCXT config fields shared between `create_broker` and
+/// `create_config`.
 struct CcxtFields {
-    exchange: String,
-    sandbox: bool,
-    api_key: String,
-    secret: String,
+    exchange:   String,
+    sandbox:    bool,
+    api_key:    String,
+    secret:     String,
     passphrase: Option<String>,
 }
 
@@ -75,21 +108,16 @@ fn parse_ccxt_fields(fields: &HashMap<String, String>) -> Result<CcxtFields, Bro
     // Validate exchange value
     ExchangeId::parse(&exchange).map_err(|_| {
         InvalidValueSnafu {
-            field: "exchange".to_string(),
+            field:  "exchange".to_string(),
             reason: format!("unsupported exchange: {exchange}"),
         }
         .build()
     })?;
 
-    let sandbox = fields
-        .get("sandbox")
-        .is_none_or(|v| v == "true");
+    let sandbox = fields.get("sandbox").is_none_or(|v| v == "true");
     let api_key = fields.get("api_key").cloned().unwrap_or_default();
     let secret = fields.get("secret").cloned().unwrap_or_default();
-    let passphrase = fields
-        .get("passphrase")
-        .filter(|v| !v.is_empty())
-        .cloned();
+    let passphrase = fields.get("passphrase").filter(|v| !v.is_empty()).cloned();
 
     Ok(CcxtFields {
         exchange,
@@ -111,9 +139,18 @@ fn ccxt_config_fields() -> Vec<ConfigField> {
             .sensitive(false)
             .default("binance")
             .options(vec![
-                SelectOption { value: "binance".into(), label: "Binance".into() },
-                SelectOption { value: "bybit".into(), label: "Bybit".into() },
-                SelectOption { value: "okx".into(), label: "OKX".into() },
+                SelectOption {
+                    value: "binance".into(),
+                    label: "Binance".into(),
+                },
+                SelectOption {
+                    value: "bybit".into(),
+                    label: "Bybit".into(),
+                },
+                SelectOption {
+                    value: "okx".into(),
+                    label: "OKX".into(),
+                },
             ])
             .build(),
         ConfigField::builder()
@@ -147,7 +184,9 @@ fn ccxt_config_fields() -> Vec<ConfigField> {
             .label("API passphrase (OKX only)")
             .required(false)
             .sensitive(true)
-            .description("Exchange API passphrase. Can also be set via RARA_BROKER_PASSPHRASE env var.")
+            .description(
+                "Exchange API passphrase. Can also be set via RARA_BROKER_PASSPHRASE env var.",
+            )
             .build(),
     ]
 }
@@ -155,9 +194,9 @@ fn ccxt_config_fields() -> Vec<ConfigField> {
 /// Build the broker registry entry for the CCXT broker.
 pub fn registry_entry() -> BrokerRegistryEntry {
     BrokerRegistryEntry {
-        type_key: "ccxt",
-        name: "CCXT (Crypto Exchanges)",
-        description: "Trade on Binance, Bybit, OKX, and other crypto exchanges via CCXT.",
+        type_key:      "ccxt",
+        name:          "CCXT (Crypto Exchanges)",
+        description:   "Trade on Binance, Bybit, OKX, and other crypto exchanges via CCXT.",
         config_fields: ccxt_config_fields,
         create_broker: |fields: &HashMap<String, String>| {
             let f = parse_ccxt_fields(fields)?;
@@ -173,10 +212,10 @@ pub fn registry_entry() -> BrokerRegistryEntry {
         create_config: |fields: &HashMap<String, String>| {
             let f = parse_ccxt_fields(fields)?;
             Ok(BrokerConfig::Ccxt(CcxtBrokerConfig {
-                exchange: f.exchange,
-                sandbox: f.sandbox,
-                api_key: f.api_key,
-                secret: f.secret,
+                exchange:   f.exchange,
+                sandbox:    f.sandbox,
+                api_key:    f.api_key,
+                secret:     f.secret,
                 passphrase: f.passphrase,
             }))
         },
@@ -231,6 +270,19 @@ impl ExchangeClient {
                 ex.create_order(symbol, order_type, side, amount, price)
                     .await
             }
+        }
+    }
+
+    /// Fetch a single order by ID and symbol.
+    async fn fetch_order(
+        &self,
+        id: &str,
+        symbol: &str,
+    ) -> Result<ccxt_rust::prelude::Order, ccxt_rust::prelude::Error> {
+        match self {
+            Self::Binance(ex) => ex.fetch_order(id, symbol).await,
+            Self::Okx(ex) => ex.fetch_order(id, symbol).await,
+            Self::Bybit(ex) => ex.fetch_order(id, symbol).await,
         }
     }
 
@@ -289,6 +341,8 @@ impl ExchangeClient {
 ///
 /// Supports Binance, OKX, and Bybit exchanges through the ccxt-rust library.
 /// Use the builder to construct an instance with exchange credentials.
+/// After submitting an order, the broker polls `fetch_order` until a terminal
+/// status is reached or the maximum number of retries is exhausted.
 #[derive(Builder)]
 pub struct CcxtBroker {
     /// Exchange identifier (e.g., "binance", "okx", "bybit").
@@ -296,16 +350,19 @@ pub struct CcxtBroker {
     exchange_id: String,
     /// API key for authentication.
     #[builder(into)]
-    api_key: String,
+    api_key:     String,
     /// API secret for authentication.
     #[builder(into)]
-    secret: String,
+    secret:      String,
     /// Passphrase for exchanges that require it (e.g., OKX).
     #[builder(into)]
-    passphrase: Option<String>,
+    passphrase:  Option<String>,
     /// Whether to use the exchange's sandbox/testnet environment.
     #[builder(default = false)]
-    sandbox: bool,
+    sandbox:     bool,
+    /// Configuration for post-submission order status polling.
+    #[builder(default)]
+    poll_config: OrderPollConfig,
 }
 
 impl std::fmt::Debug for CcxtBroker {
@@ -313,12 +370,14 @@ impl std::fmt::Debug for CcxtBroker {
         f.debug_struct("CcxtBroker")
             .field("exchange_id", &self.exchange_id)
             .field("sandbox", &self.sandbox)
+            .field("poll_config", &self.poll_config)
             .finish_non_exhaustive()
     }
 }
 
 impl CcxtBroker {
-    /// Create the underlying exchange client based on the configured exchange ID.
+    /// Create the underlying exchange client based on the configured exchange
+    /// ID.
     fn build_client(&self) -> Result<ExchangeClient, BrokerError> {
         let exchange_id = ExchangeId::parse(&self.exchange_id)?;
 
@@ -360,6 +419,92 @@ impl CcxtBroker {
             }
         }
     }
+
+    /// Poll the exchange for a terminal order status after submission.
+    ///
+    /// Repeatedly calls `fetch_order` at the configured interval until the
+    /// order reaches a terminal state (closed, cancelled, expired,
+    /// rejected) or the maximum number of retries is exhausted. On timeout,
+    /// returns the last known order state so callers always get a result
+    /// rather than an error.
+    ///
+    /// Individual fetch failures are logged and retried — a single transient
+    /// network error does not abort the polling loop.
+    async fn poll_order_status(
+        &self,
+        client: &ExchangeClient,
+        order: ccxt_rust::prelude::Order,
+        symbol: &str,
+    ) -> ccxt_rust::prelude::Order {
+        // Already terminal — skip polling entirely
+        if is_terminal_ccxt_status(order.status) {
+            return order;
+        }
+
+        let interval = Duration::from_millis(self.poll_config.poll_interval_ms);
+        let mut latest = order;
+
+        for attempt in 1..=self.poll_config.max_retries {
+            tokio::time::sleep(interval).await;
+
+            match client.fetch_order(&latest.id, symbol).await {
+                Ok(refreshed) => {
+                    debug!(
+                        order_id = %refreshed.id,
+                        status = ?refreshed.status,
+                        filled = ?refreshed.filled,
+                        attempt,
+                        "polled order status"
+                    );
+                    latest = refreshed;
+                    if is_terminal_ccxt_status(latest.status) {
+                        return latest;
+                    }
+                }
+                Err(err) => {
+                    // Transient failure — log and keep retrying
+                    warn!(
+                        order_id = %latest.id,
+                        attempt,
+                        error = %err,
+                        "fetch_order failed during polling, will retry"
+                    );
+                }
+            }
+        }
+
+        warn!(
+            order_id = %latest.id,
+            status = ?latest.status,
+            max_retries = self.poll_config.max_retries,
+            "order polling exhausted retries, returning last known status"
+        );
+        latest
+    }
+}
+
+/// Whether a ccxt `OrderStatus` represents a terminal (non-transitional) state.
+const fn is_terminal_ccxt_status(status: CcxtOrderStatus) -> bool {
+    matches!(
+        status,
+        CcxtOrderStatus::Closed
+            | CcxtOrderStatus::Cancelled
+            | CcxtOrderStatus::Expired
+            | CcxtOrderStatus::Rejected
+    )
+}
+
+/// Build an `OrderResult` from a ccxt `Order`, using the action's fields as
+/// fallbacks for values the exchange may not yet have populated.
+fn order_to_result(order: &ccxt_rust::prelude::Order, action: &StagedAction) -> OrderResult {
+    OrderResult::builder()
+        .order_id(&order.id)
+        .contract_id(&action.contract_id)
+        .status(from_ccxt_order_status(order.status))
+        .side(action.side)
+        .quantity(order.filled.unwrap_or(action.quantity))
+        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
+        .build()
 }
 
 /// Map our `Side` to ccxt `OrderSide`.
@@ -444,14 +589,11 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult::builder()
-                        .order_id(order.id)
-                        .contract_id(&action.contract_id)
-                        .status(from_ccxt_order_status(order.status))
-                        .side(action.side)
-                        .quantity(order.filled.unwrap_or(action.quantity))
-                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
-                        .build()
+                    let order = self
+                        .poll_order_status(&client, order, &action.contract_id)
+                        .await;
+
+                    order_to_result(&order, action)
                 }
                 ActionType::CancelOrder => {
                     debug!(contract = action.contract_id, "cancelling order");
@@ -496,14 +638,11 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult::builder()
-                        .order_id(order.id)
-                        .contract_id(&action.contract_id)
-                        .status(from_ccxt_order_status(order.status))
-                        .side(action.side)
-                        .quantity(order.filled.unwrap_or(action.quantity))
-                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
-                        .build()
+                    let order = self
+                        .poll_order_status(&client, order, &action.contract_id)
+                        .await;
+
+                    order_to_result(&order, action)
                 }
                 ActionType::ModifyOrder => {
                     // ccxt-rust Exchange trait has no edit_order, so cancel + re-place
@@ -527,14 +666,11 @@ impl Broker for CcxtBroker {
                         .await
                         .map_err(|e| map_ccxt_error(&e))?;
 
-                    OrderResult::builder()
-                        .order_id(order.id)
-                        .contract_id(&action.contract_id)
-                        .status(from_ccxt_order_status(order.status))
-                        .side(action.side)
-                        .quantity(order.filled.unwrap_or(action.quantity))
-                        .price(order.average.or(order.price).unwrap_or(Decimal::ZERO))
-                        .build()
+                    let order = self
+                        .poll_order_status(&client, order, &action.contract_id)
+                        .await;
+
+                    order_to_result(&order, action)
                 }
             };
 
@@ -622,17 +758,19 @@ impl Broker for CcxtBroker {
     async fn account_info(&self) -> Result<AccountInfo, BrokerError> {
         let client = self.build_client()?;
 
-        let balance = client.fetch_balance().await.map_err(|e| map_ccxt_error(&e))?;
+        let balance = client
+            .fetch_balance()
+            .await
+            .map_err(|e| map_ccxt_error(&e))?;
 
         // Sum all currency balances. A production system would convert to a
         // single quote currency for a meaningful equity figure.
-        let (total_equity, available_cash) =
-            balance
-                .balances
-                .values()
-                .fold((Decimal::ZERO, Decimal::ZERO), |(eq, cash), entry| {
-                    (eq + entry.total, cash + entry.free)
-                });
+        let (total_equity, available_cash) = balance
+            .balances
+            .values()
+            .fold((Decimal::ZERO, Decimal::ZERO), |(eq, cash), entry| {
+                (eq + entry.total, cash + entry.free)
+            });
 
         let positions = self.positions().await?;
 
@@ -794,12 +932,59 @@ mod tests {
 
     #[test]
     fn test_ccxt_error_classification() {
-        let auth_err =
-            map_ccxt_error(&ccxt_rust::prelude::Error::authentication("invalid apiKey"));
+        let auth_err = map_ccxt_error(&ccxt_rust::prelude::Error::authentication("invalid apiKey"));
         assert!(matches!(auth_err, BrokerError::Authentication { .. }));
 
-        let exchange_err =
-            map_ccxt_error(&ccxt_rust::prelude::Error::exchange("exchange", "server error"));
+        let exchange_err = map_ccxt_error(&ccxt_rust::prelude::Error::exchange(
+            "exchange",
+            "server error",
+        ));
         assert!(matches!(exchange_err, BrokerError::Exchange { .. }));
+    }
+
+    #[test]
+    fn test_terminal_status_detection() {
+        assert!(is_terminal_ccxt_status(CcxtOrderStatus::Closed));
+        assert!(is_terminal_ccxt_status(CcxtOrderStatus::Cancelled));
+        assert!(is_terminal_ccxt_status(CcxtOrderStatus::Expired));
+        assert!(is_terminal_ccxt_status(CcxtOrderStatus::Rejected));
+        assert!(!is_terminal_ccxt_status(CcxtOrderStatus::Open));
+        assert!(!is_terminal_ccxt_status(CcxtOrderStatus::Partial));
+    }
+
+    #[test]
+    fn test_poll_config_defaults() {
+        let config = OrderPollConfig::default();
+        assert_eq!(config.poll_interval_ms, 1000);
+        assert_eq!(config.max_retries, 30);
+    }
+
+    #[test]
+    fn test_poll_config_custom() {
+        let config = OrderPollConfig::builder()
+            .poll_interval_ms(500)
+            .max_retries(10)
+            .build();
+        assert_eq!(config.poll_interval_ms, 500);
+        assert_eq!(config.max_retries, 10);
+    }
+
+    #[test]
+    fn test_broker_with_custom_poll_config() {
+        let broker = CcxtBroker::builder()
+            .exchange_id("binance")
+            .api_key("test")
+            .secret("test")
+            .sandbox(true)
+            .poll_config(
+                OrderPollConfig::builder()
+                    .poll_interval_ms(2000)
+                    .max_retries(60)
+                    .build(),
+            )
+            .build();
+
+        assert_eq!(broker.poll_config.poll_interval_ms, 2000);
+        assert_eq!(broker.poll_config.max_retries, 60);
     }
 }

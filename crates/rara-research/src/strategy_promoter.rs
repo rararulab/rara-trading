@@ -1,4 +1,5 @@
-//! Strategy promotion — saves accepted WASM strategies for paper trading pickup.
+//! Strategy promotion — saves accepted WASM strategies for paper trading
+//! pickup.
 //!
 //! When the research loop accepts a candidate strategy, the promoter persists
 //! the compiled WASM binary and metadata so downstream systems (paper trading,
@@ -7,16 +8,15 @@
 use std::path::{Path, PathBuf};
 
 use bon::Builder;
+use rara_strategy_api::StrategyMeta;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
-use rara_strategy_api::StrategyMeta;
-
-use crate::compiler::StrategyCompiler;
-use crate::strategy_executor::StrategyExecutor;
-use crate::trace::Trace;
-use crate::wasm_executor::WasmExecutor;
+use crate::{
+    compiler::StrategyCompiler, strategy_executor::StrategyExecutor, trace::Trace,
+    wasm_executor::WasmExecutor,
+};
 
 /// Errors from strategy promotion operations.
 #[derive(Debug, Snafu)]
@@ -90,38 +90,28 @@ pub struct PromotedStrategy {
     /// The hypothesis the experiment tested.
     hypothesis_id: Uuid,
     /// Filesystem path to the promoted WASM binary.
-    wasm_path: PathBuf,
+    wasm_path:     PathBuf,
     /// Strategy metadata extracted from the WASM module.
-    meta: StrategyMeta,
+    meta:          StrategyMeta,
     /// Filesystem path to the saved `.rs` source code, if available.
-    source_path: Option<PathBuf>,
+    source_path:   Option<PathBuf>,
 }
 
 impl PromotedStrategy {
     /// Returns the experiment ID.
-    pub const fn experiment_id(&self) -> Uuid {
-        self.experiment_id
-    }
+    pub const fn experiment_id(&self) -> Uuid { self.experiment_id }
 
     /// Returns the hypothesis ID.
-    pub const fn hypothesis_id(&self) -> Uuid {
-        self.hypothesis_id
-    }
+    pub const fn hypothesis_id(&self) -> Uuid { self.hypothesis_id }
 
     /// Returns the path to the promoted WASM binary.
-    pub fn wasm_path(&self) -> &Path {
-        &self.wasm_path
-    }
+    pub fn wasm_path(&self) -> &Path { &self.wasm_path }
 
     /// Returns the strategy metadata.
-    pub const fn meta(&self) -> &StrategyMeta {
-        &self.meta
-    }
+    pub const fn meta(&self) -> &StrategyMeta { &self.meta }
 
     /// Returns the path to the saved `.rs` source code, if available.
-    pub fn source_path(&self) -> Option<&Path> {
-        self.source_path.as_deref()
-    }
+    pub fn source_path(&self) -> Option<&Path> { self.source_path.as_deref() }
 }
 
 /// Handles promotion of candidate strategies from research to paper trading.
@@ -132,11 +122,11 @@ impl PromotedStrategy {
 #[derive(Builder)]
 pub struct StrategyPromoter {
     /// Trace storage for looking up experiments and hypotheses.
-    trace: Trace,
+    trace:        Trace,
     /// WASM runtime for validating promoted modules.
-    runtime: WasmExecutor,
+    runtime:      WasmExecutor,
     /// Strategy compiler for producing WASM from source code.
-    compiler: StrategyCompiler,
+    compiler:     StrategyCompiler,
     /// Base directory for promoted strategies (e.g. `strategies/promoted/`).
     promoted_dir: PathBuf,
 }
@@ -182,9 +172,7 @@ impl StrategyPromoter {
         std::fs::create_dir_all(&self.promoted_dir).context(IoSnafu)?;
 
         // 5. Save WASM binary
-        let wasm_path = self
-            .promoted_dir
-            .join(format!("{experiment_id}.wasm"));
+        let wasm_path = self.promoted_dir.join(format!("{experiment_id}.wasm"));
         std::fs::write(&wasm_path, &wasm_bytes).context(IoSnafu)?;
 
         // 6. Save strategy source code alongside the binary
@@ -200,9 +188,7 @@ impl StrategyPromoter {
             .meta(meta)
             .build();
 
-        let meta_path = self
-            .promoted_dir
-            .join(format!("{experiment_id}.json"));
+        let meta_path = self.promoted_dir.join(format!("{experiment_id}.json"));
         let meta_json = serde_json::to_string_pretty(&promoted).context(SerializeSnafu)?;
         std::fs::write(&meta_path, meta_json).context(IoSnafu)?;
 
@@ -213,7 +199,8 @@ impl StrategyPromoter {
     ///
     /// Used when WASM bytes are already available (e.g. immediately after
     /// compilation in the research loop) to avoid a redundant compile step.
-    /// When `source_code` is provided, the `.rs` source is saved alongside the binary.
+    /// When `source_code` is provided, the `.rs` source is saved alongside the
+    /// binary.
     pub fn promote_from_wasm(
         &self,
         experiment_id: Uuid,
@@ -229,9 +216,7 @@ impl StrategyPromoter {
         std::fs::create_dir_all(&self.promoted_dir).context(IoSnafu)?;
 
         // 3. Save WASM binary
-        let wasm_path = self
-            .promoted_dir
-            .join(format!("{experiment_id}.wasm"));
+        let wasm_path = self.promoted_dir.join(format!("{experiment_id}.wasm"));
         std::fs::write(&wasm_path, wasm_bytes).context(IoSnafu)?;
 
         // 4. Save strategy source code if provided
@@ -252,16 +237,15 @@ impl StrategyPromoter {
             .meta(meta)
             .build();
 
-        let meta_path = self
-            .promoted_dir
-            .join(format!("{experiment_id}.json"));
+        let meta_path = self.promoted_dir.join(format!("{experiment_id}.json"));
         let meta_json = serde_json::to_string_pretty(&promoted).context(SerializeSnafu)?;
         std::fs::write(&meta_path, meta_json).context(IoSnafu)?;
 
         Ok(promoted)
     }
 
-    /// List all promoted strategies by reading metadata files from the promoted directory.
+    /// List all promoted strategies by reading metadata files from the promoted
+    /// directory.
     pub fn list_promoted(&self) -> Result<Vec<PromotedStrategy>> {
         if !self.promoted_dir.exists() {
             return Ok(vec![]);
@@ -287,9 +271,7 @@ impl StrategyPromoter {
 
     /// Load a promoted strategy's WASM bytes by experiment ID.
     pub fn load_promoted_wasm(&self, experiment_id: Uuid) -> Result<Vec<u8>> {
-        let wasm_path = self
-            .promoted_dir
-            .join(format!("{experiment_id}.wasm"));
+        let wasm_path = self.promoted_dir.join(format!("{experiment_id}.wasm"));
         std::fs::read(&wasm_path).context(IoSnafu)
     }
 }
@@ -327,8 +309,8 @@ mod tests {
         let exp_id = Uuid::new_v4();
         let hyp_id = Uuid::new_v4();
         let meta = StrategyMeta {
-            name: "test-strategy".into(),
-            version: 1,
+            name:        "test-strategy".into(),
+            version:     1,
             api_version: rara_strategy_api::API_VERSION,
             description: "A test".into(),
         };

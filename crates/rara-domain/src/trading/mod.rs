@@ -54,39 +54,37 @@ pub struct StagedAction {
     #[builder(into)]
     pub contract_id: String,
     /// Order side.
-    pub side: Side,
+    pub side:        Side,
     /// Order quantity in contract units.
-    pub quantity: Decimal,
+    pub quantity:    Decimal,
     /// Order type semantics.
-    pub order_type: OrderType,
+    pub order_type:  OrderType,
     /// Optional limit/trigger price depending on order type.
     pub limit_price: Option<Decimal>,
 }
 
 /// Generates an 8-character hex hash from a UUID.
-fn generate_hash() -> String {
-    Uuid::new_v4().to_string()[..8].to_string()
-}
+fn generate_hash() -> String { Uuid::new_v4().to_string()[..8].to_string() }
 
 /// A git-style commit of trading actions, bundling multiple staged actions.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct TradingCommit {
     /// Short commit hash used as correlation key.
     #[builder(default = generate_hash())]
-    pub hash: String,
+    pub hash:             String,
     /// Commit message describing intent.
     #[builder(into)]
-    pub message: String,
+    pub message:          String,
     /// Batched staged actions.
-    pub actions: Vec<StagedAction>,
+    pub actions:          Vec<StagedAction>,
     /// Strategy that produced this commit.
     #[builder(into)]
-    pub strategy_id: String,
+    pub strategy_id:      String,
     /// Strategy version used for generation.
     pub strategy_version: u32,
     /// Commit creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at: jiff::Timestamp,
+    pub created_at:       jiff::Timestamp,
 }
 
 /// One leg of an arbitrage opportunity.
@@ -96,12 +94,12 @@ pub struct ArbLeg {
     #[builder(into)]
     pub contract_id: String,
     /// Execution side for this leg.
-    pub side: Side,
+    pub side:        Side,
     /// Leg quantity.
-    pub quantity: Decimal,
+    pub quantity:    Decimal,
     /// Broker/exchange route for this leg.
     #[builder(into)]
-    pub broker: String,
+    pub broker:      String,
 }
 
 /// A detected arbitrage opportunity across legs.
@@ -109,13 +107,13 @@ pub struct ArbLeg {
 pub struct ArbOpportunity {
     /// Strategy that discovered the opportunity.
     #[builder(into)]
-    pub strategy_id: String,
+    pub strategy_id:     String,
     /// Arbitrage legs to execute atomically.
-    pub legs: Vec<ArbLeg>,
+    pub legs:            Vec<ArbLeg>,
     /// Expected gross spread across legs.
     pub expected_spread: Decimal,
     /// Maximum tolerated execution slippage.
-    pub max_slippage: Decimal,
+    pub max_slippage:    Decimal,
     /// Opportunity expiry timestamp.
-    pub expiry: jiff::Timestamp,
+    pub expiry:          jiff::Timestamp,
 }

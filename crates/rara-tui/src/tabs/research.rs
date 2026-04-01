@@ -18,13 +18,13 @@
 //!
 //! Keys: `j/k` navigate list, `p` toggle DAG popup, `Esc` close popup.
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap,
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap},
 };
-use ratatui::Frame;
 
 use crate::theme;
 
@@ -92,13 +92,13 @@ pub enum HypothesisStatus {
 #[derive(Debug, Clone)]
 pub struct HypothesisEntry {
     /// Unique hypothesis ID.
-    pub id: u32,
+    pub id:          u32,
     /// Short name / label.
-    pub name: String,
+    pub name:        String,
     /// Current status.
-    pub status: HypothesisStatus,
+    pub status:      HypothesisStatus,
     /// Parent hypothesis ID (for DAG lineage).
-    pub parent_id: Option<u32>,
+    pub parent_id:   Option<u32>,
     /// Optional longer description.
     pub description: String,
 }
@@ -107,24 +107,24 @@ pub struct HypothesisEntry {
 #[derive(Debug, Clone)]
 pub struct BacktestEntry {
     /// Timeframe label (e.g. "1h", "4h", "1d").
-    pub timeframe: String,
+    pub timeframe:    String,
     /// Annualized Sharpe ratio.
-    pub sharpe: f64,
+    pub sharpe:       f64,
     /// Maximum drawdown percentage.
     pub max_drawdown: f64,
     /// Win rate percentage.
-    pub win_rate: f64,
+    pub win_rate:     f64,
     /// Total number of trades.
-    pub trade_count: u32,
+    pub trade_count:  u32,
 }
 
 /// Best-known strategy info (State Of The Art).
 #[derive(Debug, Clone)]
 pub struct SotaInfo {
     /// Name of the current SOTA strategy.
-    pub name: String,
+    pub name:         String,
     /// Sharpe ratio of SOTA.
-    pub sharpe: f64,
+    pub sharpe:       f64,
     /// Max drawdown of SOTA.
     pub max_drawdown: f64,
 }
@@ -133,11 +133,11 @@ pub struct SotaInfo {
 #[derive(Debug, Clone)]
 pub struct ResearchProgress {
     /// Current hypothesis index (1-based).
-    pub current: u32,
+    pub current:         u32,
     /// Total planned hypotheses.
-    pub total: u32,
+    pub total:           u32,
     /// Current phase of the active hypothesis.
-    pub phase: ResearchPhase,
+    pub phase:           ResearchPhase,
     /// Name of the active hypothesis.
     pub hypothesis_name: String,
 }
@@ -146,17 +146,17 @@ pub struct ResearchProgress {
 #[derive(Debug, Clone)]
 pub struct ResearchState {
     /// Overall loop progress.
-    pub progress: ResearchProgress,
+    pub progress:       ResearchProgress,
     /// All hypotheses explored so far.
-    pub hypotheses: Vec<HypothesisEntry>,
+    pub hypotheses:     Vec<HypothesisEntry>,
     /// Index of the currently selected hypothesis in the list.
     pub selected_index: usize,
     /// Backtest results for the selected hypothesis.
-    pub backtests: Vec<BacktestEntry>,
+    pub backtests:      Vec<BacktestEntry>,
     /// Current best strategy info.
-    pub sota: Option<SotaInfo>,
+    pub sota:           Option<SotaInfo>,
     /// Whether the DAG popup is visible.
-    pub show_dag: bool,
+    pub show_dag:       bool,
 }
 
 impl ResearchState {
@@ -164,17 +164,17 @@ impl ResearchState {
     #[must_use]
     pub const fn empty() -> Self {
         Self {
-            progress: ResearchProgress {
-                current: 0,
-                total: 0,
-                phase: ResearchPhase::Coding,
+            progress:       ResearchProgress {
+                current:         0,
+                total:           0,
+                phase:           ResearchPhase::Coding,
                 hypothesis_name: String::new(),
             },
-            hypotheses: Vec::new(),
+            hypotheses:     Vec::new(),
             selected_index: 0,
-            backtests: Vec::new(),
-            sota: None,
-            show_dag: false,
+            backtests:      Vec::new(),
+            sota:           None,
+            show_dag:       false,
         }
     }
 
@@ -193,14 +193,10 @@ impl ResearchState {
     }
 
     /// Toggle the DAG popup visibility.
-    pub const fn toggle_dag(&mut self) {
-        self.show_dag = !self.show_dag;
-    }
+    pub const fn toggle_dag(&mut self) { self.show_dag = !self.show_dag; }
 
     /// Close the DAG popup if open.
-    pub const fn close_dag(&mut self) {
-        self.show_dag = false;
-    }
+    pub const fn close_dag(&mut self) { self.show_dag = false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +207,7 @@ impl ResearchState {
 pub fn render(frame: &mut Frame, state: &ResearchState, area: Rect) {
     let layout = Layout::vertical([
         Constraint::Length(3), // progress bar
-        Constraint::Min(8),   // main body
+        Constraint::Min(8),    // main body
         Constraint::Length(5), // detail pane
     ])
     .split(area);
@@ -239,10 +235,7 @@ fn render_progress(frame: &mut Frame, state: &ResearchState, area: Rect) {
         .hypotheses
         .iter()
         .find(|h| h.name == p.hypothesis_name)
-        .and_then(|h| {
-            h.parent_id
-                .map(|pid| format!(" (#{}<-#{})", h.id, pid))
-        })
+        .and_then(|h| h.parent_id.map(|pid| format!(" (#{}<-#{})", h.id, pid)))
         .unwrap_or_default();
 
     let label = format!(
@@ -296,18 +289,9 @@ fn render_hypothesis_list(frame: &mut Frame, state: &ResearchState, area: Rect) 
         .enumerate()
         .map(|(i, h)| {
             let (icon, style) = match h.status {
-                HypothesisStatus::InProgress => (
-                    "\u{23f3}",
-                    Style::default().fg(theme::GOLD),
-                ),
-                HypothesisStatus::Accepted => (
-                    "\u{2713}",
-                    Style::default().fg(theme::FOAM),
-                ),
-                HypothesisStatus::Rejected => (
-                    "\u{2717}",
-                    Style::default().fg(theme::LOVE),
-                ),
+                HypothesisStatus::InProgress => ("\u{23f3}", Style::default().fg(theme::GOLD)),
+                HypothesisStatus::Accepted => ("\u{2713}", Style::default().fg(theme::FOAM)),
+                HypothesisStatus::Rejected => ("\u{2717}", Style::default().fg(theme::LOVE)),
             };
 
             let selected_marker = if i == state.selected_index { ">" } else { " " };
@@ -319,7 +303,11 @@ fn render_hypothesis_list(frame: &mut Frame, state: &ResearchState, area: Rect) 
             ]);
 
             if i == state.selected_index {
-                row.style(Style::default().bg(theme::OVERLAY).add_modifier(Modifier::BOLD))
+                row.style(
+                    Style::default()
+                        .bg(theme::OVERLAY)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
                 row
             }
@@ -397,33 +385,29 @@ fn render_sota(frame: &mut Frame, state: &ResearchState, area: Rect) {
         },
     );
 
-    let paragraph = Paragraph::new(text)
-        .style(theme::text())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme::muted())
-                .title(" SOTA "),
-        );
+    let paragraph = Paragraph::new(text).style(theme::text()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::muted())
+            .title(" SOTA "),
+    );
 
     frame.render_widget(paragraph, area);
 }
 
-/// Render the detail pane at the bottom showing selected hypothesis description.
+/// Render the detail pane at the bottom showing selected hypothesis
+/// description.
 fn render_detail(frame: &mut Frame, state: &ResearchState, area: Rect) {
-    let text = state
-        .hypotheses
-        .get(state.selected_index)
-        .map_or_else(
-            || "No hypothesis selected.".to_string(),
-            |h| {
-                if h.description.is_empty() {
-                    format!("#{} {} — no description available.", h.id, h.name)
-                } else {
-                    format!("#{} {} — {}", h.id, h.name, h.description)
-                }
-            },
-        );
+    let text = state.hypotheses.get(state.selected_index).map_or_else(
+        || "No hypothesis selected.".to_string(),
+        |h| {
+            if h.description.is_empty() {
+                format!("#{} {} — no description available.", h.id, h.name)
+            } else {
+                format!("#{} {} — {}", h.id, h.name, h.description)
+            }
+        },
+    );
 
     let paragraph = Paragraph::new(text)
         .style(theme::text())
@@ -465,15 +449,13 @@ fn render_dag_popup(frame: &mut Frame, state: &ResearchState, area: Rect) {
         )));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .style(theme::text())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::IRIS))
-                .style(Style::default().bg(theme::OVERLAY))
-                .title(" Hypothesis DAG (p to close) "),
-        );
+    let paragraph = Paragraph::new(lines).style(theme::text()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::IRIS))
+            .style(Style::default().bg(theme::OVERLAY))
+            .title(" Hypothesis DAG (p to close) "),
+    );
 
     frame.render_widget(paragraph, popup);
 }
@@ -519,7 +501,8 @@ fn render_dag_node(
     }
 }
 
-/// Compute a centered rectangle within `area` using percentage width and height.
+/// Compute a centered rectangle within `area` using percentage width and
+/// height.
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let popup_layout = Layout::vertical([
         Constraint::Percentage((100 - percent_y) / 2),

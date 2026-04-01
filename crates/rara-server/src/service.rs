@@ -1,26 +1,27 @@
 //! gRPC service implementation for [`RaraService`].
 
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{pin::Pin, sync::Arc, time::Instant};
 
+use rara_event_bus::bus::EventBus;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
-use rara_event_bus::bus::EventBus;
-
-use crate::health::{self, HealthConfig};
-use crate::rara_proto::rara_service_server::RaraService;
-use crate::rara_proto::{Empty, EventFilter, EventMessage, SystemStatus};
+use crate::{
+    health::{self, HealthConfig},
+    rara_proto::{
+        Empty, EventFilter, EventMessage, SystemStatus, rara_service_server::RaraService,
+    },
+};
 
 /// Holds shared state needed by the gRPC handlers.
 pub struct RaraServiceImpl {
     /// Application start time, used to compute uptime.
-    start_time: Instant,
+    start_time:    Instant,
     /// Event bus for subscribing to real-time events.
-    event_bus: Option<Arc<EventBus>>,
-    /// Health probe configuration (None = legacy scaffold mode, all indicators false).
+    event_bus:     Option<Arc<EventBus>>,
+    /// Health probe configuration (None = legacy scaffold mode, all indicators
+    /// false).
     health_config: Option<Arc<HealthConfig>>,
 }
 
@@ -29,8 +30,8 @@ impl RaraServiceImpl {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            start_time: Instant::now(),
-            event_bus: None,
+            start_time:    Instant::now(),
+            event_bus:     None,
             health_config: None,
         }
     }
@@ -39,8 +40,8 @@ impl RaraServiceImpl {
     #[must_use]
     pub fn with_health(health_config: HealthConfig) -> Self {
         Self {
-            start_time: Instant::now(),
-            event_bus: None,
+            start_time:    Instant::now(),
+            event_bus:     None,
             health_config: Some(Arc::new(health_config)),
         }
     }
@@ -49,8 +50,8 @@ impl RaraServiceImpl {
     #[must_use]
     pub fn with_event_bus(event_bus: Arc<EventBus>) -> Self {
         Self {
-            start_time: Instant::now(),
-            event_bus: Some(event_bus),
+            start_time:    Instant::now(),
+            event_bus:     Some(event_bus),
             health_config: None,
         }
     }
@@ -64,13 +65,14 @@ impl RaraServiceImpl {
 }
 
 impl Default for RaraServiceImpl {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[tonic::async_trait]
 impl RaraService for RaraServiceImpl {
+    type StreamEventsStream =
+        Pin<Box<dyn Stream<Item = Result<EventMessage, Status>> + Send + 'static>>;
+
     async fn get_system_status(
         &self,
         _request: Request<Empty>,
@@ -83,20 +85,29 @@ impl RaraService for RaraServiceImpl {
         let (database_connected, websocket_connected, llm_available, contract_count) =
             if let Some(ref config) = self.health_config {
                 let h = health::probe(config).await;
-                (h.database_connected, h.websocket_connected, h.llm_available, config.contract_count)
+                (
+                    h.database_connected,
+                    h.websocket_connected,
+                    h.llm_available,
+                    config.contract_count,
+                )
             } else {
                 (false, false, false, 0)
             };
 
         let mut warnings = Vec::new();
         if contract_count == 0 {
-            warnings.push("No contracts configured. Run `rara setup -i` to add trading pairs.".to_string());
+            warnings.push(
+                "No contracts configured. Run `rara setup -i` to add trading pairs.".to_string(),
+            );
         }
         if !database_connected {
             warnings.push("Database unreachable. Check PostgreSQL is running.".to_string());
         }
         if !llm_available {
-            warnings.push("LLM backend not found in PATH. Run `rara setup -i` to configure.".to_string());
+            warnings.push(
+                "LLM backend not found in PATH. Run `rara setup -i` to configure.".to_string(),
+            );
         }
 
         let status = SystemStatus {
@@ -113,9 +124,6 @@ impl RaraService for RaraServiceImpl {
         info!("GetSystemStatus called, uptime={}", status.uptime);
         Ok(Response::new(status))
     }
-
-    type StreamEventsStream =
-        Pin<Box<dyn Stream<Item = Result<EventMessage, Status>> + Send + 'static>>;
 
     async fn stream_events(
         &self,

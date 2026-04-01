@@ -5,36 +5,40 @@
 //! [`OperationDispatcher`] and [`StateProvider`] via internal adapter structs.
 
 use async_trait::async_trait;
+use rara_domain::{
+    contract::Contract,
+    trading::{
+        OrderType, Side,
+        git::{
+            AddResult, CommitLogEntry, CommitPrepareResult, GitExportState, GitPosition, GitState,
+            GitStatus, OrderStatusUpdate, PushResult, RejectResult, SyncResult,
+        },
+        operation::{Operation, OperationOrderType, OperationResult, OperationStatus},
+    },
+};
 use rust_decimal::Decimal;
 use tokio::sync::Mutex;
 
-use rara_domain::contract::Contract;
-use rara_domain::trading::git::{
-    AddResult, CommitLogEntry, CommitPrepareResult, GitExportState, GitPosition, GitState,
-    GitStatus, OrderStatusUpdate, PushResult, RejectResult, SyncResult,
-};
-use rara_domain::trading::operation::{Operation, OperationOrderType, OperationResult, OperationStatus};
-use rara_domain::trading::{OrderType, Side};
-
-use crate::broker::{AccountInfo, Broker, BrokerError, OrderStatus, Position};
-use crate::health::{BrokerHealth, BrokerHealthInfo, HealthTracker};
-use crate::trading_git::{
-    OperationDispatcher, PendingOrder, StateProvider, TradingGit, TradingGitError,
+use crate::{
+    broker::{AccountInfo, Broker, BrokerError, OrderStatus, Position},
+    health::{BrokerHealth, BrokerHealthInfo, HealthTracker},
+    trading_git::{OperationDispatcher, PendingOrder, StateProvider, TradingGit, TradingGitError},
 };
 
-/// Unified Trading Account — the main entry point for the trading-as-git workflow.
+/// Unified Trading Account — the main entry point for the trading-as-git
+/// workflow.
 ///
-/// Owns a [`Broker`], a [`TradingGit`] history tracker, and a [`HealthTracker`].
-/// All broker calls are routed through health tracking, and all operations
-/// flow through the git stage -> commit -> push pipeline.
+/// Owns a [`Broker`], a [`TradingGit`] history tracker, and a
+/// [`HealthTracker`]. All broker calls are routed through health tracking, and
+/// all operations flow through the git stage -> commit -> push pipeline.
 pub struct UnifiedTradingAccount {
     /// Account identifier.
-    pub id: String,
+    pub id:    String,
     /// Human-readable label.
     pub label: String,
-    broker: Box<dyn Broker>,
-    git: Mutex<TradingGit>,
-    health: Mutex<HealthTracker>,
+    broker:    Box<dyn Broker>,
+    git:       Mutex<TradingGit>,
+    health:    Mutex<HealthTracker>,
 }
 
 impl UnifiedTradingAccount {
@@ -105,10 +109,10 @@ impl UnifiedTradingAccount {
         contract: Contract,
         quantity: Option<Decimal>,
     ) -> AddResult {
-        self.git.lock().await.add(Operation::ClosePosition {
-            contract,
-            quantity,
-        })
+        self.git
+            .lock()
+            .await
+            .add(Operation::ClosePosition { contract, quantity })
     }
 
     /// Stage an order cancellation.
@@ -251,9 +255,7 @@ impl UnifiedTradingAccount {
     // ── Queries ────────────────────────────────────────────────────────
 
     /// Return the current staging area and commit state.
-    pub async fn status(&self) -> GitStatus {
-        self.git.lock().await.status()
-    }
+    pub async fn status(&self) -> GitStatus { self.git.lock().await.status() }
 
     /// Return commit log entries, newest first.
     pub async fn log(&self, limit: usize, symbol: Option<&str>) -> Vec<CommitLogEntry> {
@@ -271,9 +273,7 @@ impl UnifiedTradingAccount {
     }
 
     /// Export the full git state for persistence.
-    pub async fn export_git_state(&self) -> GitExportState {
-        self.git.lock().await.export_state()
-    }
+    pub async fn export_git_state(&self) -> GitExportState { self.git.lock().await.export_state() }
 
     // ── Broker delegation (with health tracking) ───────────────────────
 
@@ -296,24 +296,16 @@ impl UnifiedTradingAccount {
     // ── Health ─────────────────────────────────────────────────────────
 
     /// Return the current health status.
-    pub async fn health(&self) -> BrokerHealth {
-        self.health.lock().await.status()
-    }
+    pub async fn health(&self) -> BrokerHealth { self.health.lock().await.status() }
 
     /// Return a detailed health info snapshot.
-    pub async fn health_info(&self) -> BrokerHealthInfo {
-        self.health.lock().await.info()
-    }
+    pub async fn health_info(&self) -> BrokerHealthInfo { self.health.lock().await.info() }
 
     /// Check whether the broker has been manually disabled.
-    pub async fn is_disabled(&self) -> bool {
-        self.health.lock().await.is_disabled()
-    }
+    pub async fn is_disabled(&self) -> bool { self.health.lock().await.is_disabled() }
 
     /// Re-enable a previously disabled broker.
-    pub async fn enable(&self) {
-        self.health.lock().await.enable();
-    }
+    pub async fn enable(&self) { self.health.lock().await.enable(); }
 
     /// Set the current trading round for subsequent commits.
     pub async fn set_current_round(&self, round: u32) {
@@ -357,13 +349,13 @@ impl OperationDispatcher for BrokerDispatcher<'_> {
             Operation::SyncOrders => {
                 // Sync is handled at the UTA level, not via dispatch
                 return OperationResult {
-                    action: op.clone(),
-                    success: true,
-                    order_id: None,
-                    status: OperationStatus::Filled,
-                    filled_qty: None,
+                    action:       op.clone(),
+                    success:      true,
+                    order_id:     None,
+                    status:       OperationStatus::Filled,
+                    filled_qty:   None,
                     filled_price: None,
-                    error: None,
+                    error:        None,
                 };
             }
         };
@@ -372,26 +364,26 @@ impl OperationDispatcher for BrokerDispatcher<'_> {
             Ok(order_result) => {
                 self.health.lock().await.record_success();
                 OperationResult {
-                    action: op.clone(),
-                    success: order_result.status != OrderStatus::Rejected,
-                    order_id: Some(order_result.order_id),
-                    status: map_order_status(order_result.status),
-                    filled_qty: None,
+                    action:       op.clone(),
+                    success:      order_result.status != OrderStatus::Rejected,
+                    order_id:     Some(order_result.order_id),
+                    status:       map_order_status(order_result.status),
+                    filled_qty:   None,
                     filled_price: None,
-                    error: None,
+                    error:        None,
                 }
             }
             Err(e) => {
                 let msg = e.to_string();
                 self.health.lock().await.record_failure(&msg);
                 OperationResult {
-                    action: op.clone(),
-                    success: false,
-                    order_id: None,
-                    status: OperationStatus::Rejected,
-                    filled_qty: None,
+                    action:       op.clone(),
+                    success:      false,
+                    order_id:     None,
+                    status:       OperationStatus::Rejected,
+                    filled_qty:   None,
                     filled_price: None,
-                    error: Some(msg),
+                    error:        Some(msg),
                 }
             }
         }
@@ -480,7 +472,11 @@ async fn call_broker_with_health<'a, T, F>(
     f: F,
 ) -> Result<T, BrokerError>
 where
-    F: FnOnce(&'a dyn Broker) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, BrokerError>> + Send + 'a>>,
+    F: FnOnce(
+        &'a dyn Broker,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<T, BrokerError>> + Send + 'a>,
+    >,
 {
     let result = f(broker).await;
     match &result {
@@ -492,12 +488,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use rara_domain::{
+        contract::{Contract, SecType},
+        trading::operation::OperationOrderType,
+    };
     use rust_decimal_macros::dec;
 
+    use super::*;
     use crate::brokers::paper::PaperBroker;
-    use rara_domain::contract::{Contract, SecType};
-    use rara_domain::trading::operation::OperationOrderType;
 
     fn test_contract() -> Contract {
         Contract::builder()
@@ -568,7 +566,10 @@ mod tests {
         uta.commit("risky trade").await.expect("should commit");
 
         // Reject instead of pushing
-        let reject = uta.reject("too risky").await.expect("reject should succeed");
+        let reject = uta
+            .reject("too risky")
+            .await
+            .expect("reject should succeed");
         assert_eq!(reject.operation_count, 1);
         assert!(reject.message.contains("REJECTED"));
 

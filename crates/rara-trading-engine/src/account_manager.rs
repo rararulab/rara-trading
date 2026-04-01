@@ -10,19 +10,21 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 
-use crate::account_config::AccountConfig;
-use crate::health::{BrokerHealth, BrokerHealthInfo};
-use crate::uta::UnifiedTradingAccount;
+use crate::{
+    account_config::AccountConfig,
+    health::{BrokerHealth, BrokerHealthInfo},
+    uta::UnifiedTradingAccount,
+};
 
 /// Summary of a registered account.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AccountSummary {
     /// Account identifier.
     #[builder(into)]
-    pub id: String,
+    pub id:     String,
     /// Human-readable label.
     #[builder(into)]
-    pub label: String,
+    pub label:  String,
     /// Current health snapshot.
     pub health: BrokerHealthInfo,
 }
@@ -31,13 +33,13 @@ pub struct AccountSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct AggregatedEquity {
     /// Sum of equity from all healthy accounts.
-    pub total_equity: Decimal,
+    pub total_equity:         Decimal,
     /// Sum of cash from all healthy accounts.
-    pub total_cash: Decimal,
+    pub total_cash:           Decimal,
     /// Sum of unrealized P&L from all healthy accounts.
     pub total_unrealized_pnl: Decimal,
     /// Per-account equity breakdown.
-    pub accounts: Vec<AccountEquity>,
+    pub accounts:             Vec<AccountEquity>,
 }
 
 /// Single account equity entry within an aggregated view.
@@ -45,18 +47,18 @@ pub struct AggregatedEquity {
 pub struct AccountEquity {
     /// Account identifier.
     #[builder(into)]
-    pub id: String,
+    pub id:             String,
     /// Human-readable label.
     #[builder(into)]
-    pub label: String,
+    pub label:          String,
     /// Account equity (zero if offline).
-    pub equity: Decimal,
+    pub equity:         Decimal,
     /// Account cash (zero if offline).
-    pub cash: Decimal,
+    pub cash:           Decimal,
     /// Unrealized P&L (zero if offline).
     pub unrealized_pnl: Decimal,
     /// Health status at the time of query.
-    pub health: BrokerHealth,
+    pub health:         BrokerHealth,
 }
 
 /// Error from account manager operations.
@@ -81,7 +83,7 @@ pub enum AccountManagerError {
     #[snafu(display("failed to create broker for account '{id}': {source}"))]
     BrokerCreate {
         /// Account whose broker could not be created.
-        id: String,
+        id:     String,
         /// The underlying registry error.
         source: crate::broker_registry::BrokerRegistryError,
     },
@@ -106,7 +108,7 @@ impl AccountManager {
             let type_key = acc.broker_config.type_key();
             let entry = crate::broker_registry::find_broker(type_key).ok_or_else(|| {
                 AccountManagerError::BrokerCreate {
-                    id: acc.id.clone(),
+                    id:     acc.id.clone(),
                     source: crate::broker_registry::BrokerRegistryError::UnknownType {
                         type_key: type_key.to_string(),
                     },
@@ -128,29 +130,19 @@ impl AccountManager {
     }
 
     /// Register a UTA. Uses `uta.id` as the key, replacing any previous entry.
-    pub fn add(&mut self, uta: UnifiedTradingAccount) {
-        self.accounts.insert(uta.id.clone(), uta);
-    }
+    pub fn add(&mut self, uta: UnifiedTradingAccount) { self.accounts.insert(uta.id.clone(), uta); }
 
     /// Remove and return a UTA by its ID.
-    pub fn remove(&mut self, id: &str) -> Option<UnifiedTradingAccount> {
-        self.accounts.remove(id)
-    }
+    pub fn remove(&mut self, id: &str) -> Option<UnifiedTradingAccount> { self.accounts.remove(id) }
 
     /// Look up a UTA by exact ID.
-    pub fn get(&self, id: &str) -> Option<&UnifiedTradingAccount> {
-        self.accounts.get(id)
-    }
+    pub fn get(&self, id: &str) -> Option<&UnifiedTradingAccount> { self.accounts.get(id) }
 
     /// Check whether an account with the given ID is registered.
-    pub fn has(&self, id: &str) -> bool {
-        self.accounts.contains_key(id)
-    }
+    pub fn has(&self, id: &str) -> bool { self.accounts.contains_key(id) }
 
     /// Return the number of registered accounts.
-    pub fn size(&self) -> usize {
-        self.accounts.len()
-    }
+    pub fn size(&self) -> usize { self.accounts.len() }
 
     /// Return `(id, label)` pairs for all registered accounts.
     pub fn list(&self) -> Vec<(&str, &str)> {
@@ -260,9 +252,7 @@ impl AccountManager {
 }
 
 impl Default for AccountManager {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]
@@ -270,11 +260,12 @@ mod tests {
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
-    use crate::account_config::{BrokerConfig, PaperBrokerConfig};
-    use crate::brokers::paper::PaperBroker;
-    use crate::uta::UnifiedTradingAccount;
-
     use super::*;
+    use crate::{
+        account_config::{BrokerConfig, PaperBrokerConfig},
+        brokers::paper::PaperBroker,
+        uta::UnifiedTradingAccount,
+    };
 
     fn make_uta(id: &str) -> UnifiedTradingAccount {
         let broker = PaperBroker::new(Decimal::new(100_000, 0));
@@ -387,22 +378,20 @@ mod tests {
     fn from_config_creates_enabled_accounts() {
         let accounts = vec![
             AccountConfig {
-                id: "paper-1".to_string(),
-                label: Some("Paper One".to_string()),
+                id:            "paper-1".to_string(),
+                label:         Some("Paper One".to_string()),
                 broker_config: BrokerConfig::Paper(PaperBrokerConfig {
                     fill_price: Some(100.0),
                 }),
-                enabled: true,
-                contracts: vec!["BTC-USDT".to_string()],
+                enabled:       true,
+                contracts:     vec!["BTC-USDT".to_string()],
             },
             AccountConfig {
-                id: "paper-2".to_string(),
-                label: None,
-                broker_config: BrokerConfig::Paper(PaperBrokerConfig {
-                    fill_price: None,
-                }),
-                enabled: false,
-                contracts: vec![],
+                id:            "paper-2".to_string(),
+                label:         None,
+                broker_config: BrokerConfig::Paper(PaperBrokerConfig { fill_price: None }),
+                enabled:       false,
+                contracts:     vec![],
             },
         ];
         let mgr = AccountManager::from_config(&accounts).unwrap();
@@ -414,11 +403,11 @@ mod tests {
     #[test]
     fn from_config_uses_label() {
         let accounts = vec![AccountConfig {
-            id: "test".to_string(),
-            label: Some("My Label".to_string()),
+            id:            "test".to_string(),
+            label:         Some("My Label".to_string()),
             broker_config: BrokerConfig::Paper(PaperBrokerConfig { fill_price: None }),
-            enabled: true,
-            contracts: vec![],
+            enabled:       true,
+            contracts:     vec![],
         }];
         let mgr = AccountManager::from_config(&accounts).unwrap();
         let list = mgr.list();

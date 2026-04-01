@@ -1,27 +1,30 @@
-//! Research loop orchestration — the full propose -> code -> compile -> backtest -> evaluate cycle.
+//! Research loop orchestration — the full propose -> code -> compile ->
+//! backtest -> evaluate cycle.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use bon::Builder;
+use rara_domain::{
+    event::{Event, EventType},
+    research::{
+        Experiment, Hypothesis, HypothesisFeedback, ResearchStrategy, ResearchStrategyStatus,
+    },
+    timeframe::Timeframe,
+};
+use rara_event_bus::bus::EventBus;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
-use rara_domain::event::{Event, EventType};
-use rara_domain::research::{
-    Experiment, Hypothesis, HypothesisFeedback, ResearchStrategy, ResearchStrategyStatus,
+use crate::{
+    backtester::Backtester,
+    feedback_gen::FeedbackGenerator,
+    hypothesis_gen::HypothesisGenerator,
+    prompt_renderer::PromptRenderer,
+    strategy_manager::{StrategyManager, StrategyManagerError},
+    trace::{DagSelection, Trace},
 };
-use rara_domain::timeframe::Timeframe;
-use rara_event_bus::bus::EventBus;
-
-use crate::backtester::Backtester;
-use crate::feedback_gen::FeedbackGenerator;
-use crate::hypothesis_gen::HypothesisGenerator;
-use crate::prompt_renderer::PromptRenderer;
-use crate::strategy_manager::{StrategyManager, StrategyManagerError};
-use crate::trace::{DagSelection, Trace};
 
 /// Event payload for hypothesis creation.
 #[derive(Debug, Serialize)]
@@ -36,7 +39,7 @@ struct ExperimentCompletedPayload {
     /// UUID of the completed experiment.
     experiment_id: String,
     /// Whether the experiment met acceptance criteria.
-    accepted: bool,
+    accepted:      bool,
 }
 
 /// Event payload for a strategy candidate.
@@ -106,11 +109,11 @@ pub struct IterationResult {
     /// The experiment that was run.
     pub experiment: Experiment,
     /// The feedback on the experiment.
-    pub feedback: HypothesisFeedback,
+    pub feedback:   HypothesisFeedback,
     /// Whether the experiment was accepted.
-    pub accepted: bool,
+    pub accepted:   bool,
     /// The compiled research strategy.
-    pub strategy: ResearchStrategy,
+    pub strategy:   ResearchStrategy,
 }
 
 /// Orchestrates the full RD-Agent style research loop:
@@ -118,30 +121,30 @@ pub struct IterationResult {
 #[derive(Builder)]
 pub struct ResearchLoop {
     /// Generates new hypotheses from trace history.
-    hypothesis_gen: HypothesisGenerator,
+    hypothesis_gen:      HypothesisGenerator,
     /// Manages the full strategy lifecycle (code gen, compile, load).
-    strategy_manager: Arc<dyn StrategyManager>,
+    strategy_manager:    Arc<dyn StrategyManager>,
     /// Runs backtests against loaded strategy handles.
-    backtester: Arc<dyn Backtester>,
+    backtester:          Arc<dyn Backtester>,
     /// LLM-driven feedback evaluator.
-    feedback_gen: FeedbackGenerator,
+    feedback_gen:        FeedbackGenerator,
     /// Prompt template renderer.
     #[allow(dead_code)]
-    prompt_renderer: PromptRenderer,
+    prompt_renderer:     PromptRenderer,
     /// DAG trace storage.
-    trace: Trace,
+    trace:               Trace,
     /// Domain event bus.
-    event_bus: Arc<EventBus>,
+    event_bus:           Arc<EventBus>,
     /// Maximum attempts to fix compile errors before giving up.
     #[builder(default = 3)]
     max_compile_retries: u32,
     /// Directory for saving generated strategy source code each iteration.
     /// When set, each iteration's `.rs` source is persisted here for debugging
     /// and reproducibility.
-    generated_dir: Option<PathBuf>,
+    generated_dir:       Option<PathBuf>,
     /// Timeframes to evaluate each hypothesis on.
     #[builder(default = vec![Timeframe::Hour1, Timeframe::Hour4, Timeframe::Day1])]
-    timeframes: Vec<Timeframe>,
+    timeframes:          Vec<Timeframe>,
 }
 
 impl ResearchLoop {
@@ -187,9 +190,7 @@ impl ResearchLoop {
         }
 
         // 6. Compile with retries, producing a persisted ResearchStrategy
-        let strategy = self
-            .compile_with_retries(&mut code, &hypothesis)
-            .await?;
+        let strategy = self.compile_with_retries(&mut code, &hypothesis).await?;
 
         // 7. Validate the module loads successfully
         let _loaded = self
@@ -204,9 +205,7 @@ impl ResearchLoop {
             .build();
 
         // 9. Run backtests across all configured timeframes, pick best result
-        let backtest_result = self
-            .run_multi_timeframe_backtest(strategy.id)
-            .await?;
+        let backtest_result = self.run_multi_timeframe_backtest(strategy.id).await?;
 
         // 10. Persist experiment with backtest result attached
         experiment.backtest_result = Some(backtest_result.clone());
@@ -276,10 +275,11 @@ impl ResearchLoop {
         })
     }
 
-    /// Attempt to compile strategy code, retrying with LLM-driven fixes on failure.
+    /// Attempt to compile strategy code, retrying with LLM-driven fixes on
+    /// failure.
     ///
-    /// Only persists the strategy record and artifact after a successful compilation,
-    /// avoiding orphaned records from failed attempts.
+    /// Only persists the strategy record and artifact after a successful
+    /// compilation, avoiding orphaned records from failed attempts.
     #[tracing::instrument(skip(self, code, hypothesis), fields(hypothesis_id = %hypothesis.id))]
     async fn compile_with_retries(
         &self,
@@ -321,7 +321,8 @@ impl ResearchLoop {
         })
     }
 
-    /// Run backtests across all configured timeframes, returning the best result.
+    /// Run backtests across all configured timeframes, returning the best
+    /// result.
     ///
     /// Each timeframe is tested sequentially. Failed individual timeframes are
     /// logged as warnings but do not abort the entire run. The result with the
@@ -380,11 +381,7 @@ impl ResearchLoop {
     }
 
     /// Helper to publish a domain event with a typed payload.
-    fn publish_event(
-        &self,
-        event_type: EventType,
-        payload: &impl Serialize,
-    ) -> Result<()> {
+    fn publish_event(&self, event_type: EventType, payload: &impl Serialize) -> Result<()> {
         let event = Event::builder()
             .event_type(event_type)
             .source("research_loop")

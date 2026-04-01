@@ -1,28 +1,34 @@
 #![allow(clippy::result_large_err)]
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use chrono::{NaiveDate, Utc};
 use clap::Parser;
+use rara_trading::{
+    accounts_config,
+    agent::{CliBackend, CliExecutor},
+    app_config,
+    cli::{
+        Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction,
+        SetupAccountAction, SetupAction, StrategyAction,
+    },
+    error::{
+        self, AgentBackendSnafu, AgentExecutionSnafu, AppError, ConfigSnafu, DataFetchSnafu,
+        EventBusSnafu, GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu,
+        PromptRendererSnafu, RegistrySnafu, TraceSnafu,
+    },
+    event_bus::bus::EventBus,
+    logging::{self, LoggingConfig},
+    paths, validation,
+};
 use rust_decimal_macros::dec;
 use serde::Serialize;
 use snafu::ResultExt;
 
 use rara_market_data::fetcher::HistoryFetcher;
-use rara_trading::agent::{CliBackend, CliExecutor};
-use rara_trading::app_config;
-use rara_trading::accounts_config;
-use rara_trading::cli::{Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction, SetupAction, SetupAccountAction, StrategyAction};
-use rara_trading::validation;
-use rara_trading::error::{
-    self, AgentBackendSnafu, AgentExecutionSnafu, AppError, ConfigSnafu, DataFetchSnafu,
-    EventBusSnafu, GrpcServeSnafu, IoSnafu, MarketStoreSnafu, PromoterSnafu,
-    PromptRendererSnafu, RegistrySnafu, TraceSnafu,
-};
-use rara_trading::event_bus::bus::EventBus;
-use rara_trading::logging::{self, LoggingConfig};
-use rara_trading::paths;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -31,247 +37,247 @@ use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ErrorResponse {
-    ok: bool,
-    error: String,
+    ok:         bool,
+    error:      String,
     #[serde(skip_serializing_if = "Option::is_none")]
     suggestion: Option<String>,
 }
 
 #[derive(Serialize)]
 struct ConfigSetResponse<'a> {
-    ok: bool,
+    ok:     bool,
     action: &'static str,
-    key: &'a str,
-    value: &'a str,
+    key:    &'a str,
+    value:  &'a str,
 }
 
 #[derive(Serialize)]
 struct ConfigGetResponse<'a> {
-    ok: bool,
+    ok:     bool,
     action: &'static str,
-    key: &'a str,
-    value: &'a str,
+    key:    &'a str,
+    value:  &'a str,
 }
 
 #[derive(Serialize)]
 struct ConfigListResponse {
-    ok: bool,
-    action: &'static str,
+    ok:      bool,
+    action:  &'static str,
     entries: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Serialize)]
 struct SetupInitResponse {
-    ok: bool,
-    action: &'static str,
+    ok:      bool,
+    action:  &'static str,
     created: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
+    reason:  Option<String>,
 }
 
 #[derive(Serialize)]
 struct ValidateCheck {
-    name: String,
-    ok: bool,
+    name:       String,
+    ok:         bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    detail:     Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     suggestion: Option<String>,
 }
 
 #[derive(Serialize)]
 struct SetupValidateResponse {
-    ok: bool,
+    ok:     bool,
     action: &'static str,
     checks: Vec<ValidateCheck>,
 }
 
 #[derive(Serialize)]
 struct SetupAccountAddResponse<'a> {
-    ok: bool,
-    action: &'static str,
-    id: &'a str,
+    ok:      bool,
+    action:  &'static str,
+    id:      &'a str,
     created: bool,
 }
 
 #[derive(Serialize)]
 struct SetupAccountListResponse {
-    ok: bool,
-    action: &'static str,
+    ok:       bool,
+    action:   &'static str,
     accounts: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize)]
 struct SetupAccountRemoveResponse<'a> {
-    ok: bool,
-    action: &'static str,
-    id: &'a str,
+    ok:      bool,
+    action:  &'static str,
+    id:      &'a str,
     removed: bool,
 }
 
 #[derive(Serialize)]
 struct SetupAccountTestResponse<'a> {
-    ok: bool,
-    action: &'static str,
-    id: &'a str,
-    equity: String,
+    ok:             bool,
+    action:         &'static str,
+    id:             &'a str,
+    equity:         String,
     available_cash: String,
 }
 
 #[derive(Serialize)]
 struct HelloResponse<'a> {
-    ok: bool,
-    action: &'static str,
+    ok:       bool,
+    action:   &'static str,
     greeting: &'a str,
 }
 
 #[derive(Serialize)]
 struct AgentResponse<'a> {
-    ok: bool,
-    action: &'static str,
+    ok:        bool,
+    action:    &'static str,
     exit_code: Option<i32>,
     timed_out: bool,
-    output: &'a str,
+    output:    &'a str,
 }
 
 #[derive(Serialize)]
 struct IterationResponse<'a> {
-    iteration: u32,
-    accepted: bool,
+    iteration:  u32,
+    accepted:   bool,
     hypothesis: &'a str,
 }
 
 #[derive(Serialize)]
 struct ResearchRunResponse {
-    ok: bool,
-    action: &'static str,
+    ok:         bool,
+    action:     &'static str,
     iterations: u32,
-    accepted: u32,
-    rejected: u32,
-    errors: u32,
+    accepted:   u32,
+    rejected:   u32,
+    errors:     u32,
 }
 
 #[derive(Serialize)]
 struct DataFetchResponse<'a> {
-    ok: bool,
-    action: &'static str,
-    source: &'a str,
-    symbol: &'a str,
+    ok:      bool,
+    action:  &'static str,
+    source:  &'a str,
+    symbol:  &'a str,
     candles: usize,
 }
 
 #[derive(Serialize)]
 struct DataInfoResponse {
-    ok: bool,
-    action: &'static str,
+    ok:          bool,
+    action:      &'static str,
     instruments: Vec<rara_market_data::store::candle::CandleCoverage>,
 }
 
 #[derive(Serialize)]
 struct ExperimentListItem {
-    index: u64,
+    index:         u64,
     experiment_id: String,
-    hypothesis: String,
-    decision: &'static str,
-    sharpe: Option<f64>,
+    hypothesis:    String,
+    decision:      &'static str,
+    sharpe:        Option<f64>,
 }
 
 #[derive(Serialize)]
 struct ResearchListResponse {
-    ok: bool,
-    action: &'static str,
+    ok:          bool,
+    action:      &'static str,
     experiments: Vec<ExperimentListItem>,
 }
 
 #[derive(Serialize)]
 struct HypothesisDetail {
-    id: String,
-    text: String,
-    reason: String,
+    id:          String,
+    text:        String,
+    reason:      String,
     observation: String,
-    knowledge: String,
-    parent: Option<String>,
+    knowledge:   String,
+    parent:      Option<String>,
 }
 
 #[derive(Serialize)]
 struct FeedbackDetail {
-    experiment_id: String,
-    decision: bool,
-    reason: String,
-    observations: String,
+    experiment_id:         String,
+    decision:              bool,
+    reason:                String,
+    observations:          String,
     hypothesis_evaluation: String,
-    new_hypothesis: Option<String>,
-    code_change_summary: String,
+    new_hypothesis:        Option<String>,
+    code_change_summary:   String,
 }
 
 #[derive(Serialize)]
 struct BacktestDetail {
-    pnl: String,
+    pnl:          String,
     sharpe_ratio: f64,
     max_drawdown: String,
-    win_rate: f64,
-    trade_count: u32,
+    win_rate:     f64,
+    trade_count:  u32,
 }
 
 #[derive(Serialize)]
 struct ExperimentDetail {
-    id: String,
-    hypothesis_id: String,
-    status: String,
-    strategy_code: String,
+    id:              String,
+    hypothesis_id:   String,
+    status:          String,
+    strategy_code:   String,
     backtest_result: Option<BacktestDetail>,
 }
 
 #[derive(Serialize)]
 struct ResearchShowResponse {
-    ok: bool,
-    action: &'static str,
+    ok:         bool,
+    action:     &'static str,
     experiment: ExperimentDetail,
     hypothesis: Option<HypothesisDetail>,
-    feedbacks: Vec<FeedbackDetail>,
+    feedbacks:  Vec<FeedbackDetail>,
 }
 
 #[derive(Serialize)]
 struct PromotedItem {
     experiment_id: String,
     hypothesis_id: String,
-    wasm_path: String,
-    source_path: Option<String>,
-    meta: PromotedMeta,
+    wasm_path:     String,
+    source_path:   Option<String>,
+    meta:          PromotedMeta,
 }
 
 #[derive(Serialize)]
 struct PromotedMeta {
-    name: String,
-    version: u32,
+    name:        String,
+    version:     u32,
     api_version: u32,
     description: String,
 }
 
 #[derive(Serialize)]
 struct ResearchPromotedResponse {
-    ok: bool,
-    action: &'static str,
+    ok:         bool,
+    action:     &'static str,
     strategies: Vec<PromotedItem>,
 }
 
 #[derive(Serialize)]
 struct EvaluationEntry {
-    timestamp: String,
-    strategy_id: String,
-    decision: String,
-    reason: String,
+    timestamp:    String,
+    strategy_id:  String,
+    decision:     String,
+    reason:       String,
     sharpe_ratio: f64,
-    win_rate: f64,
-    trade_count: u64,
-    pnl: String,
+    win_rate:     f64,
+    trade_count:  u64,
+    pnl:          String,
     max_drawdown: String,
 }
 
 #[derive(Serialize)]
 struct FeedbackReportResponse {
-    ok: bool,
-    action: &'static str,
+    ok:          bool,
+    action:      &'static str,
     evaluations: Vec<EvaluationEntry>,
 }
 
@@ -279,50 +285,45 @@ struct FeedbackReportResponse {
 #[derive(Serialize)]
 struct StrategyStatus {
     strategy: String,
-    trades: usize,
-    filled: usize,
+    trades:   usize,
+    filled:   usize,
     rejected: usize,
 }
 
 /// Response payload for `paper status`.
 #[derive(Serialize)]
 struct PaperStatusResponse {
-    ok: bool,
-    action: &'static str,
-    strategies: Vec<StrategyStatus>,
+    ok:           bool,
+    action:       &'static str,
+    strategies:   Vec<StrategyStatus>,
     total_trades: usize,
 }
 
 /// Response payload for `paper stop`.
 #[derive(Serialize)]
 struct PaperStopResponse {
-    ok: bool,
-    action: &'static str,
+    ok:      bool,
+    action:  &'static str,
     message: String,
 }
 
 /// Summary printed after graceful shutdown of paper trading.
 #[derive(Serialize)]
 struct PaperShutdownSummary {
-    ok: bool,
-    action: &'static str,
+    ok:            bool,
+    action:        &'static str,
     duration_secs: u64,
-    total_trades: usize,
+    total_trades:  usize,
 }
 
-use rara_trading::research::barter_backtester::BarterBacktester;
-use rara_trading::research::compiler::StrategyCompiler;
-use rara_trading::research::strategy_executor::StrategyExecutor;
-use rara_trading::research::wasm_executor::WasmExecutor;
-use rara_trading::research::feedback_gen::FeedbackGenerator;
-use rara_trading::research::hypothesis_gen::HypothesisGenerator;
-use rara_trading::research::prompt_renderer::PromptRenderer;
-use rara_trading::research::research_loop::ResearchLoop;
-use rara_trading::research::strategy_coder::StrategyCoder;
-use rara_trading::research::strategy_promoter::PromotedStrategy;
-use rara_trading::research::strategy_store::StrategyStore;
-use rara_trading::research::trace::Trace;
-use rara_trading::research::wasm_strategy_manager::WasmStrategyManager;
+use rara_trading::research::{
+    barter_backtester::BarterBacktester, compiler::StrategyCompiler,
+    feedback_gen::FeedbackGenerator, hypothesis_gen::HypothesisGenerator,
+    prompt_renderer::PromptRenderer, research_loop::ResearchLoop, strategy_coder::StrategyCoder,
+    strategy_executor::StrategyExecutor, strategy_promoter::PromotedStrategy,
+    strategy_store::StrategyStore, trace::Trace, wasm_executor::WasmExecutor,
+    wasm_strategy_manager::WasmStrategyManager,
+};
 
 #[tokio::main]
 async fn main() {
@@ -335,8 +336,8 @@ async fn main() {
         println!(
             "{}",
             serde_json::to_string(&ErrorResponse {
-                ok: false,
-                error: e.to_string(),
+                ok:         false,
+                error:      e.to_string(),
                 suggestion: None,
             })
             .expect("ErrorResponse must serialize")
@@ -359,10 +360,10 @@ async fn run() -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ConfigSetResponse {
-                        ok: true,
+                        ok:     true,
                         action: "config_set",
-                        key: &key,
-                        value: &value,
+                        key:    &key,
+                        value:  &value,
                     })
                     .expect("ConfigSetResponse must serialize")
                 );
@@ -374,10 +375,10 @@ async fn run() -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ConfigGetResponse {
-                        ok: true,
+                        ok:     true,
                         action: "config_get",
-                        key: &key,
-                        value: display_value,
+                        key:    &key,
+                        value:  display_value,
                     })
                     .expect("ConfigGetResponse must serialize")
                 );
@@ -392,8 +393,8 @@ async fn run() -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ConfigListResponse {
-                        ok: true,
-                        action: "config_list",
+                        ok:      true,
+                        action:  "config_list",
                         entries: map,
                     })
                     .expect("ConfigListResponse must serialize")
@@ -406,8 +407,8 @@ async fn run() -> error::Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&HelloResponse {
-                    ok: true,
-                    action: "hello",
+                    ok:       true,
+                    action:   "hello",
                     greeting: &greeting,
                 })
                 .expect("HelloResponse must serialize")
@@ -425,7 +426,10 @@ async fn run() -> error::Result<()> {
         } => {
             rara_trading::daemon::run(iterations, grpc_addr).await?;
         }
-        Command::Setup { interactive, action } => {
+        Command::Setup {
+            interactive,
+            action,
+        } => {
             if interactive {
                 rara_trading::setup_wizard::run().await?;
             } else if let Some(action) = action {
@@ -441,7 +445,9 @@ async fn run() -> error::Result<()> {
         Command::Tui { server } => {
             rara_tui::event_loop::run(server.as_deref(), crate::paths::strategies_promoted_dir())
                 .await
-                .map_err(|e| AppError::Tui { source: Box::new(e) })?;
+                .map_err(|e| AppError::Tui {
+                    source: Box::new(e),
+                })?;
         }
         Command::Feedback { action } => {
             run_feedback(action)?;
@@ -483,11 +489,11 @@ async fn run() -> error::Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&AgentResponse {
-                    ok: result.success,
-                    action: "agent_run",
+                    ok:        result.success,
+                    action:    "agent_run",
                     exit_code: result.exit_code,
                     timed_out: result.timed_out,
-                    output: &result.output,
+                    output:    &result.output,
                 })
                 .expect("AgentResponse must serialize")
             );
@@ -556,7 +562,12 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) -> 
         "server.port" => {
             cfg.server.port = value.parse().map_err(|_| parse_err(key, value))?;
         }
-        _ => return ConfigSnafu { message: format!("unknown config key: {key}") }.fail(),
+        _ => {
+            return ConfigSnafu {
+                message: format!("unknown config key: {key}"),
+            }
+            .fail();
+        }
     }
     Ok(())
 }
@@ -591,13 +602,14 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> error::Result<Opt
         }
         // sentinel
         "sentinel.enabled" => Ok(Some(cfg.sentinel.enabled.to_string())),
-        "sentinel.check_interval_secs" => {
-            Ok(Some(cfg.sentinel.check_interval_secs.to_string()))
-        }
+        "sentinel.check_interval_secs" => Ok(Some(cfg.sentinel.check_interval_secs.to_string())),
         // server
         "server.listen_addr" => Ok(Some(cfg.server.listen_addr.clone())),
         "server.port" => Ok(Some(cfg.server.port.to_string())),
-        _ => ConfigSnafu { message: format!("unknown config key: {key}") }.fail(),
+        _ => ConfigSnafu {
+            message: format!("unknown config key: {key}"),
+        }
+        .fail(),
     }
 }
 
@@ -664,10 +676,7 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
             cfg.feedback.max_drawdown_for_retirement.to_string(),
         ),
         // sentinel
-        (
-            "sentinel.enabled".into(),
-            cfg.sentinel.enabled.to_string(),
-        ),
+        ("sentinel.enabled".into(), cfg.sentinel.enabled.to_string()),
         (
             "sentinel.check_interval_secs".into(),
             cfg.sentinel.check_interval_secs.to_string(),
@@ -684,7 +693,6 @@ fn run_feedback(action: FeedbackAction) -> error::Result<()> {
         FeedbackAction::Report { strategy, limit } => {
             run_feedback_report(strategy.as_deref(), limit)
         }
-
     }
 }
 
@@ -705,35 +713,19 @@ fn run_feedback_report(strategy: Option<&str>, limit: usize) -> error::Result<()
 
     let mut entries: Vec<EvaluationEntry> = events
         .into_iter()
-        .filter(|e| {
-            strategy.is_none_or(|s| e.strategy_id.as_deref() == Some(s))
-        })
+        .filter(|e| strategy.is_none_or(|s| e.strategy_id.as_deref() == Some(s)))
         .map(|e| {
             let p = &e.payload;
             EvaluationEntry {
-                timestamp: e.timestamp.to_string(),
-                strategy_id: e
-                    .strategy_id
-                    .unwrap_or_else(|| "unknown".to_owned()),
-                decision: p["decision"]
-                    .as_str()
-                    .unwrap_or("unknown")
-                    .to_owned(),
-                reason: p["reason"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_owned(),
+                timestamp:    e.timestamp.to_string(),
+                strategy_id:  e.strategy_id.unwrap_or_else(|| "unknown".to_owned()),
+                decision:     p["decision"].as_str().unwrap_or("unknown").to_owned(),
+                reason:       p["reason"].as_str().unwrap_or("").to_owned(),
                 sharpe_ratio: p["sharpe_ratio"].as_f64().unwrap_or(0.0),
-                win_rate: p["win_rate"].as_f64().unwrap_or(0.0),
-                trade_count: p["trade_count"].as_u64().unwrap_or(0),
-                pnl: p["pnl"]
-                    .as_str()
-                    .unwrap_or("0")
-                    .to_owned(),
-                max_drawdown: p["max_drawdown"]
-                    .as_str()
-                    .unwrap_or("0")
-                    .to_owned(),
+                win_rate:     p["win_rate"].as_f64().unwrap_or(0.0),
+                trade_count:  p["trade_count"].as_u64().unwrap_or(0),
+                pnl:          p["pnl"].as_str().unwrap_or("0").to_owned(),
+                max_drawdown: p["max_drawdown"].as_str().unwrap_or("0").to_owned(),
             }
         })
         .collect();
@@ -755,10 +747,7 @@ fn run_feedback_report(strategy: Option<&str>, limit: usize) -> error::Result<()
         // Format PnL with sign
         let pnl = format_pnl(&entry.pnl);
         // Truncate timestamp to minutes
-        let ts = entry
-            .timestamp
-            .get(..16)
-            .unwrap_or(&entry.timestamp);
+        let ts = entry.timestamp.get(..16).unwrap_or(&entry.timestamp);
         eprintln!(
             "{:<24} {:<16} {:<9} {:>7.2} {:>9} {:>7} {:>7} {:>10}",
             ts,
@@ -775,8 +764,8 @@ fn run_feedback_report(strategy: Option<&str>, limit: usize) -> error::Result<()
     println!(
         "{}",
         serde_json::to_string(&FeedbackReportResponse {
-            ok: true,
-            action: "feedback.report",
+            ok:          true,
+            action:      "feedback.report",
             evaluations: entries,
         })
         .expect("FeedbackReportResponse must serialize")
@@ -784,13 +773,15 @@ fn run_feedback_report(strategy: Option<&str>, limit: usize) -> error::Result<()
     Ok(())
 }
 
-/// Format a drawdown decimal string as a negative percentage (e.g. "0.05" -> "-5.0%").
+/// Format a drawdown decimal string as a negative percentage (e.g. "0.05" ->
+/// "-5.0%").
 fn format_drawdown(dd: &str) -> String {
     dd.parse::<f64>()
         .map_or_else(|_| dd.to_owned(), |v| format!("-{:.1}%", v * 100.0))
 }
 
-/// Format a `PnL` string with a sign prefix (e.g. "234.50" -> "+$234", "-124" -> "-$124").
+/// Format a `PnL` string with a sign prefix (e.g. "234.50" -> "+$234", "-124"
+/// -> "-$124").
 fn format_pnl(pnl: &str) -> String {
     pnl.parse::<f64>().map_or_else(
         |_| pnl.to_owned(),
@@ -818,22 +809,15 @@ async fn run_data(action: DataAction) -> error::Result<()> {
 }
 
 /// Fetch historical market data from an exchange into `TimescaleDB`.
-async fn run_data_fetch(
-    source: &str,
-    symbol: &str,
-    start: &str,
-    end: &str,
-) -> error::Result<()> {
-    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d").map_err(|_| {
-        error::AppError::Config {
+async fn run_data_fetch(source: &str, symbol: &str, start: &str, end: &str) -> error::Result<()> {
+    let start_date =
+        NaiveDate::parse_from_str(start, "%Y-%m-%d").map_err(|_| error::AppError::Config {
             message: format!("invalid start date: {start}"),
-        }
-    })?;
-    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| {
-        error::AppError::Config {
+        })?;
+    let end_date =
+        NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| error::AppError::Config {
             message: format!("invalid end date: {end}"),
-        }
-    })?;
+        })?;
 
     let cfg = app_config::load();
     let store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
@@ -888,8 +872,8 @@ async fn run_data_info() -> error::Result<()> {
     println!(
         "{}",
         serde_json::to_string(&DataInfoResponse {
-            ok: true,
-            action: "data.info",
+            ok:          true,
+            action:      "data.info",
             instruments: coverage,
         })
         .expect("DataInfoResponse must serialize")
@@ -935,19 +919,19 @@ async fn build_research_loop(trace_path: &Path) -> error::Result<ResearchLoop> {
         .await
         .context(MarketStoreSnafu)?;
 
-    let backtester: Arc<dyn rara_trading::research::backtester::Backtester> =
-        Arc::new(BarterBacktester::builder()
+    let backtester: Arc<dyn rara_trading::research::backtester::Backtester> = Arc::new(
+        BarterBacktester::builder()
             .store(market_store)
             .initial_capital(dec!(10000))
             .fees_percent(dec!(0.1))
             .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
             .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
-            .build());
+            .build(),
+    );
 
     let cli_backend =
         CliBackend::from_agent_config(&cfg.agent).context(error::AgentBackendSnafu)?;
-    let llm: Arc<dyn rara_trading::infra::llm::LlmClient> =
-        Arc::new(CliExecutor::new(cli_backend));
+    let llm: Arc<dyn rara_trading::infra::llm::LlmClient> = Arc::new(CliExecutor::new(cli_backend));
 
     let strategy_db_path = trace_path.join("strategy_db");
     let artifact_dir = paths::data_dir().join("artifacts");
@@ -955,12 +939,14 @@ async fn build_research_loop(trace_path: &Path) -> error::Result<ResearchLoop> {
         .expect("failed to open strategy store");
 
     let strategy_manager: Arc<dyn rara_trading::research::strategy_manager::StrategyManager> =
-        Arc::new(WasmStrategyManager::builder()
-            .store(strategy_store)
-            .coder(StrategyCoder::new(Arc::clone(&llm)))
-            .compiler(compiler)
-            .executor(WasmExecutor::builder().build())
-            .build());
+        Arc::new(
+            WasmStrategyManager::builder()
+                .store(strategy_store)
+                .coder(StrategyCoder::new(Arc::clone(&llm)))
+                .compiler(compiler)
+                .executor(WasmExecutor::builder().build())
+                .build(),
+        );
 
     let feedback_gen = FeedbackGenerator::new(Arc::clone(&llm), prompt_renderer);
     let hypothesis_gen = HypothesisGenerator::new(llm);
@@ -992,7 +978,11 @@ async fn run_research_loop(
     let mut error_count: u32 = 0;
 
     for i in 1..=iterations {
-        tracing::info!(iteration = i, total = iterations, "research iteration starting");
+        tracing::info!(
+            iteration = i,
+            total = iterations,
+            "research iteration starting"
+        );
         let result = research_loop.run_iteration(contract).await;
         match result {
             Ok(ir) => {
@@ -1031,8 +1021,8 @@ async fn run_research_loop(
                 println!(
                     "{}",
                     serde_json::to_string(&IterationResponse {
-                        iteration: i,
-                        accepted: ir.accepted,
+                        iteration:  i,
+                        accepted:   ir.accepted,
                         hypothesis: &ir.hypothesis.text,
                     })
                     .expect("IterationResponse must serialize")
@@ -1054,7 +1044,10 @@ async fn run_research_loop(
     }
 
     eprintln!("=== Research Summary ===");
-    eprintln!("Total: {iterations} | Accepted: {accepted_count} | Rejected: {rejected_count} | Errors: {error_count}");
+    eprintln!(
+        "Total: {iterations} | Accepted: {accepted_count} | Rejected: {rejected_count} | Errors: \
+         {error_count}"
+    );
 
     println!(
         "{}",
@@ -1088,11 +1081,7 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
                 .map_or_else(|| "unknown".to_owned(), |h| h.text);
 
             let decision = fb.as_ref().map_or("no feedback", |f| {
-                if f.decision {
-                    "accepted"
-                } else {
-                    "rejected"
-                }
+                if f.decision { "accepted" } else { "rejected" }
             });
 
             let sharpe = exp
@@ -1113,8 +1102,8 @@ fn run_research_list(limit: usize, trace_dir: Option<String>) -> error::Result<(
     println!(
         "{}",
         serde_json::to_string(&ResearchListResponse {
-            ok: true,
-            action: "research.list",
+            ok:          true,
+            action:      "research.list",
             experiments: items,
         })
         .expect("ResearchListResponse must serialize")
@@ -1147,49 +1136,49 @@ fn run_research_show(experiment_id: &str, trace_dir: Option<String>) -> error::R
         .context(TraceSnafu)?;
 
     let hyp_detail = hypothesis.map(|h| HypothesisDetail {
-        id: h.id.to_string(),
-        text: h.text,
-        reason: h.reason,
+        id:          h.id.to_string(),
+        text:        h.text,
+        reason:      h.reason,
         observation: h.observation,
-        knowledge: h.knowledge,
-        parent: h.parent.map(|p| p.to_string()),
+        knowledge:   h.knowledge,
+        parent:      h.parent.map(|p| p.to_string()),
     });
 
     let fb_details: Vec<FeedbackDetail> = feedbacks
         .iter()
         .map(|fb| FeedbackDetail {
-            experiment_id: fb.experiment_id.to_string(),
-            decision: fb.decision,
-            reason: fb.reason.clone(),
-            observations: fb.observations.clone(),
+            experiment_id:         fb.experiment_id.to_string(),
+            decision:              fb.decision,
+            reason:                fb.reason.clone(),
+            observations:          fb.observations.clone(),
             hypothesis_evaluation: fb.hypothesis_evaluation.clone(),
-            new_hypothesis: fb.new_hypothesis.clone(),
-            code_change_summary: fb.code_change_summary.clone(),
+            new_hypothesis:        fb.new_hypothesis.clone(),
+            code_change_summary:   fb.code_change_summary.clone(),
         })
         .collect();
 
     let backtest_detail = exp.backtest_result.as_ref().map(|br| BacktestDetail {
-        pnl: br.pnl.to_string(),
+        pnl:          br.pnl.to_string(),
         sharpe_ratio: br.sharpe_ratio,
         max_drawdown: br.max_drawdown.to_string(),
-        win_rate: br.win_rate,
-        trade_count: br.trade_count,
+        win_rate:     br.win_rate,
+        trade_count:  br.trade_count,
     });
 
     println!(
         "{}",
         serde_json::to_string(&ResearchShowResponse {
-            ok: true,
-            action: "research.show",
+            ok:         true,
+            action:     "research.show",
             experiment: ExperimentDetail {
-                id: exp.id.to_string(),
-                hypothesis_id: exp.hypothesis_id.to_string(),
-                status: exp.status.to_string(),
-                strategy_code: exp.strategy_code,
+                id:              exp.id.to_string(),
+                hypothesis_id:   exp.hypothesis_id.to_string(),
+                status:          exp.status.to_string(),
+                strategy_code:   exp.strategy_code,
                 backtest_result: backtest_detail,
             },
             hypothesis: hyp_detail,
-            feedbacks: fb_details,
+            feedbacks:  fb_details,
         })
         .expect("ResearchShowResponse must serialize")
     );
@@ -1207,11 +1196,11 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
         .map(|p| PromotedItem {
             experiment_id: p.experiment_id().to_string(),
             hypothesis_id: p.hypothesis_id().to_string(),
-            wasm_path: p.wasm_path().to_string_lossy().into_owned(),
-            source_path: p.source_path().map(|s| s.to_string_lossy().into_owned()),
-            meta: PromotedMeta {
-                name: p.meta().name.clone(),
-                version: p.meta().version,
+            wasm_path:     p.wasm_path().to_string_lossy().into_owned(),
+            source_path:   p.source_path().map(|s| s.to_string_lossy().into_owned()),
+            meta:          PromotedMeta {
+                name:        p.meta().name.clone(),
+                version:     p.meta().version,
                 api_version: p.meta().api_version,
                 description: p.meta().description.clone(),
             },
@@ -1221,8 +1210,8 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
     println!(
         "{}",
         serde_json::to_string(&ResearchPromotedResponse {
-            ok: true,
-            action: "research.promoted",
+            ok:         true,
+            action:     "research.promoted",
             strategies: items,
         })
         .expect("ResearchPromotedResponse must serialize")
@@ -1236,12 +1225,12 @@ fn run_research_promoted(promoted_dir: Option<String>) -> error::Result<()> {
 /// point: gRPC server + market data WebSocket connection so that all TUI
 /// health indicators reflect real service state.
 async fn run_serve(port: u16) -> error::Result<()> {
-    use std::sync::atomic::AtomicBool;
-    use std::sync::Arc;
+    use std::sync::{Arc, atomic::AtomicBool};
 
-    use rara_server::health::HealthConfig;
-    use rara_server::rara_proto::rara_service_server::RaraServiceServer;
-    use rara_server::service::RaraServiceImpl;
+    use rara_server::{
+        health::HealthConfig, rara_proto::rara_service_server::RaraServiceServer,
+        service::RaraServiceImpl,
+    };
 
     let cfg = crate::app_config::load();
 
@@ -1257,9 +1246,9 @@ async fn run_serve(port: u16) -> error::Result<()> {
         .collect();
 
     let health_config = HealthConfig {
-        database_url: cfg.database.url.clone(),
-        llm_backend: cfg.agent.backend.clone(),
-        ws_connected: Arc::clone(&ws_connected),
+        database_url:   cfg.database.url.clone(),
+        llm_backend:    cfg.agent.backend.clone(),
+        ws_connected:   Arc::clone(&ws_connected),
         contract_count: u32::try_from(contracts.len()).unwrap_or(u32::MAX),
     };
 
@@ -1280,9 +1269,9 @@ async fn run_serve(port: u16) -> error::Result<()> {
     eprintln!("gRPC server listening on {addr}");
 
     tonic::transport::Server::builder()
-        .add_service(RaraServiceServer::new(
-            RaraServiceImpl::with_health(health_config),
-        ))
+        .add_service(RaraServiceServer::new(RaraServiceImpl::with_health(
+            health_config,
+        )))
         .serve(addr)
         .await
         .context(GrpcServeSnafu)?;
@@ -1310,7 +1299,8 @@ async fn run_market_data_ws(contracts: Vec<String>, ws_flag: Arc<std::sync::atom
     let max_backoff = std::time::Duration::from_secs(60);
 
     loop {
-        let sub_refs: Vec<(&str, &str)> = subs.iter().map(|(s, i)| (s.as_str(), i.as_str())).collect();
+        let sub_refs: Vec<(&str, &str)> =
+            subs.iter().map(|(s, i)| (s.as_str(), i.as_str())).collect();
 
         match client.subscribe_klines_multi(&sub_refs).await {
             Ok(mut stream) => {
@@ -1339,7 +1329,6 @@ async fn run_market_data_ws(contracts: Vec<String>, ws_flag: Arc<std::sync::atom
     }
 }
 
-
 /// Execute the paper trading subcommand.
 async fn run_paper(action: PaperAction) -> error::Result<()> {
     match action {
@@ -1357,8 +1346,9 @@ async fn run_paper(action: PaperAction) -> error::Result<()> {
 /// Aggregates order-submitted, order-filled, and order-rejected events by
 /// strategy and prints a summary table to stderr plus JSON to stdout.
 fn run_paper_status() -> error::Result<()> {
-    use rara_domain::event::EventType;
     use std::collections::BTreeMap;
+
+    use rara_domain::event::EventType;
 
     let trace_path = paths::data_dir().join("trace");
     let event_bus_path = trace_path.join("events");
@@ -1368,9 +1358,9 @@ fn run_paper_status() -> error::Result<()> {
         println!(
             "{}",
             serde_json::to_string(&PaperStatusResponse {
-                ok: true,
-                action: "paper.status",
-                strategies: vec![],
+                ok:           true,
+                action:       "paper.status",
+                strategies:   vec![],
                 total_trades: 0,
             })
             .expect("PaperStatusResponse must serialize")
@@ -1379,7 +1369,10 @@ fn run_paper_status() -> error::Result<()> {
     }
 
     let event_bus = EventBus::open(&event_bus_path).context(EventBusSnafu)?;
-    let events = event_bus.store().read_topic("trading", 0, 100_000).context(EventBusSnafu)?;
+    let events = event_bus
+        .store()
+        .read_topic("trading", 0, 100_000)
+        .context(EventBusSnafu)?;
 
     // Aggregate by strategy_id
     let mut stats: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
@@ -1445,9 +1438,9 @@ fn run_paper_status() -> error::Result<()> {
 /// the terminal where `paper start` is running. This command simply prints
 /// that guidance.
 fn run_paper_stop() {
-    let message =
-        "Paper trading runs in the foreground. Press Ctrl+C in the terminal where it's running."
-            .to_string();
+    let message = "Paper trading runs in the foreground. Press Ctrl+C in the terminal where it's \
+                   running."
+        .to_string();
     eprintln!("{message}");
     println!(
         "{}",
@@ -1523,23 +1516,23 @@ fn load_strategies_for_contracts(
 #[allow(clippy::too_many_lines)]
 async fn run_paper_start() -> error::Result<()> {
     use futures_util::StreamExt;
-    use rara_trading::trading::engine::TradingEngine;
-    use rara_trading::trading::guard_pipeline::GuardPipeline;
-    use rara_trading::trading::signal_loop::run_signal_loop;
-    use rara_market_data::stream::aggregator::CandleAggregator;
-    use rara_market_data::stream::binance_ws::BinanceWsClient;
+    use rara_market_data::stream::{aggregator::CandleAggregator, binance_ws::BinanceWsClient};
+    use rara_trading::trading::{
+        engine::TradingEngine, guard_pipeline::GuardPipeline, signal_loop::run_signal_loop,
+    };
 
     let cfg = app_config::load();
 
     // Load accounts from config; use AccountManager to create brokers
     let accounts_cfg = accounts_config::load_accounts();
-    let account_manager = rara_trading_engine::account_manager::AccountManager::from_config(
-        &accounts_cfg.accounts,
-    )
-    .expect("failed to initialize accounts from config");
+    let account_manager =
+        rara_trading_engine::account_manager::AccountManager::from_config(&accounts_cfg.accounts)
+            .expect("failed to initialize accounts from config");
 
     if account_manager.size() == 0 {
-        eprintln!("No enabled accounts found in accounts.toml. Run 'rara setup account add' first.");
+        eprintln!(
+            "No enabled accounts found in accounts.toml. Run 'rara setup account add' first."
+        );
         return Ok(());
     }
 
@@ -1580,14 +1573,20 @@ async fn run_paper_start() -> error::Result<()> {
         let fields = first_account.broker_config.to_field_map();
         let type_key = first_account.broker_config.type_key();
         let entry = rara_trading_engine::broker_registry::find_broker(type_key)
-            .ok_or_else(|| rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
-                type_key: type_key.to_string(),
-            })
+            .ok_or_else(
+                || rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
+                    type_key: type_key.to_string(),
+                },
+            )
             .context(error::BrokerRegistrySnafu)?;
         (entry.create_broker)(&fields).context(error::BrokerRegistrySnafu)?
     };
     let guard_pipeline = GuardPipeline::new(vec![]);
-    let engine = Arc::new(TradingEngine::new(broker, guard_pipeline, Arc::clone(&event_bus)));
+    let engine = Arc::new(TradingEngine::new(
+        broker,
+        guard_pipeline,
+        Arc::clone(&event_bus),
+    ));
 
     // Shutdown signal via watch channel — tasks check this to drain gracefully
     let (shutdown_tx, mut shutdown_rx_agg) = tokio::sync::watch::channel(false);
@@ -1597,12 +1596,13 @@ async fn run_paper_start() -> error::Result<()> {
     let (mut aggregator, candle_rx) = CandleAggregator::with_defaults();
     let ws_client = BinanceWsClient::new();
     let subs: Vec<(&str, &str)> = contracts.iter().map(|c| (c.as_str(), "1m")).collect();
-    let mut kline_stream = ws_client
-        .subscribe_klines_multi(&subs)
-        .await
-        .map_err(|e| error::AppError::Config {
-            message: format!("WebSocket connection failed: {e}"),
-        })?;
+    let mut kline_stream =
+        ws_client
+            .subscribe_klines_multi(&subs)
+            .await
+            .map_err(|e| error::AppError::Config {
+                message: format!("WebSocket connection failed: {e}"),
+            })?;
 
     // Spawn aggregator: forward raw klines into candle aggregator, exit on shutdown
     let agg_handle = tokio::spawn(async move {
@@ -1703,7 +1703,9 @@ async fn run_paper_start() -> error::Result<()> {
 fn list_promoted_from_dir(
     dir: &Path,
 ) -> rara_trading::research::strategy_promoter::Result<Vec<PromotedStrategy>> {
-    use rara_trading::research::strategy_promoter::{IoSnafu as PmIoSnafu, SerializeSnafu as PmSerializeSnafu};
+    use rara_trading::research::strategy_promoter::{
+        IoSnafu as PmIoSnafu, SerializeSnafu as PmSerializeSnafu,
+    };
 
     if !dir.exists() {
         return Ok(vec![]);
@@ -1733,42 +1735,42 @@ fn list_promoted_from_dir(
 
 #[derive(Serialize)]
 struct StrategyListResponse {
-    ok: bool,
-    action: &'static str,
+    ok:         bool,
+    action:     &'static str,
     strategies: Vec<StrategyListItem>,
 }
 
 #[derive(Serialize)]
 struct StrategyListItem {
-    name: String,
+    name:    String,
     version: String,
-    tag: String,
-    size: u64,
+    tag:     String,
+    size:    u64,
 }
 
 #[derive(Serialize)]
 struct StrategyFetchResponse {
-    ok: bool,
-    action: &'static str,
-    name: String,
-    version: String,
+    ok:          bool,
+    action:      &'static str,
+    name:        String,
+    version:     String,
     api_version: u32,
-    wasm_path: String,
+    wasm_path:   String,
 }
 
 #[derive(Serialize)]
 struct StrategyInstalledResponse {
-    ok: bool,
-    action: &'static str,
+    ok:         bool,
+    action:     &'static str,
     strategies: Vec<StrategyInstalledItem>,
 }
 
 #[derive(Serialize)]
 struct StrategyInstalledItem {
-    name: String,
-    version: String,
+    name:        String,
+    version:     String,
     api_version: u32,
-    wasm_path: String,
+    wasm_path:   String,
 }
 
 async fn run_strategy(action: StrategyAction) -> error::Result<()> {
@@ -1790,18 +1792,18 @@ async fn run_strategy_list(repo: &str) -> error::Result<()> {
     let items: Vec<StrategyListItem> = entries
         .iter()
         .map(|e| StrategyListItem {
-            name: e.name.clone(),
+            name:    e.name.clone(),
             version: e.version.clone(),
-            tag: e.tag.clone(),
-            size: e.size,
+            tag:     e.tag.clone(),
+            size:    e.size,
         })
         .collect();
 
     println!(
         "{}",
         serde_json::to_string(&StrategyListResponse {
-            ok: true,
-            action: "strategy.list",
+            ok:         true,
+            action:     "strategy.list",
             strategies: items,
         })
         .expect("StrategyListResponse must serialize")
@@ -1824,12 +1826,12 @@ async fn run_strategy_fetch(name: &str, repo: &str) -> error::Result<()> {
     println!(
         "{}",
         serde_json::to_string(&StrategyFetchResponse {
-            ok: true,
-            action: "strategy.fetch",
-            name: fetched.meta.name,
-            version: format!("v{}", fetched.meta.version),
+            ok:          true,
+            action:      "strategy.fetch",
+            name:        fetched.meta.name,
+            version:     format!("v{}", fetched.meta.version),
             api_version: fetched.meta.api_version,
-            wasm_path: fetched.wasm_path.display().to_string(),
+            wasm_path:   fetched.wasm_path.display().to_string(),
         })
         .expect("StrategyFetchResponse must serialize")
     );
@@ -1847,18 +1849,18 @@ fn run_strategy_installed() -> error::Result<()> {
     let items: Vec<StrategyInstalledItem> = installed
         .iter()
         .map(|s| StrategyInstalledItem {
-            name: s.meta.name.clone(),
-            version: format!("v{}", s.meta.version),
+            name:        s.meta.name.clone(),
+            version:     format!("v{}", s.meta.version),
             api_version: s.meta.api_version,
-            wasm_path: s.wasm_path.display().to_string(),
+            wasm_path:   s.wasm_path.display().to_string(),
         })
         .collect();
 
     println!(
         "{}",
         serde_json::to_string(&StrategyInstalledResponse {
-            ok: true,
-            action: "strategy.installed",
+            ok:         true,
+            action:     "strategy.installed",
             strategies: items,
         })
         .expect("StrategyInstalledResponse must serialize")
@@ -1987,9 +1989,9 @@ async fn run_setup_validate() -> error::Result<()> {
     let config_path = paths::config_file();
     let config_exists = config_path.exists();
     checks.push(ValidateCheck {
-        name: "config.toml".to_string(),
-        ok: config_exists,
-        detail: if config_exists {
+        name:       "config.toml".to_string(),
+        ok:         config_exists,
+        detail:     if config_exists {
             None
         } else {
             has_errors = true;
@@ -2006,9 +2008,9 @@ async fn run_setup_validate() -> error::Result<()> {
     let accounts_path = paths::accounts_file();
     let accounts_exists = accounts_path.exists();
     checks.push(ValidateCheck {
-        name: "accounts.toml".to_string(),
-        ok: accounts_exists,
-        detail: if accounts_exists {
+        name:       "accounts.toml".to_string(),
+        ok:         accounts_exists,
+        detail:     if accounts_exists {
             None
         } else {
             has_errors = true;
@@ -2032,9 +2034,9 @@ async fn run_setup_validate() -> error::Result<()> {
     }
     let no_dupes = duplicates.is_empty();
     checks.push(ValidateCheck {
-        name: "unique_account_ids".to_string(),
-        ok: no_dupes,
-        detail: if no_dupes {
+        name:       "unique_account_ids".to_string(),
+        ok:         no_dupes,
+        detail:     if no_dupes {
             None
         } else {
             has_errors = true;
@@ -2050,9 +2052,9 @@ async fn run_setup_validate() -> error::Result<()> {
     // Count enabled accounts
     let enabled_count = accounts_cfg.accounts.iter().filter(|a| a.enabled).count();
     checks.push(ValidateCheck {
-        name: "enabled_accounts".to_string(),
-        ok: true,
-        detail: Some(format!("{enabled_count} account(s) enabled")),
+        name:       "enabled_accounts".to_string(),
+        ok:         true,
+        detail:     Some(format!("{enabled_count} account(s) enabled")),
         suggestion: None,
     });
 
@@ -2063,17 +2065,17 @@ async fn run_setup_validate() -> error::Result<()> {
         for e in &startup_errors {
             has_errors = true;
             checks.push(ValidateCheck {
-                name: "startup".to_string(),
-                ok: false,
-                detail: Some(e.to_string()),
+                name:       "startup".to_string(),
+                ok:         false,
+                detail:     Some(e.to_string()),
                 suggestion: None,
             });
         }
         if startup_errors.is_empty() {
             checks.push(ValidateCheck {
-                name: "startup".to_string(),
-                ok: true,
-                detail: None,
+                name:       "startup".to_string(),
+                ok:         true,
+                detail:     None,
                 suggestion: None,
             });
         }
@@ -2083,7 +2085,11 @@ async fn run_setup_validate() -> error::Result<()> {
         if check.ok {
             eprintln!("OK: {}", check.name);
         } else {
-            eprintln!("FAIL: {} — {}", check.name, check.detail.as_deref().unwrap_or(""));
+            eprintln!(
+                "FAIL: {} — {}",
+                check.name,
+                check.detail.as_deref().unwrap_or("")
+            );
         }
     }
 
@@ -2132,9 +2138,9 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&SetupAccountAddResponse {
-                        ok: true,
-                        action: "account.add",
-                        id: &id,
+                        ok:      true,
+                        action:  "account.add",
+                        id:      &id,
                         created: false,
                     })
                     .expect("SetupAccountAddResponse must serialize")
@@ -2149,9 +2155,11 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                         println!(
                             "{}",
                             serde_json::to_string(&ErrorResponse {
-                                ok: false,
-                                error: "--exchange is required for ccxt broker".to_string(),
-                                suggestion: Some("add --exchange binance (or bybit, okx)".to_string()),
+                                ok:         false,
+                                error:      "--exchange is required for ccxt broker".to_string(),
+                                suggestion: Some(
+                                    "add --exchange binance (or bybit, okx)".to_string()
+                                ),
                             })
                             .expect("ErrorResponse must serialize")
                         );
@@ -2169,10 +2177,8 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                     println!(
                         "{}",
                         serde_json::to_string(&ErrorResponse {
-                            ok: false,
-                            error: format!(
-                                "unknown broker type \"{other}\""
-                            ),
+                            ok:         false,
+                            error:      format!("unknown broker type \"{other}\""),
                             suggestion: Some("use --broker paper or --broker ccxt".to_string()),
                         })
                         .expect("ErrorResponse must serialize")
@@ -2195,9 +2201,9 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&SetupAccountAddResponse {
-                    ok: true,
-                    action: "account.add",
-                    id: &id,
+                    ok:      true,
+                    action:  "account.add",
+                    id:      &id,
                     created: true,
                 })
                 .expect("SetupAccountAddResponse must serialize")
@@ -2231,8 +2237,8 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ErrorResponse {
-                        ok: false,
-                        error: "--yes flag is required to confirm removal".to_string(),
+                        ok:         false,
+                        error:      "--yes flag is required to confirm removal".to_string(),
                         suggestion: Some("add --yes to confirm removal".to_string()),
                     })
                     .expect("ErrorResponse must serialize")
@@ -2248,9 +2254,11 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ErrorResponse {
-                        ok: false,
-                        error: format!("account \"{id}\" not found"),
-                        suggestion: Some("run 'rara setup account list' to see available accounts".to_string()),
+                        ok:         false,
+                        error:      format!("account \"{id}\" not found"),
+                        suggestion: Some(
+                            "run 'rara setup account list' to see available accounts".to_string()
+                        ),
                     })
                     .expect("ErrorResponse must serialize")
                 );
@@ -2263,9 +2271,9 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(&SetupAccountRemoveResponse {
-                    ok: true,
-                    action: "account.remove",
-                    id: &id,
+                    ok:      true,
+                    action:  "account.remove",
+                    id:      &id,
                     removed: true,
                 })
                 .expect("SetupAccountRemoveResponse must serialize")
@@ -2278,8 +2286,8 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string(&ErrorResponse {
-                        ok: false,
-                        error: format!("account \"{id}\" not found"),
+                        ok:         false,
+                        error:      format!("account \"{id}\" not found"),
                         suggestion: Some(
                             "run 'rara setup account list' to see available accounts".to_string(),
                         ),
@@ -2293,8 +2301,10 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 let fields = acc.broker_config.to_field_map();
                 let type_key = acc.broker_config.type_key();
                 let entry = rara_trading_engine::broker_registry::find_broker(type_key)
-                    .ok_or_else(|| rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
-                        type_key: type_key.to_string(),
+                    .ok_or_else(|| {
+                        rara_trading_engine::broker_registry::BrokerRegistryError::UnknownType {
+                            type_key: type_key.to_string(),
+                        }
                     })
                     .context(error::BrokerRegistrySnafu)?;
                 (entry.create_broker)(&fields).context(error::BrokerRegistrySnafu)?
@@ -2304,10 +2314,10 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                     println!(
                         "{}",
                         serde_json::to_string(&SetupAccountTestResponse {
-                            ok: true,
-                            action: "account.test",
-                            id: &id,
-                            equity: info.total_equity.to_string(),
+                            ok:             true,
+                            action:         "account.test",
+                            id:             &id,
+                            equity:         info.total_equity.to_string(),
                             available_cash: info.available_cash.to_string(),
                         })
                         .expect("SetupAccountTestResponse must serialize")
@@ -2317,8 +2327,8 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                     println!(
                         "{}",
                         serde_json::to_string(&ErrorResponse {
-                            ok: false,
-                            error: format!("connectivity test failed: {e}"),
+                            ok:         false,
+                            error:      format!("connectivity test failed: {e}"),
                             suggestion: Some(
                                 "check API credentials and network connectivity".to_string(),
                             ),

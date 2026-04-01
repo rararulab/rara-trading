@@ -4,16 +4,16 @@
 //! Supports optional execution timeout with graceful SIGTERM termination.
 //! Ported from ralph-orchestrator.
 
-use std::io::Write;
-use std::process::Stdio;
-use std::time::Duration;
+use std::{io::Write, process::Stdio, time::Duration};
 
 #[cfg(unix)]
 use nix::sys::signal::{Signal, kill};
 #[cfg(unix)]
 use nix::unistd::Pid;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
+    process::Command,
+};
 use tracing::{debug, warn};
 
 use crate::backend::{CliBackend, CommandSpec};
@@ -22,11 +22,11 @@ use crate::backend::{CliBackend, CommandSpec};
 #[derive(Debug)]
 pub struct ExecutionResult {
     /// The full stdout output from the CLI.
-    pub output: String,
+    pub output:    String,
     /// Captured stderr output (separate from stdout).
-    pub stderr: String,
+    pub stderr:    String,
     /// Whether the execution succeeded (exit code 0).
-    pub success: bool,
+    pub success:   bool,
     /// The exit code.
     pub exit_code: Option<i32>,
     /// Whether the execution was terminated due to timeout.
@@ -61,19 +61,18 @@ enum StreamKind {
 
 impl CliExecutor {
     /// Creates a new executor with the given backend.
-    pub const fn new(backend: CliBackend) -> Self {
-        Self { backend }
-    }
+    pub const fn new(backend: CliBackend) -> Self { Self { backend } }
 
     /// Executes a prompt and streams output to the provided writer.
     ///
     /// Output is streamed line-by-line to the writer while being accumulated
-    /// for the return value. If `timeout` is provided and the execution produces
-    /// no stdout/stderr activity for longer than that duration, the process
-    /// is terminated and the result indicates timeout.
+    /// for the return value. If `timeout` is provided and the execution
+    /// produces no stdout/stderr activity for longer than that duration,
+    /// the process is terminated and the result indicates timeout.
     ///
-    /// When `verbose` is true, stderr output is also written to the output writer
-    /// with a `[stderr]` prefix. When false, stderr is captured but not displayed.
+    /// When `verbose` is true, stderr output is also written to the output
+    /// writer with a `[stderr]` prefix. When false, stderr is captured but
+    /// not displayed.
     pub async fn execute<W: Write + Send>(
         &self,
         prompt: &str,
@@ -92,8 +91,9 @@ impl CliExecutor {
             drop(stdin);
         }
 
-        let (accumulated_output, accumulated_stderr, timed_out) =
-            self.read_output(&mut child, &mut output_writer, timeout, verbose).await?;
+        let (accumulated_output, accumulated_stderr, timed_out) = self
+            .read_output(&mut child, &mut output_writer, timeout, verbose)
+            .await?;
 
         let status = child.wait().await?;
 
@@ -235,9 +235,7 @@ impl CliExecutor {
 
     /// Terminates the child process via `start_kill()` (non-Unix).
     #[cfg(not(unix))]
-    fn terminate_child(child: &mut tokio::process::Child) {
-        let _ = child.start_kill();
-    }
+    fn terminate_child(child: &mut tokio::process::Child) { let _ = child.start_kill(); }
 
     /// Executes a prompt without streaming (captures all output).
     ///
@@ -299,12 +297,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_echo() {
         let backend = CliBackend {
-            command: "echo".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "echo".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -323,12 +321,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_stdin() {
         let backend = CliBackend {
-            command: "cat".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Stdin,
-            prompt_flag: None,
+            command:       "cat".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Stdin,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -341,12 +339,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_failure() {
         let backend = CliBackend {
-            command: "false".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "false".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -360,12 +358,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_timeout() {
         let backend = CliBackend {
-            command: "sleep".to_string(),
-            args: vec!["10".to_string()],
-            prompt_mode: PromptMode::Stdin,
-            prompt_flag: None,
+            command:       "sleep".to_string(),
+            args:          vec!["10".to_string()],
+            prompt_mode:   PromptMode::Stdin,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -385,12 +383,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_timeout_resets_on_output_activity() {
         let backend = CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string()],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string()],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -416,12 +414,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_streams_output_before_inactivity_timeout() {
         let backend = CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), "printf 'hello\\n'; sleep 10".to_string()],
-            prompt_mode: PromptMode::Stdin,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string(), "printf 'hello\\n'; sleep 10".to_string()],
+            prompt_mode:   PromptMode::Stdin,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -442,12 +440,12 @@ mod tests {
     #[tokio::test]
     async fn test_execute_no_timeout_when_fast() {
         let backend = CliBackend {
-            command: "echo".to_string(),
-            args: vec![],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "echo".to_string(),
+            args:          vec![],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);
@@ -465,15 +463,15 @@ mod tests {
     #[tokio::test]
     async fn test_stderr_not_mixed_into_output() {
         let backend = CliBackend {
-            command: "sh".to_string(),
-            args: vec![
+            command:       "sh".to_string(),
+            args:          vec![
                 "-c".to_string(),
                 "echo stdout_line; echo stderr_line >&2".to_string(),
             ],
-            prompt_mode: PromptMode::Stdin,
-            prompt_flag: None,
+            prompt_mode:   PromptMode::Stdin,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         };
 
         let executor = CliExecutor::new(backend);

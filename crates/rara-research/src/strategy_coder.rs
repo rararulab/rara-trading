@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use snafu::{ResultExt, Snafu};
-
 use rara_domain::research::Hypothesis;
 use rara_infra::llm::LlmClient;
+use snafu::{ResultExt, Snafu};
 
 /// Errors from strategy code generation.
 #[derive(Debug, Snafu)]
@@ -29,24 +28,14 @@ pub struct StrategyCoder {
 
 impl StrategyCoder {
     /// Create a new strategy coder backed by the given LLM client.
-    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
-        Self { llm }
-    }
+    pub fn new(llm: Arc<dyn LlmClient>) -> Self { Self { llm } }
 
     /// Generate strategy code based on a hypothesis and additional context.
-    pub async fn generate_code(
-        &self,
-        hypothesis: &Hypothesis,
-        context: &str,
-    ) -> Result<String> {
+    pub async fn generate_code(&self, hypothesis: &Hypothesis, context: &str) -> Result<String> {
         let prompt = format!(
-            "Generate trading strategy code for this hypothesis:\n\
-             Hypothesis: {}\n\
-             Reason: {}\n\
-             Context: {context}\n\n\
-             Return only the strategy code.",
-            hypothesis.text,
-            hypothesis.reason
+            "Generate trading strategy code for this hypothesis:\nHypothesis: {}\nReason: \
+             {}\nContext: {context}\n\nReturn only the strategy code.",
+            hypothesis.text, hypothesis.reason
         );
 
         self.llm.complete(&prompt).await.context(LlmSnafu)
@@ -60,11 +49,9 @@ impl StrategyCoder {
         hypothesis: &Hypothesis,
     ) -> Result<String> {
         let prompt = format!(
-            "Fix the following Rust strategy code compilation errors.\n\n\
-             Hypothesis: {}\n\n\
-             Current code:\n```rust\n{code}\n```\n\n\
-             Compilation errors:\n{}\n\n\
-             Return only the corrected Rust code.",
+            "Fix the following Rust strategy code compilation errors.\n\nHypothesis: \
+             {}\n\nCurrent code:\n```rust\n{code}\n```\n\nCompilation errors:\n{}\n\nReturn only \
+             the corrected Rust code.",
             hypothesis.text,
             errors.join("\n")
         );
@@ -75,18 +62,21 @@ impl StrategyCoder {
 
 #[cfg(test)]
 mod tests {
+    use rara_agent::{
+        backend::{CliBackend, OutputFormat, PromptMode},
+        executor::CliExecutor,
+    };
+
     use super::*;
-    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use rara_agent::executor::CliExecutor;
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string(), format!("printf '{response}\\n'")],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         })
     }
 

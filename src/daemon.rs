@@ -1,46 +1,66 @@
 //! Unified daemon orchestrator — runs research, paper trading, feedback, and
 //! gRPC server as concurrent tokio tasks in a single process.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use chrono::NaiveDate;
+use rara_domain::{event::EventType, research::ResearchStrategyStatus};
+use rara_market_data::stream::{
+    aggregator::CandleAggregator,
+    binance_ws::BinanceWsClient,
+    reconnect::{ReconnectConfig, ReconnectingWsClient},
+};
+use rara_sentinel::{
+    analyzer::SignalAnalyzer,
+    engine::SentinelEngine,
+    source::DataSource,
+    sources::{rss::RssDataSource, trump_code::TrumpCodeDataSource},
+};
+use rara_trading_engine::{
+    brokers::paper::PaperBroker,
+    engine::TradingEngine,
+    guard_pipeline::GuardPipeline,
+    signal_loop::{self, LoadedStrategy},
+};
 use rust_decimal_macros::dec;
 use snafu::ResultExt;
 use tokio::task::JoinSet;
 use tracing::{error, info, warn};
 
-use crate::accounts_config;
-use crate::agent::{CliBackend, CliExecutor};
-use crate::app_config;
-use crate::error::{self, AgentBackendSnafu, EventBusSnafu, MarketStoreSnafu, PromptRendererSnafu, TraceSnafu};
-use crate::event_bus::bus::EventBus;
-use crate::paths;
-use crate::research::barter_backtester::BarterBacktester;
-use crate::research::compiler::StrategyCompiler;
-use crate::research::feedback_gen::FeedbackGenerator;
-use crate::research::hypothesis_gen::HypothesisGenerator;
-use crate::research::prompt_renderer::PromptRenderer;
-use crate::research::research_loop::ResearchLoop;
-use crate::research::strategy_coder::StrategyCoder;
-use crate::research::strategy_store::StrategyStore;
-use crate::research::trace::Trace;
-use crate::research::wasm_executor::WasmExecutor;
-use crate::research::wasm_strategy_manager::WasmStrategyManager;
-
-use rara_domain::event::EventType;
+use crate::{
+    accounts_config,
+    agent::{CliBackend, CliExecutor},
+    app_config,
+    app_config::SentinelConfig,
+    error::{
+        self, AgentBackendSnafu, EventBusSnafu, MarketStoreSnafu, PromptRendererSnafu, TraceSnafu,
+    },
+    event_bus::bus::EventBus,
+    paths,
+    research::{
+        barter_backtester::BarterBacktester, compiler::StrategyCompiler,
+        feedback_gen::FeedbackGenerator, hypothesis_gen::HypothesisGenerator,
+        prompt_renderer::PromptRenderer, research_loop::ResearchLoop,
+        strategy_coder::StrategyCoder, strategy_executor::StrategyExecutor,
+        strategy_store::StrategyStore, trace::Trace, wasm_executor::WasmExecutor,
+        wasm_strategy_manager::WasmStrategyManager,
+    },
+};
 
 /// Run the unified daemon: spawn all trading-loop components as concurrent
 /// tokio tasks and wait for shutdown (Ctrl+C) or a fatal task error.
 ///
-/// Accounts and contracts are loaded from `accounts.toml` rather than CLI flags.
+/// Accounts and contracts are loaded from `accounts.toml` rather than CLI
+/// flags.
 pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
     // Load accounts from config; collect contracts from all enabled accounts
     let accounts_cfg = accounts_config::load_accounts();
-    let _account_manager = rara_trading_engine::account_manager::AccountManager::from_config(
-        &accounts_cfg.accounts,
-    )
-    .expect("failed to initialize accounts from config");
+    let _account_manager =
+        rara_trading_engine::account_manager::AccountManager::from_config(&accounts_cfg.accounts)
+            .expect("failed to initialize accounts from config");
 
     // Persistent event bus shared across all components
     let trace_path = paths::data_dir().join("trace");
@@ -94,12 +114,13 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
     for contract in &contract_list {
         let contract = contract.clone();
         let bus = Arc::clone(&event_bus);
+        let trace_path_clone = paths::data_dir().join("trace");
+        let cfg = app_config::load();
         tasks.spawn(async move {
-            info!(contract = %contract, "paper trading placeholder — wire up WS + aggregator + signal loop");
-            // TODO: connect to exchange WS, run candle aggregator, feed
-            // promoted strategies, and publish fills to event bus.
-            let _ = bus;
-            std::future::pending::<()>().await;
+            info!(contract = %contract, "paper trading task starting");
+            if let Err(e) = run_paper_trading(&contract, bus, &trace_path_clone, cfg).await {
+                error!(contract = %contract, error = %e, "paper trading task failed");
+            }
             Ok::<(), error::AppError>(())
         });
     }
@@ -112,13 +133,18 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
             info!("feedback loop starting");
             let evaluator = build_strategy_evaluator(&feedback_cfg);
             let loop_config = rara_feedback::feedback_loop::FeedbackLoopConfig::builder()
-                .eval_interval(std::time::Duration::from_secs(feedback_cfg.eval_interval_secs))
+                .eval_interval(std::time::Duration::from_secs(
+                    feedback_cfg.eval_interval_secs,
+                ))
                 .min_trades_between_evals(feedback_cfg.min_trades_between_evals)
                 .build();
             rara_feedback::feedback_loop::run_feedback_loop(bus, evaluator, loop_config).await;
             Ok::<(), error::AppError>(())
         });
     }
+
+    // --- Sentinel monitoring task ---
+    spawn_sentinel_task(&mut tasks, &event_bus);
 
     info!("daemon running — press Ctrl+C to shut down");
 
@@ -178,32 +204,32 @@ async fn build_research_loop(
         .await
         .context(MarketStoreSnafu)?;
 
-    let backtester: Arc<dyn crate::research::backtester::Backtester> =
-        Arc::new(BarterBacktester::builder()
+    let backtester: Arc<dyn crate::research::backtester::Backtester> = Arc::new(
+        BarterBacktester::builder()
             .store(market_store)
             .initial_capital(dec!(10000))
             .fees_percent(dec!(0.1))
             .backtest_start(NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
             .backtest_end(NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
-            .build());
+            .build(),
+    );
 
-    let cli_backend =
-        CliBackend::from_agent_config(&cfg.agent).context(AgentBackendSnafu)?;
-    let llm: Arc<dyn crate::infra::llm::LlmClient> =
-        Arc::new(CliExecutor::new(cli_backend));
+    let cli_backend = CliBackend::from_agent_config(&cfg.agent).context(AgentBackendSnafu)?;
+    let llm: Arc<dyn crate::infra::llm::LlmClient> = Arc::new(CliExecutor::new(cli_backend));
 
     let strategy_db_path = trace_path.join("strategy_db");
     let artifact_dir = paths::data_dir().join("artifacts");
     let strategy_store = StrategyStore::open_path(&strategy_db_path, &artifact_dir)
         .expect("failed to open strategy store");
 
-    let strategy_manager: Arc<dyn crate::research::strategy_manager::StrategyManager> =
-        Arc::new(WasmStrategyManager::builder()
+    let strategy_manager: Arc<dyn crate::research::strategy_manager::StrategyManager> = Arc::new(
+        WasmStrategyManager::builder()
             .store(strategy_store)
             .coder(StrategyCoder::new(Arc::clone(&llm)))
             .compiler(compiler)
             .executor(WasmExecutor::builder().build())
-            .build());
+            .build(),
+    );
 
     let feedback_gen = FeedbackGenerator::new(Arc::clone(&llm), prompt_renderer);
     let hypothesis_gen = HypothesisGenerator::new(llm);
@@ -240,7 +266,10 @@ async fn run_research_loop(
         info!(cycle, iterations, "research cycle starting");
         run_research_iterations(research_loop, iterations, contract, cycle_delay).await;
 
-        info!(cycle, "research cycle complete — waiting for retrain signal or periodic timeout");
+        info!(
+            cycle,
+            "research cycle complete — waiting for retrain signal or periodic timeout"
+        );
 
         // Wait for a retrain event or the periodic fallback timer
         loop {
@@ -295,7 +324,11 @@ async fn run_research_iterations(
     let mut error_count: u32 = 0;
 
     for i in 1..=iterations {
-        info!(iteration = i, total = iterations, "research iteration starting");
+        info!(
+            iteration = i,
+            total = iterations,
+            "research iteration starting"
+        );
         match research_loop.run_iteration(contract).await {
             Ok(ir) => {
                 if ir.accepted {
@@ -367,6 +400,275 @@ fn has_pending_retrain_events(event_bus: &EventBus) -> bool {
         .any(|e| e.event_type == EventType::FeedbackResearchRetrainRequested)
 }
 
+/// Spawn the sentinel monitoring task if enabled in config.
+///
+/// When enabled, creates a polling loop that periodically checks all
+/// configured data sources (RSS feeds, trump-code) for market-moving
+/// signals using LLM analysis, publishing detected signals to the event bus.
+fn spawn_sentinel_task(tasks: &mut JoinSet<error::Result<()>>, event_bus: &Arc<EventBus>) {
+    let sentinel_cfg = app_config::load().sentinel.clone();
+    if !sentinel_cfg.enabled {
+        info!("sentinel monitoring disabled — skipping");
+        return;
+    }
+
+    let bus = Arc::clone(event_bus);
+    let cfg = app_config::load();
+    tasks.spawn(async move {
+        info!("sentinel monitoring starting");
+        let cli_backend = CliBackend::from_agent_config(&cfg.agent).context(AgentBackendSnafu)?;
+        let llm = CliExecutor::new(cli_backend);
+        let sources = build_sentinel_sources(&sentinel_cfg);
+        let analyzer = SignalAnalyzer::new(llm);
+        let engine = SentinelEngine::new(sources, analyzer, Arc::clone(&bus));
+        let interval = std::time::Duration::from_secs(sentinel_cfg.check_interval_secs);
+        run_sentinel_loop(&engine, interval).await;
+        Ok::<(), error::AppError>(())
+    });
+}
+
+/// Build data sources from sentinel configuration.
+///
+/// Creates RSS feed sources and optionally the trump-code source based on
+/// the config. Returns an empty vec if no sources are configured.
+fn build_sentinel_sources(cfg: &SentinelConfig) -> Vec<Box<dyn DataSource>> {
+    let client = reqwest::Client::new();
+    let mut sources: Vec<Box<dyn DataSource>> = cfg
+        .rss_feeds
+        .iter()
+        .map(|feed| -> Box<dyn DataSource> {
+            Box::new(
+                RssDataSource::builder()
+                    .name(feed.name.clone())
+                    .url(feed.url.clone())
+                    .client(client.clone())
+                    .build(),
+            )
+        })
+        .collect();
+
+    if cfg.trump_code_enabled {
+        sources.push(Box::new(
+            TrumpCodeDataSource::builder()
+                .base_url(cfg.trump_code_url.clone())
+                .client(client)
+                .build(),
+        ));
+    }
+
+    sources
+}
+
+/// Run the sentinel engine in a polling loop.
+///
+/// Each cycle polls all data sources and analyzes signals via LLM.
+/// Errors are logged but never crash the daemon — sentinel is a monitoring
+/// component that must not take down the trading system.
+async fn run_sentinel_loop<L: rara_infra::llm::LlmClient>(
+    engine: &SentinelEngine<L>,
+    interval: std::time::Duration,
+) {
+    loop {
+        match engine.poll_and_analyze().await {
+            Ok(signals) => {
+                if signals.is_empty() {
+                    info!("sentinel poll complete — no actionable signals");
+                } else {
+                    info!(
+                        count = signals.len(),
+                        "sentinel poll complete — published signals to event bus"
+                    );
+                    for signal in &signals {
+                        info!(
+                            signal_type = %signal.signal_type,
+                            severity = %signal.severity,
+                            contracts = ?signal.affected_contracts,
+                            "sentinel signal detected"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                // Log and continue — sentinel errors must never crash the daemon
+                error!(error = %e, "sentinel poll failed — will retry next cycle");
+            }
+        }
+
+        tokio::time::sleep(interval).await;
+    }
+}
+
+/// Run paper trading for a single contract.
+///
+/// Connects to Binance WebSocket for live kline data, aggregates into
+/// multi-timeframe candles, loads promoted strategies from the store,
+/// and runs the signal loop to generate and execute trades through a
+/// paper broker.
+async fn run_paper_trading(
+    contract: &str,
+    event_bus: Arc<EventBus>,
+    trace_path: &Path,
+    cfg: &crate::app_config::AppConfig,
+) -> error::Result<()> {
+    // Load promoted strategies from the store
+    let strategies = load_promoted_strategies(trace_path, contract, cfg)?;
+
+    if strategies.is_empty() {
+        info!(
+            contract = %contract,
+            "no promoted strategies found — paper trading will idle until strategies are promoted"
+        );
+        // Block until cancelled; a future enhancement could poll the store periodically
+        std::future::pending::<()>().await;
+        return Ok(());
+    }
+
+    info!(
+        contract = %contract,
+        strategy_count = strategies.len(),
+        "loaded promoted strategies for paper trading"
+    );
+
+    // Set up candle aggregation (5m, 15m, 1h from 1m klines)
+    let (mut aggregator, candle_rx) = CandleAggregator::with_defaults();
+
+    // Set up reconnecting WebSocket client for this contract's 1m klines
+    let ws_client = BinanceWsClient::new();
+    let reconnect_client = ReconnectingWsClient::new(ws_client, ReconnectConfig::default());
+    let mut kline_rx = reconnect_client.subscribe();
+
+    let subscriptions = vec![(contract.to_string(), "1m".to_string())];
+
+    // Spawn the WebSocket connection loop (runs forever with auto-reconnect)
+    let ws_handle = tokio::spawn(async move {
+        reconnect_client.run(subscriptions).await;
+    });
+
+    // Spawn the kline-to-candle aggregation task
+    let agg_handle = tokio::spawn(async move {
+        loop {
+            match kline_rx.recv().await {
+                Ok(kline) => {
+                    aggregator.process_kline(&kline);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(
+                        skipped = n,
+                        "kline aggregation lagged — some 1m candles were dropped"
+                    );
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    info!("kline channel closed — aggregation stopping");
+                    break;
+                }
+            }
+        }
+    });
+
+    // Build paper broker + trading engine
+    let paper_broker = PaperBroker::new(rust_decimal::Decimal::ZERO);
+    let guard_pipeline = GuardPipeline::new(vec![]);
+    let engine = Arc::new(TradingEngine::new(
+        Box::new(paper_broker),
+        guard_pipeline,
+        Arc::clone(&event_bus),
+    ));
+
+    // Run the signal loop (blocks until candle channel closes)
+    signal_loop::run_signal_loop(candle_rx, engine, strategies).await;
+
+    // Clean up background tasks
+    ws_handle.abort();
+    agg_handle.abort();
+
+    Ok(())
+}
+
+/// Load promoted strategies from the strategy store and prepare them for
+/// live signal generation.
+///
+/// Reads all strategies with `Promoted` status, loads their WASM artifacts,
+/// and wraps each in a [`LoadedStrategy`] ready for the signal loop.
+fn load_promoted_strategies(
+    trace_path: &Path,
+    contract: &str,
+    cfg: &crate::app_config::AppConfig,
+) -> error::Result<Vec<LoadedStrategy>> {
+    let strategy_db_path = trace_path.join("strategy_db");
+    let artifact_dir = paths::data_dir().join("artifacts");
+    let store = StrategyStore::open_path(&strategy_db_path, &artifact_dir).map_err(|e| {
+        error::AppError::PaperTrading {
+            message: format!("failed to open strategy store: {e}"),
+        }
+    })?;
+
+    let promoted = store
+        .list(Some(ResearchStrategyStatus::Promoted))
+        .map_err(|e| error::AppError::PaperTrading {
+            message: format!("failed to list promoted strategies: {e}"),
+        })?;
+
+    let executor = WasmExecutor::builder().build();
+    let position_size = rust_decimal::Decimal::try_from(cfg.trading.max_position_size)
+        .expect("max_position_size config must be a valid decimal");
+
+    let mut loaded = Vec::new();
+
+    for strategy in &promoted {
+        let artifact = match store.load_artifact(strategy.id) {
+            Ok(a) => a,
+            Err(e) => {
+                warn!(
+                    strategy_id = %strategy.id,
+                    error = %e,
+                    "skipping promoted strategy — failed to load artifact"
+                );
+                continue;
+            }
+        };
+
+        let mut handle = match executor.load(&artifact) {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(
+                    strategy_id = %strategy.id,
+                    error = %e,
+                    "skipping promoted strategy — failed to load WASM module"
+                );
+                continue;
+            }
+        };
+
+        let meta = match handle.meta() {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(
+                    strategy_id = %strategy.id,
+                    error = %e,
+                    "skipping promoted strategy — failed to read metadata"
+                );
+                continue;
+            }
+        };
+
+        info!(
+            strategy_id = %strategy.id,
+            name = meta.name,
+            version = meta.version,
+            "loaded promoted strategy for paper trading"
+        );
+
+        loaded.push(LoadedStrategy {
+            name: meta.name,
+            version: meta.version,
+            contract_id: contract.to_string(),
+            position_size,
+            handle,
+        });
+    }
+
+    Ok(loaded)
+}
 
 /// Build a [`StrategyEvaluator`](rara_feedback::evaluator::StrategyEvaluator)
 /// from the application's feedback configuration.

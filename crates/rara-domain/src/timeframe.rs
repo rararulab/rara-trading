@@ -40,7 +40,5 @@ impl Timeframe {
     }
 
     /// Duration of this timeframe in seconds.
-    pub const fn seconds(&self) -> i64 {
-        self.minutes() as i64 * 60
-    }
+    pub const fn seconds(&self) -> i64 { self.minutes() as i64 * 60 }
 }

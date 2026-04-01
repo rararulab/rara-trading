@@ -53,7 +53,5 @@ pub struct AgentConfig {
 }
 
 impl Default for AgentConfig {
-    fn default() -> Self {
-        Self::builder().build()
-    }
+    fn default() -> Self { Self::builder().build() }
 }

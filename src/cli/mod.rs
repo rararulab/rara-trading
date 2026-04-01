@@ -29,7 +29,7 @@ pub enum Command {
     /// Run a prompt through the configured agent backend
     Agent {
         /// The prompt to send to the agent
-        prompt: String,
+        prompt:  String,
         /// Override the backend (e.g., "claude", "codex")
         #[arg(long)]
         backend: Option<String>,
@@ -57,7 +57,7 @@ pub enum Command {
         iterations: u32,
         /// gRPC server listen address.
         #[arg(long, default_value = "0.0.0.0:50051")]
-        grpc_addr: String,
+        grpc_addr:  String,
     },
 
     /// Setup and configuration management.
@@ -82,7 +82,8 @@ pub enum Command {
     /// Launch the TUI dashboard.
     ///
     /// When `--server` is provided, connects to an existing gRPC server.
-    /// When omitted, automatically spawns a server subprocess (standalone mode).
+    /// When omitted, automatically spawns a server subprocess (standalone
+    /// mode).
     Tui {
         /// gRPC server address to connect to. Omit for standalone mode.
         #[arg(long)]
@@ -94,7 +95,6 @@ pub enum Command {
         #[command(subcommand)]
         action: FeedbackAction,
     },
-
 
     /// Paper trading operations.
     Paper {
@@ -119,10 +119,9 @@ pub enum FeedbackAction {
         strategy: Option<String>,
         /// Maximum number of entries to show.
         #[arg(long, default_value = "20")]
-        limit: usize,
+        limit:    usize,
     },
 }
-
 
 /// Paper trading subcommands.
 #[derive(Subcommand, Debug)]
@@ -153,10 +152,10 @@ pub enum DataAction {
         symbol: String,
         /// Start date (YYYY-MM-DD).
         #[arg(long)]
-        start: String,
+        start:  String,
         /// End date (YYYY-MM-DD).
         #[arg(long)]
-        end: String,
+        end:    String,
     },
 
     /// Show data coverage for all stored instruments (JSON output).
@@ -173,20 +172,20 @@ pub enum ResearchAction {
         iterations: u32,
         /// Contract to backtest against.
         #[arg(long, default_value = "BTC-USDT")]
-        contract: String,
+        contract:   String,
         /// Path to trace storage directory.
         #[arg(long)]
-        trace_dir: Option<String>,
+        trace_dir:  Option<String>,
         /// Only output final summary, suppress per-iteration progress.
         #[arg(long)]
-        quiet: bool,
+        quiet:      bool,
     },
 
     /// List experiment history from the trace.
     List {
         /// Maximum number of entries to show.
         #[arg(long, default_value = "20")]
-        limit: usize,
+        limit:     usize,
         /// Path to trace storage directory.
         #[arg(long)]
         trace_dir: Option<String>,
@@ -199,7 +198,7 @@ pub enum ResearchAction {
         experiment_id: String,
         /// Path to trace storage directory.
         #[arg(long)]
-        trace_dir: Option<String>,
+        trace_dir:     Option<String>,
     },
 
     /// List promoted strategies.
@@ -239,7 +238,7 @@ pub enum ConfigAction {
     /// Set a config value
     Set {
         /// Config key (e.g. example.setting)
-        key: String,
+        key:   String,
         /// Config value
         value: String,
     },
@@ -281,24 +280,26 @@ pub enum SetupAccountAction {
     /// Add a trading account.
     ///
     /// EXAMPLES:
-    ///     rara setup account add --id paper-btc --broker paper --contracts BTC-USDT --fill-price 50000
-    ///     rara setup account add --id binance-prod --broker ccxt --exchange binance --api-key "$KEY" --secret "$SECRET" --sandbox
+    ///     rara setup account add --id paper-btc --broker paper --contracts
+    /// BTC-USDT --fill-price 50000     rara setup account add --id
+    /// binance-prod --broker ccxt --exchange binance --api-key "$KEY" --secret
+    /// "$SECRET" --sandbox
     Add {
         /// Account identifier.
         #[arg(long)]
-        id: String,
+        id:         String,
         /// Broker type: "paper" or "ccxt".
         #[arg(long)]
-        broker: String,
+        broker:     String,
         /// Human-readable label.
         #[arg(long)]
-        label: Option<String>,
+        label:      Option<String>,
         /// Contracts to trade (comma-separated).
         #[arg(long, value_delimiter = ',')]
-        contracts: Option<Vec<String>>,
+        contracts:  Option<Vec<String>>,
         /// Enable/disable the account.
         #[arg(long, default_value = "true")]
-        enabled: bool,
+        enabled:    bool,
         // Paper broker options
         /// Fixed fill price (paper broker only).
         #[arg(long)]
@@ -306,19 +307,19 @@ pub enum SetupAccountAction {
         // CCXT broker options
         /// Exchange: "binance", "bybit", "okx" (ccxt only).
         #[arg(long)]
-        exchange: Option<String>,
+        exchange:   Option<String>,
         /// API key (ccxt only).
         #[arg(long)]
-        api_key: Option<String>,
+        api_key:    Option<String>,
         /// API secret (ccxt only).
         #[arg(long)]
-        secret: Option<String>,
+        secret:     Option<String>,
         /// API passphrase, OKX only (ccxt only).
         #[arg(long)]
         passphrase: Option<String>,
         /// Use sandbox/testnet (ccxt only).
         #[arg(long)]
-        sandbox: bool,
+        sandbox:    bool,
     },
     /// List configured accounts.
     List,
@@ -328,7 +329,7 @@ pub enum SetupAccountAction {
     ///     rara setup account remove binance-prod --yes
     Remove {
         /// Account ID to remove.
-        id: String,
+        id:  String,
         /// Skip confirmation.
         #[arg(long)]
         yes: bool,

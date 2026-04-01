@@ -14,23 +14,27 @@
 //! └───────────────────────────────────────────────────────────┘
 //! ```
 
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Modifier;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
-use ratatui::Frame;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout},
+    style::Modifier,
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Tabs},
+};
 
-use crate::app::{App, ConnectionStatus, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_NAMES, TAB_RESEARCH, TRADING_TAB};
-use crate::tabs;
-use crate::tabs::research;
-use crate::tabs::strategies as strategies_tab;
-use crate::tabs::trading;
-use crate::theme;
+use crate::{
+    app::{
+        App, ConnectionStatus, EVENTS_TAB_INDEX, STRATEGIES_TAB, TAB_NAMES, TAB_RESEARCH,
+        TRADING_TAB,
+    },
+    tabs,
+    tabs::{research, strategies as strategies_tab, trading},
+    theme,
+};
 
 /// Braille spinner animation frames for the startup screen.
 const SPINNER_FRAMES: &[&str] = &[
-    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}",
-    "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
     "\u{2807}", "\u{280f}",
 ];
 
@@ -83,10 +87,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         },
     );
 
-    let strategy_count = app
-        .system_status
-        .as_ref()
-        .map_or(0, |s| s.strategy_count);
+    let strategy_count = app.system_status.as_ref().map_or(0, |s| s.strategy_count);
     let uptime = app
         .system_status
         .as_ref()
@@ -156,8 +157,7 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
         ConnectionStatus::Disconnected { retry_count } => {
             let content = Paragraph::new(format!(
-                "Connection lost. Reconnecting... (attempt {retry_count})\n\
-                 Server: {}",
+                "Connection lost. Reconnecting... (attempt {retry_count})\nServer: {}",
                 app.server_addr
             ))
             .style(theme::negative())
@@ -180,10 +180,7 @@ fn render_content(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     } else if app.active_tab == EVENTS_TAB_INDEX {
         tabs::events::render(frame, &app.events_state, area);
     } else {
-        let tab_name = TAB_NAMES
-            .get(app.active_tab)
-            .copied()
-            .unwrap_or("Unknown");
+        let tab_name = TAB_NAMES.get(app.active_tab).copied().unwrap_or("Unknown");
         let content = Paragraph::new(format!(
             "{tab_name}\n\nContent will be implemented in future issues."
         ))
@@ -240,9 +237,7 @@ fn render_startup(frame: &mut Frame, app: &App) {
     frame.render_widget(bg, area);
 
     let (message, attempts) = match &app.phase {
-        crate::app::AppPhase::StartingServer { message, attempts } => {
-            (message.as_str(), *attempts)
-        }
+        crate::app::AppPhase::StartingServer { message, attempts } => (message.as_str(), *attempts),
         crate::app::AppPhase::Ready => return,
     };
 
@@ -250,25 +245,19 @@ fn render_startup(frame: &mut Frame, app: &App) {
 
     let lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  rara-trading", theme::emphasis()),
-        ]),
+        Line::from(vec![Span::styled("  rara-trading", theme::emphasis())]),
         Line::from(""),
         Line::from(vec![
             Span::styled(format!("  {spinner} "), theme::warning()),
             Span::styled(message, theme::text()),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                format!("  Connection attempts: {attempts}"),
-                theme::muted(),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            format!("  Connection attempts: {attempts}"),
+            theme::muted(),
+        )]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  q: Quit", theme::muted()),
-        ]),
+        Line::from(vec![Span::styled("  q: Quit", theme::muted())]),
     ];
 
     let paragraph = Paragraph::new(lines);

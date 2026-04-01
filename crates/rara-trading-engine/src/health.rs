@@ -1,7 +1,8 @@
 //! Broker connection health tracking with automatic degradation detection.
 //!
-//! Tracks consecutive failures and maps them to health states using configurable
-//! thresholds. Supports manual disable/enable and exponential backoff for recovery.
+//! Tracks consecutive failures and maps them to health states using
+//! configurable thresholds. Supports manual disable/enable and exponential
+//! backoff for recovery.
 
 use bon::Builder;
 use serde::{Deserialize, Serialize};
@@ -36,19 +37,19 @@ pub enum BrokerHealth {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct BrokerHealthInfo {
     /// Current health status.
-    pub status: BrokerHealth,
+    pub status:               BrokerHealth,
     /// Number of consecutive failures without a success.
     pub consecutive_failures: u32,
     /// Most recent error message, if any.
-    pub last_error: Option<String>,
+    pub last_error:           Option<String>,
     /// Timestamp of the last successful operation.
-    pub last_success_at: Option<jiff::Timestamp>,
+    pub last_success_at:      Option<jiff::Timestamp>,
     /// Timestamp of the last failed operation.
-    pub last_failure_at: Option<jiff::Timestamp>,
+    pub last_failure_at:      Option<jiff::Timestamp>,
     /// Whether a recovery attempt is in progress.
-    pub recovering: bool,
+    pub recovering:           bool,
     /// Whether the broker has been manually disabled.
-    pub disabled: bool,
+    pub disabled:             bool,
 }
 
 /// Tracks broker connection health and computes status from failure history.
@@ -59,11 +60,11 @@ pub struct BrokerHealthInfo {
 /// - Manually disabled brokers always report `Offline`.
 pub struct HealthTracker {
     consecutive_failures: u32,
-    last_error: Option<String>,
-    last_success_at: Option<jiff::Timestamp>,
-    last_failure_at: Option<jiff::Timestamp>,
-    recovering: bool,
-    disabled: bool,
+    last_error:           Option<String>,
+    last_success_at:      Option<jiff::Timestamp>,
+    last_failure_at:      Option<jiff::Timestamp>,
+    recovering:           bool,
+    disabled:             bool,
 }
 
 impl HealthTracker {
@@ -71,15 +72,16 @@ impl HealthTracker {
     pub const fn new() -> Self {
         Self {
             consecutive_failures: 0,
-            last_error: None,
-            last_success_at: None,
-            last_failure_at: None,
-            recovering: false,
-            disabled: false,
+            last_error:           None,
+            last_success_at:      None,
+            last_failure_at:      None,
+            recovering:           false,
+            disabled:             false,
         }
     }
 
-    /// Returns the current health status based on failure count and disabled flag.
+    /// Returns the current health status based on failure count and disabled
+    /// flag.
     pub const fn status(&self) -> BrokerHealth {
         if self.disabled {
             return BrokerHealth::Offline;
@@ -96,13 +98,13 @@ impl HealthTracker {
     /// Returns a serializable snapshot of the current health state.
     pub fn info(&self) -> BrokerHealthInfo {
         BrokerHealthInfo {
-            status: self.status(),
+            status:               self.status(),
             consecutive_failures: self.consecutive_failures,
-            last_error: self.last_error.clone(),
-            last_success_at: self.last_success_at,
-            last_failure_at: self.last_failure_at,
-            recovering: self.recovering,
-            disabled: self.disabled,
+            last_error:           self.last_error.clone(),
+            last_success_at:      self.last_success_at,
+            last_failure_at:      self.last_failure_at,
+            recovering:           self.recovering,
+            disabled:             self.disabled,
         }
     }
 
@@ -128,21 +130,16 @@ impl HealthTracker {
     }
 
     /// Re-enables a previously disabled broker.
-    pub const fn enable(&mut self) {
-        self.disabled = false;
-    }
+    pub const fn enable(&mut self) { self.disabled = false; }
 
     /// Returns whether the broker has been manually disabled.
-    pub const fn is_disabled(&self) -> bool {
-        self.disabled
-    }
+    pub const fn is_disabled(&self) -> bool { self.disabled }
 
     /// Sets the recovering flag to indicate a recovery attempt is in progress.
-    pub const fn set_recovering(&mut self, recovering: bool) {
-        self.recovering = recovering;
-    }
+    pub const fn set_recovering(&mut self, recovering: bool) { self.recovering = recovering; }
 
-    /// Computes the recovery delay for a given attempt using exponential backoff.
+    /// Computes the recovery delay for a given attempt using exponential
+    /// backoff.
     ///
     /// Delay doubles each attempt starting from [`RECOVERY_BASE_MS`],
     /// capped at [`RECOVERY_MAX_MS`].
@@ -153,9 +150,7 @@ impl HealthTracker {
 }
 
 impl Default for HealthTracker {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]

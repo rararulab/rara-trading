@@ -1,5 +1,6 @@
-//! WASM-based strategy executor — implements [`StrategyExecutor`] and [`StrategyHandle`]
-//! by delegating to `wasmtime` for compiled `.wasm` strategy files.
+//! WASM-based strategy executor — implements [`StrategyExecutor`] and
+//! [`StrategyHandle`] by delegating to `wasmtime` for compiled `.wasm` strategy
+//! files.
 
 use bon::Builder;
 use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
@@ -10,8 +11,9 @@ use crate::strategy_executor::{ExecutorError, Result, StrategyExecutor, Strategy
 
 /// WASM-based strategy executor powered by `wasmtime`.
 ///
-/// Loads compiled `.wasm` strategy artifacts and produces [`WasmStrategyHandle`] instances
-/// that communicate via the JSON-based protocol.
+/// Loads compiled `.wasm` strategy artifacts and produces
+/// [`WasmStrategyHandle`] instances that communicate via the JSON-based
+/// protocol.
 #[derive(Debug, Builder)]
 pub struct WasmExecutor {
     /// Maximum fuel (computation budget) for WASM execution.
@@ -21,16 +23,17 @@ pub struct WasmExecutor {
 
 /// A loaded WASM strategy ready to execute.
 ///
-/// Wraps a `wasmtime` store and cached function handles for the strategy protocol.
+/// Wraps a `wasmtime` store and cached function handles for the strategy
+/// protocol.
 pub struct WasmStrategyHandle {
-    store: Store<WasiP1Ctx>,
-    memory: Memory,
+    store:               Store<WasiP1Ctx>,
+    memory:              Memory,
     // Cached typed function handles
-    fn_alloc: TypedFunc<u32, u32>,
-    fn_get_output_ptr: TypedFunc<(), u32>,
-    fn_get_output_len: TypedFunc<(), u32>,
-    fn_wasm_meta: TypedFunc<(), u32>,
-    fn_wasm_on_candles: TypedFunc<(), u32>,
+    fn_alloc:            TypedFunc<u32, u32>,
+    fn_get_output_ptr:   TypedFunc<(), u32>,
+    fn_get_output_len:   TypedFunc<(), u32>,
+    fn_wasm_meta:        TypedFunc<(), u32>,
+    fn_wasm_on_candles:  TypedFunc<(), u32>,
     fn_wasm_risk_levels: TypedFunc<(), u32>,
 }
 
@@ -65,7 +68,8 @@ impl StrategyExecutor for WasmExecutor {
         config.consume_fuel(true);
         let engine = Engine::new(&config).map_err(|e| load_err("WASM engine error", e))?;
 
-        let module = Module::new(&engine, artifact).map_err(|e| load_err("WASM module error", e))?;
+        let module =
+            Module::new(&engine, artifact).map_err(|e| load_err("WASM module error", e))?;
 
         let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new().build_p1();
 
@@ -82,13 +86,15 @@ impl StrategyExecutor for WasmExecutor {
             .instantiate(&mut store, &module)
             .map_err(|e| load_err("WASM instantiation error", e))?;
 
-        let memory = instance
-            .get_memory(&mut store, "memory")
-            .ok_or_else(|| ExecutorError::Load {
-                message: "missing WASM export: memory".into(),
-            })?;
+        let memory =
+            instance
+                .get_memory(&mut store, "memory")
+                .ok_or_else(|| ExecutorError::Load {
+                    message: "missing WASM export: memory".into(),
+                })?;
 
-        // Resolve each exported function handle individually to preserve type information
+        // Resolve each exported function handle individually to preserve type
+        // information
         let fn_alloc: TypedFunc<u32, u32> = instance
             .get_typed_func(&mut store, "alloc")
             .map_err(|e| load_err("missing export: alloc", e))?;
@@ -149,7 +155,7 @@ impl StrategyHandle for WasmStrategyHandle {
         #[derive(serde::Serialize)]
         struct Input {
             entry_price: f64,
-            side: Side,
+            side:        Side,
         }
         let input = serde_json::to_vec(&Input { entry_price, side })
             .map_err(|e| serde_err("failed to serialize risk_levels input", e))?;

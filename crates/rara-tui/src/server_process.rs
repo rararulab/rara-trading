@@ -1,10 +1,10 @@
 //! Manages a child gRPC server process for standalone TUI mode.
 //!
 //! When the TUI is launched without an explicit `--server` address, this module
-//! spawns the same binary with `serve --port <port>` and ensures cleanup on exit.
+//! spawns the same binary with `serve --port <port>` and ensures cleanup on
+//! exit.
 
-use std::net::TcpListener;
-use std::process::Stdio;
+use std::{net::TcpListener, process::Stdio};
 
 use snafu::ResultExt;
 use tokio::process::{Child, Command};
@@ -18,7 +18,7 @@ use crate::error::{IoSnafu, Result};
 /// The `port` field records which port the server is listening on.
 pub struct ServerProcess {
     pub port: u16,
-    child: Child,
+    child:    Child,
 }
 
 impl ServerProcess {
@@ -49,9 +49,7 @@ impl ServerProcess {
     }
 
     /// Build the gRPC server address string for this child process.
-    pub fn server_addr(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
+    pub fn server_addr(&self) -> String { format!("http://127.0.0.1:{}", self.port) }
 
     /// Gracefully shut down the child process.
     ///
@@ -81,7 +79,8 @@ impl ServerProcess {
     }
 }
 
-/// Find an available TCP port by binding to port 0 and reading the assigned port.
+/// Find an available TCP port by binding to port 0 and reading the assigned
+/// port.
 fn pick_available_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").context(IoSnafu)?;
     let port = listener.local_addr().context(IoSnafu)?.port();

@@ -1,34 +1,45 @@
-//! Barter [`AlgoStrategy`] adapter that bridges any [`StrategyHandle`] with the barter engine.
+//! Barter [`AlgoStrategy`] adapter that bridges any [`StrategyHandle`] with the
+//! barter engine.
 //!
-//! Receives 1-minute candle data from [`CandleInstrumentData`], aggregates to the target
-//! [`Timeframe`], and delegates signal generation to a [`StrategyHandle`] (runtime-agnostic).
+//! Receives 1-minute candle data from [`CandleInstrumentData`], aggregates to
+//! the target [`Timeframe`], and delegates signal generation to a
+//! [`StrategyHandle`] (runtime-agnostic).
 
 use std::cell::RefCell;
 
-use barter::engine::Engine;
-use barter::engine::state::EngineState;
-use barter::engine::state::global::DefaultGlobalData;
-use barter::engine::state::instrument::data::InstrumentDataState;
-use barter::engine::state::instrument::filter::InstrumentFilter;
-use barter::strategy::algo::AlgoStrategy;
-use barter::strategy::close_positions::{ClosePositionsStrategy, close_open_positions_with_market_orders};
-use barter::strategy::on_disconnect::OnDisconnectStrategy;
-use barter::strategy::on_trading_disabled::OnTradingDisabled;
-use barter_execution::order::id::{ClientOrderId, StrategyId};
-use barter_execution::order::request::{OrderRequestCancel, OrderRequestOpen, RequestOpen};
-use barter_execution::order::{OrderKey, OrderKind, TimeInForce};
-use barter_instrument::Side;
-use barter_instrument::asset::AssetIndex;
-use barter_instrument::exchange::{ExchangeId, ExchangeIndex};
-use barter_instrument::instrument::InstrumentIndex;
+use barter::{
+    engine::{
+        Engine,
+        state::{
+            EngineState,
+            global::DefaultGlobalData,
+            instrument::{data::InstrumentDataState, filter::InstrumentFilter},
+        },
+    },
+    strategy::{
+        algo::AlgoStrategy,
+        close_positions::{ClosePositionsStrategy, close_open_positions_with_market_orders},
+        on_disconnect::OnDisconnectStrategy,
+        on_trading_disabled::OnTradingDisabled,
+    },
+};
+use barter_execution::order::{
+    OrderKey, OrderKind, TimeInForce,
+    id::{ClientOrderId, StrategyId},
+    request::{OrderRequestCancel, OrderRequestOpen, RequestOpen},
+};
+use barter_instrument::{
+    Side,
+    asset::AssetIndex,
+    exchange::{ExchangeId, ExchangeIndex},
+    instrument::InstrumentIndex,
+};
+use rara_domain::timeframe::Timeframe;
+use rara_strategy_api::{Candle as ApiCandle, Signal};
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use tracing::warn;
 
-use rara_domain::timeframe::Timeframe;
-use rara_strategy_api::{Candle as ApiCandle, Signal};
-
-use crate::candle_instrument_data::CandleInstrumentData;
-use crate::strategy_executor::StrategyHandle;
+use crate::{candle_instrument_data::CandleInstrumentData, strategy_executor::StrategyHandle};
 
 /// Maximum number of aggregated candles retained in history.
 const MAX_AGGREGATED_HISTORY: usize = 500;
@@ -36,32 +47,35 @@ const MAX_AGGREGATED_HISTORY: usize = 500;
 /// Engine state type alias using our candle-aware instrument data.
 pub type BacktestEngineState = EngineState<DefaultGlobalData, CandleInstrumentData>;
 
-/// Barter strategy adapter that delegates signal generation to any [`StrategyHandle`].
+/// Barter strategy adapter that delegates signal generation to any
+/// [`StrategyHandle`].
 ///
-/// Aggregates 1-minute candles from [`CandleInstrumentData`] into the target [`Timeframe`],
-/// then calls the handle's `on_candles()` when a new aggregated bar completes.
-/// Uses [`RefCell`] for interior mutability because barter's [`AlgoStrategy`] requires `&self`.
+/// Aggregates 1-minute candles from [`CandleInstrumentData`] into the target
+/// [`Timeframe`], then calls the handle's `on_candles()` when a new aggregated
+/// bar completes. Uses [`RefCell`] for interior mutability because barter's
+/// [`AlgoStrategy`] requires `&self`.
 pub struct BarterStrategy {
     /// Strategy identifier for order tagging.
     pub id: StrategyId,
-    /// Mutable inner state behind `RefCell` (barter calls `generate_algo_orders` with `&self`).
-    state: RefCell<StrategyInner>,
+    /// Mutable inner state behind `RefCell` (barter calls
+    /// `generate_algo_orders` with `&self`).
+    state:  RefCell<StrategyInner>,
 }
 
 /// Mutable state for candle aggregation and strategy invocation.
 struct StrategyInner {
     /// Strategy handle for calling `on_candles()`.
-    handle: Box<dyn StrategyHandle>,
+    handle:          Box<dyn StrategyHandle>,
     /// Target timeframe for candle aggregation.
-    timeframe: Timeframe,
+    timeframe:       Timeframe,
     /// Buffer of 1m candles accumulating toward next aggregation boundary.
-    buffer: Vec<ApiCandle>,
+    buffer:          Vec<ApiCandle>,
     /// Aggregated candle history passed to the WASM strategy.
-    history: Vec<ApiCandle>,
+    history:         Vec<ApiCandle>,
     /// Number of candles already consumed from `CandleInstrumentData`.
     processed_count: usize,
     /// Most recent signal from the WASM strategy.
-    current_signal: Option<Signal>,
+    current_signal:  Option<Signal>,
 }
 
 impl BarterStrategy {
@@ -72,7 +86,7 @@ impl BarterStrategy {
     /// * `timeframe` - Target timeframe for candle aggregation (e.g., 4h)
     pub fn new(handle: Box<dyn StrategyHandle>, timeframe: Timeframe) -> Self {
         Self {
-            id: StrategyId::new("strategy"),
+            id:    StrategyId::new("strategy"),
             state: RefCell::new(StrategyInner {
                 handle,
                 timeframe,
@@ -85,10 +99,12 @@ impl BarterStrategy {
     }
 }
 
-/// Check whether the buffer of 1m candles should be aggregated into one target-timeframe bar.
+/// Check whether the buffer of 1m candles should be aggregated into one
+/// target-timeframe bar.
 ///
-/// For 1m timeframe, every candle passes through directly. For larger timeframes,
-/// aggregation triggers when the next minute would cross a natural timeframe boundary.
+/// For 1m timeframe, every candle passes through directly. For larger
+/// timeframes, aggregation triggers when the next minute would cross a natural
+/// timeframe boundary.
 fn should_aggregate(buffer: &[ApiCandle], timeframe: Timeframe) -> bool {
     if timeframe == Timeframe::Min1 {
         return true;
@@ -106,15 +122,22 @@ fn should_aggregate(buffer: &[ApiCandle], timeframe: Timeframe) -> bool {
 ///
 /// Panics if `candles` is empty.
 fn aggregate_candles(candles: &[ApiCandle]) -> ApiCandle {
-    let first = candles.first().expect("aggregate requires non-empty candles");
-    let last = candles.last().expect("aggregate requires non-empty candles");
+    let first = candles
+        .first()
+        .expect("aggregate requires non-empty candles");
+    let last = candles
+        .last()
+        .expect("aggregate requires non-empty candles");
     ApiCandle {
         timestamp: first.timestamp,
-        open: first.open,
-        high: candles.iter().map(|c| c.high).fold(f64::NEG_INFINITY, f64::max),
-        low: candles.iter().map(|c| c.low).fold(f64::INFINITY, f64::min),
-        close: last.close,
-        volume: candles.iter().map(|c| c.volume).sum(),
+        open:      first.open,
+        high:      candles
+            .iter()
+            .map(|c| c.high)
+            .fold(f64::NEG_INFINITY, f64::max),
+        low:       candles.iter().map(|c| c.low).fold(f64::INFINITY, f64::min),
+        close:     last.close,
+        volume:    candles.iter().map(|c| c.volume).sum(),
     }
 }
 
@@ -180,15 +203,14 @@ impl AlgoStrategy for BarterStrategy {
                                 rara_strategy_api::Side::Long => Side::Buy,
                                 rara_strategy_api::Side::Short => Side::Sell,
                             };
-                            let quantity = Decimal::from_f64(*strength)
-                                .unwrap_or(Decimal::ONE);
+                            let quantity = Decimal::from_f64(*strength).unwrap_or(Decimal::ONE);
 
                             open_orders.push(OrderRequestOpen {
-                                key: OrderKey {
-                                    exchange: instrument_state.instrument.exchange,
+                                key:   OrderKey {
+                                    exchange:   instrument_state.instrument.exchange,
                                     instrument: instrument_state.key,
-                                    strategy: self.id.clone(),
-                                    cid: ClientOrderId::random(),
+                                    strategy:   self.id.clone(),
+                                    cid:        ClientOrderId::random(),
                                 },
                                 state: RequestOpen {
                                     side: order_side,
@@ -210,11 +232,11 @@ impl AlgoStrategy for BarterStrategy {
                                 Side::Sell => Side::Buy,
                             };
                             open_orders.push(OrderRequestOpen {
-                                key: OrderKey {
-                                    exchange: instrument_state.instrument.exchange,
+                                key:   OrderKey {
+                                    exchange:   instrument_state.instrument.exchange,
                                     instrument: instrument_state.key,
-                                    strategy: self.id.clone(),
-                                    cid: ClientOrderId::random(),
+                                    strategy:   self.id.clone(),
+                                    cid:        ClientOrderId::random(),
                                 },
                                 state: RequestOpen {
                                     side: exit_side,

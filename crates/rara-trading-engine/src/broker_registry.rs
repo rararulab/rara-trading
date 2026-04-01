@@ -1,8 +1,8 @@
 //! Broker registry — self-describing broker types for dynamic UI generation.
 //!
 //! Each broker registers a [`BrokerRegistryEntry`] that describes its config
-//! fields, allowing the setup wizard to render forms without hard-coded knowledge
-//! of individual brokers.
+//! fields, allowing the setup wizard to render forms without hard-coded
+//! knowledge of individual brokers.
 
 use std::collections::HashMap;
 
@@ -10,8 +10,7 @@ use bon::Builder;
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
 
-use crate::account_config::BrokerConfig;
-use crate::broker::Broker;
+use crate::{account_config::BrokerConfig, broker::Broker};
 
 /// Factory function that creates a [`Broker`] from a raw config map.
 pub type CreateBrokerFn =
@@ -54,28 +53,28 @@ pub struct SelectOption {
 pub struct ConfigField {
     /// Machine-readable field name (used as the key in config maps).
     #[builder(into)]
-    pub name: String,
+    pub name:        String,
     /// The input type for this field.
-    pub field_type: ConfigFieldType,
+    pub field_type:  ConfigFieldType,
     /// Human-readable label shown in the UI.
     #[builder(into)]
-    pub label: String,
+    pub label:       String,
     /// Placeholder text shown when the field is empty.
     #[builder(into)]
     pub placeholder: Option<String>,
     /// Default value if the user provides none.
     #[builder(into)]
-    pub default: Option<String>,
+    pub default:     Option<String>,
     /// Whether the field must be filled.
-    pub required: bool,
+    pub required:    bool,
     /// Available choices for [`ConfigFieldType::Select`] fields.
     #[builder(default)]
-    pub options: Vec<SelectOption>,
+    pub options:     Vec<SelectOption>,
     /// Help text describing the field's purpose.
     #[builder(into)]
     pub description: Option<String>,
     /// Whether the field contains sensitive data (passwords, keys).
-    pub sensitive: bool,
+    pub sensitive:   bool,
 }
 
 /// Errors that can occur during broker registry operations.
@@ -92,7 +91,7 @@ pub enum BrokerRegistryError {
     #[snafu(display("invalid value for field '{field}': {reason}"))]
     InvalidValue {
         /// Name of the field with the invalid value.
-        field: String,
+        field:  String,
         /// Why the value is invalid.
         reason: String,
     },
@@ -114,11 +113,11 @@ pub type Result<T> = std::result::Result<T, BrokerRegistryError>;
 /// render broker configuration forms.
 pub struct BrokerRegistryEntry {
     /// Unique identifier for this broker type (e.g. "paper", "ccxt").
-    pub type_key: &'static str,
+    pub type_key:      &'static str,
     /// Human-readable broker name.
-    pub name: &'static str,
+    pub name:          &'static str,
     /// Short description of the broker.
-    pub description: &'static str,
+    pub description:   &'static str,
     /// Returns the config fields this broker requires.
     pub config_fields: fn() -> Vec<ConfigField>,
     /// Create a [`Broker`] instance from a raw config map.

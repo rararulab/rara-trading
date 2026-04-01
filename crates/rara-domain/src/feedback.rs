@@ -23,15 +23,15 @@ pub enum FeedbackDecision {
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct StrategyMetrics {
     /// Profit and loss.
-    pub pnl: Decimal,
+    pub pnl:          Decimal,
     /// Sharpe ratio.
     pub sharpe_ratio: f64,
     /// Maximum drawdown.
     pub max_drawdown: Decimal,
     /// Win rate as a fraction.
-    pub win_rate: f64,
+    pub win_rate:     f64,
     /// Total number of trades.
-    pub trade_count: u32,
+    pub trade_count:  u32,
 }
 
 /// A periodic evaluation report for a strategy.
@@ -39,30 +39,28 @@ pub struct StrategyMetrics {
 pub struct StrategyReport {
     /// Strategy identifier being evaluated.
     #[builder(into)]
-    pub strategy_id: String,
+    pub strategy_id:      String,
     /// Strategy version under evaluation.
     pub strategy_version: u32,
     /// Evaluation window start timestamp.
-    pub window_start: jiff::Timestamp,
+    pub window_start:     jiff::Timestamp,
     /// Evaluation window end timestamp.
-    pub window_end: jiff::Timestamp,
+    pub window_end:       jiff::Timestamp,
     /// Aggregated performance metrics in the window.
-    pub metrics: StrategyMetrics,
+    pub metrics:          StrategyMetrics,
     /// Related sentinel event identifiers.
-    pub sentinel_events: Vec<Uuid>,
+    pub sentinel_events:  Vec<Uuid>,
     /// Lifecycle decision from evaluator.
-    pub decision: FeedbackDecision,
+    pub decision:         FeedbackDecision,
     /// Human-readable decision rationale.
     #[builder(into)]
-    pub reason: String,
+    pub reason:           String,
     /// Report generation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub generated_at: jiff::Timestamp,
+    pub generated_at:     jiff::Timestamp,
 }
 
 impl StrategyReport {
     /// Returns `true` if the strategy should be retrained (i.e. retired).
-    pub fn should_trigger_retrain(&self) -> bool {
-        self.decision == FeedbackDecision::Retire
-    }
+    pub fn should_trigger_retrain(&self) -> bool { self.decision == FeedbackDecision::Retire }
 }

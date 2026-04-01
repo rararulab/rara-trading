@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use snafu::{ResultExt, Snafu};
-
 use rara_domain::research::Hypothesis;
 use rara_infra::llm::LlmClient;
+use snafu::{ResultExt, Snafu};
 
 use crate::trace::Trace;
 
@@ -43,9 +42,7 @@ pub struct HypothesisGenerator {
 
 impl HypothesisGenerator {
     /// Create a new generator backed by the given LLM client.
-    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
-        Self { llm }
-    }
+    pub fn new(llm: Arc<dyn LlmClient>) -> Self { Self { llm } }
 
     /// Generate a new hypothesis informed by the trace history and context.
     ///
@@ -67,8 +64,7 @@ impl HypothesisGenerator {
             let _ = write!(
                 prompt,
                 "Best experiment so far:\n- Code: {}\n- Feedback: {}\n\n",
-                exp.strategy_code,
-                fb.reason
+                exp.strategy_code, fb.reason
             );
         }
 
@@ -82,16 +78,15 @@ impl HypothesisGenerator {
 
     /// Parse the LLM response into a Hypothesis, linking to the best
     /// experiment's hypothesis as parent if one exists.
-    fn parse_response(
-        response: &str,
-        trace: &Trace,
-    ) -> Result<Hypothesis> {
+    fn parse_response(response: &str, trace: &Trace) -> Result<Hypothesis> {
         let lines: Vec<&str> = response.lines().collect();
 
-        let text = lines
-            .first()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| ParseSnafu { message: "empty response".to_owned() }.build())?;
+        let text = lines.first().filter(|s| !s.is_empty()).ok_or_else(|| {
+            ParseSnafu {
+                message: "empty response".to_owned(),
+            }
+            .build()
+        })?;
 
         let reason = lines.get(1).unwrap_or(&"no reason provided");
 
@@ -113,19 +108,22 @@ impl HypothesisGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use rara_agent::executor::CliExecutor;
+    use rara_agent::{
+        backend::{CliBackend, OutputFormat, PromptMode},
+        executor::CliExecutor,
+    };
     use rara_domain::research::Experiment;
+
+    use super::*;
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string(), format!("printf '{response}\\n'")],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         })
     }
 

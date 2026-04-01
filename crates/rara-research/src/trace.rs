@@ -2,10 +2,9 @@
 
 use std::path::Path;
 
+use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
-
-use rara_domain::research::{Experiment, Hypothesis, HypothesisFeedback};
 
 /// Errors that can occur in trace storage.
 #[derive(Debug, Snafu)]
@@ -42,13 +41,14 @@ pub enum DagSelection {
 /// DAG storage for the research loop, persisting hypotheses, experiments,
 /// and feedback in sled trees.
 pub struct Trace {
-    hypotheses: sled::Tree,
+    hypotheses:  sled::Tree,
     experiments: sled::Tree,
-    feedbacks: sled::Tree,
-    /// Maps `u64_be_bytes` node index to `serde_json Vec<u64>` of parent indices.
+    feedbacks:   sled::Tree,
+    /// Maps `u64_be_bytes` node index to `serde_json Vec<u64>` of parent
+    /// indices.
     dag_parents: sled::Tree,
     /// Maps `u64_be_bytes` sequential index to experiment ID bytes.
-    hist_order: sled::Tree,
+    hist_order:  sled::Tree,
 }
 
 impl Trace {
@@ -151,14 +151,14 @@ impl Trace {
     /// Find the experiment with the best accepted feedback.
     ///
     /// Scans all feedbacks and returns the first accepted experiment found,
-    /// along with its feedback. Returns `None` if no accepted experiments exist.
+    /// along with its feedback. Returns `None` if no accepted experiments
+    /// exist.
     pub fn get_best_experiment(&self) -> Result<Option<(Experiment, HypothesisFeedback)>> {
         let mut best: Option<(Experiment, HypothesisFeedback)> = None;
 
         for res in &self.feedbacks {
             let (_, bytes) = res.context(SledSnafu)?;
-            let fb: HypothesisFeedback =
-                serde_json::from_slice(&bytes).context(SerializeSnafu)?;
+            let fb: HypothesisFeedback = serde_json::from_slice(&bytes).context(SerializeSnafu)?;
 
             if !fb.decision {
                 continue;
@@ -276,8 +276,7 @@ impl Trace {
 
         for res in &self.feedbacks {
             let (_, bytes) = res.context(SledSnafu)?;
-            let fb: HypothesisFeedback =
-                serde_json::from_slice(&bytes).context(SerializeSnafu)?;
+            let fb: HypothesisFeedback = serde_json::from_slice(&bytes).context(SerializeSnafu)?;
 
             if !fb.decision {
                 continue;
@@ -292,7 +291,9 @@ impl Trace {
                 .as_ref()
                 .map_or(f64::NEG_INFINITY, |result| result.sharpe_ratio);
 
-            let dominated = best.as_ref().is_some_and(|(_, _, best_sharpe)| *best_sharpe >= sharpe);
+            let dominated = best
+                .as_ref()
+                .is_some_and(|(_, _, best_sharpe)| *best_sharpe >= sharpe);
             if !dominated {
                 best = Some((exp, fb, sharpe));
             }
@@ -328,10 +329,7 @@ impl Trace {
     ///
     /// Scans all `dag_parents` entries and returns nodes whose parent list
     /// contains `parent_idx`.
-    pub fn children(
-        &self,
-        parent_idx: u64,
-    ) -> Result<Vec<(Experiment, HypothesisFeedback)>> {
+    pub fn children(&self, parent_idx: u64) -> Result<Vec<(Experiment, HypothesisFeedback)>> {
         self.dag_parents
             .iter()
             .filter_map(|res| {
@@ -412,7 +410,8 @@ impl Trace {
     /// Render trace history as structured text for LLM prompt injection.
     ///
     /// Shows the most recent `max_entries` entries from `hist_order`, formatted
-    /// as one line per iteration with hypothesis, result, metrics, and feedback.
+    /// as one line per iteration with hypothesis, result, metrics, and
+    /// feedback.
     pub fn format_for_prompt(&self, max_entries: usize) -> Result<String> {
         let total = self.hist_order.len();
         let skip = total.saturating_sub(max_entries);
@@ -459,7 +458,8 @@ impl Trace {
                 let iteration = skip + i;
 
                 Some(Ok(format!(
-                    "[Iteration {iteration}] Hypothesis: {hyp_text} | Result: {decision_str} | Sharpe: {sharpe} | PnL: {pnl} | Feedback: {}",
+                    "[Iteration {iteration}] Hypothesis: {hyp_text} | Result: {decision_str} | \
+                     Sharpe: {sharpe} | PnL: {pnl} | Feedback: {}",
                     fb.reason
                 )))
             })
@@ -471,9 +471,8 @@ impl Trace {
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal_macros::dec;
-
     use rara_domain::research::BacktestResult;
+    use rust_decimal_macros::dec;
 
     use super::*;
 
@@ -658,17 +657,23 @@ mod tests {
         // Accepted with low Sharpe
         let exp_low = make_experiment(h.id, "low", Some(0.5));
         let fb_low = make_feedback(exp_low.id, true, "low sharpe reason");
-        trace.record(&exp_low, &fb_low, &DagSelection::NewRoot).unwrap();
+        trace
+            .record(&exp_low, &fb_low, &DagSelection::NewRoot)
+            .unwrap();
 
         // Rejected with high Sharpe (should not win)
         let exp_rej = make_experiment(h.id, "rejected", Some(5.0));
         let fb_rej = make_feedback(exp_rej.id, false, "rejected reason");
-        trace.record(&exp_rej, &fb_rej, &DagSelection::Latest).unwrap();
+        trace
+            .record(&exp_rej, &fb_rej, &DagSelection::Latest)
+            .unwrap();
 
         // Accepted with high Sharpe (should win)
         let exp_high = make_experiment(h.id, "high", Some(2.5));
         let fb_high = make_feedback(exp_high.id, true, "high sharpe reason");
-        trace.record(&exp_high, &fb_high, &DagSelection::Latest).unwrap();
+        trace
+            .record(&exp_high, &fb_high, &DagSelection::Latest)
+            .unwrap();
 
         let sota = trace.get_sota().unwrap().unwrap();
         assert_eq!(sota.0.id, exp_high.id);

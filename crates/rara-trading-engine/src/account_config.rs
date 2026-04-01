@@ -16,18 +16,18 @@ pub struct AccountsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountConfig {
     /// Unique account identifier.
-    pub id: String,
+    pub id:            String,
     /// Human-readable label.
-    pub label: Option<String>,
+    pub label:         Option<String>,
     /// Broker-specific configuration (discriminated by `broker` field).
     #[serde(flatten)]
     pub broker_config: BrokerConfig,
     /// Whether the account is active.
     #[serde(default = "default_true")]
-    pub enabled: bool,
+    pub enabled:       bool,
     /// Contracts to trade on this account.
     #[serde(default)]
-    pub contracts: Vec<String>,
+    pub contracts:     Vec<String>,
 }
 
 impl AccountConfig {
@@ -100,23 +100,21 @@ pub struct PaperBrokerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CcxtBrokerConfig {
     /// Exchange identifier: "binance", "bybit", "okx".
-    pub exchange: String,
+    pub exchange:   String,
     /// Use exchange sandbox/testnet.
     #[serde(default)]
-    pub sandbox: bool,
+    pub sandbox:    bool,
     /// API key (sensitive — masked in CLI output).
     #[serde(default)]
-    pub api_key: String,
+    pub api_key:    String,
     /// API secret (sensitive — masked in CLI output).
     #[serde(default)]
-    pub secret: String,
+    pub secret:     String,
     /// API passphrase (OKX only, sensitive).
     pub passphrase: Option<String>,
 }
 
-const fn default_true() -> bool {
-    true
-}
+const fn default_true() -> bool { true }
 
 #[cfg(test)]
 mod tests {
@@ -202,13 +200,13 @@ mod tests {
     fn serialize_roundtrip() {
         let cfg = AccountsConfig {
             accounts: vec![AccountConfig {
-                id: "test".to_string(),
-                label: Some("Test Account".to_string()),
+                id:            "test".to_string(),
+                label:         Some("Test Account".to_string()),
                 broker_config: BrokerConfig::Paper(PaperBrokerConfig {
                     fill_price: Some(100.0),
                 }),
-                enabled: true,
-                contracts: vec!["BTC-USDT".to_string()],
+                enabled:       true,
+                contracts:     vec!["BTC-USDT".to_string()],
             }],
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
@@ -220,17 +218,17 @@ mod tests {
     #[test]
     fn mask_secrets_hides_sensitive_fields() {
         let mut acc = AccountConfig {
-            id: "test".to_string(),
-            label: None,
+            id:            "test".to_string(),
+            label:         None,
             broker_config: BrokerConfig::Ccxt(CcxtBrokerConfig {
-                exchange: "binance".to_string(),
-                sandbox: false,
-                api_key: "my-secret-key".to_string(),
-                secret: "my-secret-value".to_string(),
+                exchange:   "binance".to_string(),
+                sandbox:    false,
+                api_key:    "my-secret-key".to_string(),
+                secret:     "my-secret-value".to_string(),
                 passphrase: Some("my-pass".to_string()),
             }),
-            enabled: true,
-            contracts: vec![],
+            enabled:       true,
+            contracts:     vec![],
         };
         acc.mask_secrets();
         if let BrokerConfig::Ccxt(ref c) = acc.broker_config {

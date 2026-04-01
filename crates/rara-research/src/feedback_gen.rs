@@ -4,14 +4,12 @@
 //! calls the LLM, and parses the structured JSON response into
 //! [`HypothesisFeedback`].
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use snafu::{ResultExt, Snafu};
-use uuid::Uuid;
+use std::{collections::HashMap, sync::Arc};
 
 use rara_domain::research::{BacktestResult, Hypothesis, HypothesisFeedback};
 use rara_infra::llm::LlmClient;
+use snafu::{ResultExt, Snafu};
+use uuid::Uuid;
 
 use crate::prompt_renderer::{PromptError, PromptRenderer};
 
@@ -45,22 +43,23 @@ pub type Result<T> = std::result::Result<T, FeedbackGenError>;
 /// Raw JSON structure matching the LLM response format.
 #[derive(serde::Deserialize)]
 struct RawFeedback {
-    decision: bool,
-    reason: String,
-    observations: String,
+    decision:              bool,
+    reason:                String,
+    observations:          String,
     hypothesis_evaluation: String,
-    new_hypothesis: Option<String>,
-    code_change_summary: String,
+    new_hypothesis:        Option<String>,
+    code_change_summary:   String,
 }
 
 /// Generates structured feedback for experiments by prompting an LLM.
 pub struct FeedbackGenerator {
-    llm: Arc<dyn LlmClient>,
+    llm:             Arc<dyn LlmClient>,
     prompt_renderer: PromptRenderer,
 }
 
 impl FeedbackGenerator {
-    /// Create a new feedback generator with the given LLM client and prompt renderer.
+    /// Create a new feedback generator with the given LLM client and prompt
+    /// renderer.
     pub fn new(llm: Arc<dyn LlmClient>, prompt_renderer: PromptRenderer) -> Self {
         Self {
             llm,
@@ -177,11 +176,11 @@ fn extract_json(response: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use async_trait::async_trait;
     use rara_infra::llm::LlmError;
     use rust_decimal_macros::dec;
+
+    use super::*;
 
     /// Mock LLM client that returns a fixed response.
     struct MockLlm {
@@ -209,8 +208,7 @@ mod tests {
     }
 
     fn make_renderer() -> PromptRenderer {
-        let prompt_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/prompts");
+        let prompt_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/prompts");
         PromptRenderer::load_from_dir(&prompt_dir).expect("prompts dir should exist")
     }
 

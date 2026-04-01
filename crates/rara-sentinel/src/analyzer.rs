@@ -3,23 +3,23 @@
 
 use std::str::FromStr;
 
+use rara_domain::sentinel::{SentinelSignal, Severity, SignalSource, SignalType};
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
-
-use rara_domain::sentinel::{Severity, SignalSource, SignalType, SentinelSignal};
 
 /// Raw data captured during signal analysis, attached to the resulting
 /// [`SentinelSignal`].
 #[derive(Debug, Serialize)]
 struct AnalyzerRawData<'a> {
     /// Name of the originating data source.
-    source_name: &'a str,
+    source_name:  &'a str,
     /// Original textual content that was analyzed.
-    content: &'a str,
+    content:      &'a str,
     /// Full LLM response text.
     llm_response: &'a str,
 }
 use rara_infra::llm::LlmClient;
+
 use crate::source::RawSignal;
 
 /// Errors that can occur during signal analysis.
@@ -49,9 +49,7 @@ pub struct SignalAnalyzer<L: LlmClient> {
 
 impl<L: LlmClient> SignalAnalyzer<L> {
     /// Create a new analyzer backed by the given LLM client.
-    pub const fn new(llm: L) -> Self {
-        Self { llm }
-    }
+    pub const fn new(llm: L) -> Self { Self { llm } }
 
     /// Analyze a raw signal and return an actionable `SentinelSignal` if the
     /// LLM determines it warrants attention, or `None` if no action is needed.
@@ -132,8 +130,8 @@ fn parse_response(
         .summary(summary_str)
         .raw_data(
             serde_json::to_value(AnalyzerRawData {
-                source_name: &raw.source_name,
-                content: &raw.content,
+                source_name:  &raw.source_name,
+                content:      &raw.content,
                 llm_response: response,
             })
             .expect("AnalyzerRawData must serialize"),
@@ -156,40 +154,46 @@ fn infer_source(source_name: &str) -> SignalSource {
 
 #[cfg(test)]
 mod tests {
-    use rara_agent::backend::{CliBackend, OutputFormat, PromptMode};
-    use rara_agent::executor::CliExecutor;
+    use rara_agent::{
+        backend::{CliBackend, OutputFormat, PromptMode},
+        executor::CliExecutor,
+    };
 
     use super::*;
 
     fn echo_executor(response: &str) -> CliExecutor {
         CliExecutor::new(CliBackend {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), format!("printf '{response}\\n'")],
-            prompt_mode: PromptMode::Arg,
-            prompt_flag: None,
+            command:       "sh".to_string(),
+            args:          vec!["-c".to_string(), format!("printf '{response}\\n'")],
+            prompt_mode:   PromptMode::Arg,
+            prompt_flag:   None,
             output_format: OutputFormat::Text,
-            env_vars: vec![],
+            env_vars:      vec![],
         })
     }
 
     fn make_raw_signal() -> RawSignal {
         RawSignal {
             source_name: "test-source".to_owned(),
-            content: "Major exchange hack detected".to_owned(),
-            metadata: serde_json::json!({}),
-            timestamp: jiff::Timestamp::now(),
+            content:     "Major exchange hack detected".to_owned(),
+            metadata:    serde_json::json!({}),
+            timestamp:   jiff::Timestamp::now(),
         }
     }
 
     #[tokio::test]
     async fn parses_critical_signal_correctly() {
         let executor = echo_executor(
-            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP,ETH-PERP\nSUMMARY: Major exchange hack detected",
+            "SEVERITY: Critical\nTYPE: BlackSwan\nCONTRACTS: BTC-PERP,ETH-PERP\nSUMMARY: Major \
+             exchange hack detected",
         );
         let analyzer = SignalAnalyzer::new(executor);
         let raw = make_raw_signal();
 
-        let result = analyzer.analyze(&raw).await.expect("analysis should succeed");
+        let result = analyzer
+            .analyze(&raw)
+            .await
+            .expect("analysis should succeed");
         let signal = result.expect("should return Some for Critical severity");
 
         assert_eq!(signal.severity, Severity::Critical);
@@ -205,7 +209,10 @@ mod tests {
         let analyzer = SignalAnalyzer::new(executor);
         let raw = make_raw_signal();
 
-        let result = analyzer.analyze(&raw).await.expect("analysis should succeed");
+        let result = analyzer
+            .analyze(&raw)
+            .await
+            .expect("analysis should succeed");
         assert!(result.is_none());
     }
 }
