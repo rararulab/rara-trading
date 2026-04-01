@@ -2174,32 +2174,27 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 return Ok(());
             }
 
-            // Credentials can be omitted at add-time if they will be supplied
-            // via environment variables (RARA_ACCOUNT_{ID}_API_KEY, etc.).
-            // For non-sandbox accounts, require them upfront.
-            if !sandbox && (api_key.is_none() || secret.is_none()) {
+            let (Some(api_key), Some(secret)) = (api_key, secret) else {
                 println!(
                     "{}",
                     serde_json::to_string(&ErrorResponse {
                         ok:         false,
-                        error:      "--api-key and --secret are required for live accounts"
-                            .to_string(),
+                        error:      "--api-key and --secret are required".to_string(),
                         suggestion: Some(
-                            "add --sandbox for testnet, or provide credentials \
-                             (also settable via RARA_ACCOUNT_{ID}_API_KEY env vars)"
+                            "provide exchange API credentials: --api-key <KEY> --secret <SECRET>"
                                 .to_string(),
                         ),
                     })
                     .expect("ErrorResponse must serialize")
                 );
                 std::process::exit(1);
-            }
+            };
 
             let broker_config = BrokerConfig::Ccxt(CcxtBrokerConfig {
                 exchange,
                 sandbox,
-                api_key: api_key.unwrap_or_default(),
-                secret: secret.unwrap_or_default(),
+                api_key,
+                secret,
                 passphrase,
             });
 
