@@ -20,6 +20,7 @@ reqwest.workspace = true
 sqlx.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
+binance-sdk = { version = "44.0.1", default-features = false, features = ["spot", "rustls-tls"] }
 
 [lints]
 workspace = true
