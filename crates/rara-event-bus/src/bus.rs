@@ -44,6 +44,13 @@ impl EventBus {
 
     /// Access the underlying store for catch-up reads and offset management.
     pub const fn store(&self) -> &EventStore { &self.store }
+
+    /// Read all events sharing a given correlation ID across all topics.
+    ///
+    /// Delegates to [`EventStore::read_by_correlation_id`] for a full scan.
+    pub fn read_by_correlation_id(&self, correlation_id: &str) -> Result<Vec<Event>> {
+        self.store.read_by_correlation_id(correlation_id)
+    }
 }
 
 #[cfg(test)]

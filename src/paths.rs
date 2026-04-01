@@ -49,3 +49,5 @@ pub fn strategies_promoted_dir() -> PathBuf { data_dir().join("strategies/promot
 
 /// Path to the accounts configuration file.
 pub fn accounts_file() -> PathBuf { data_dir().join("accounts.toml") }
+/// Event bus sled database directory: `<data>/trace/events`
+pub fn event_bus_dir() -> PathBuf { data_dir().join("trace/events") }

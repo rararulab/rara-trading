@@ -167,12 +167,15 @@ impl ResearchLoop {
             .save_hypothesis(&hypothesis)
             .context(TraceSnafu)?;
 
-        // 3. Publish hypothesis created event
+        // 3. Publish hypothesis created event — establishes the correlation_id for this
+        //    run
+        let correlation_id = hypothesis.correlation_id.clone();
         self.publish_event(
             EventType::ResearchHypothesisCreated,
             &HypothesisCreatedPayload {
                 hypothesis_id: hypothesis.id.to_string(),
             },
+            &correlation_id,
         )?;
 
         // 4. Generate strategy code
@@ -249,6 +252,7 @@ impl ResearchLoop {
                 experiment_id: experiment.id.to_string(),
                 accepted,
             },
+            &correlation_id,
         )?;
 
         // 15. If accepted, update status and publish candidate event
@@ -263,6 +267,7 @@ impl ResearchLoop {
                     experiment_id: experiment.id.to_string(),
                     hypothesis_id: hypothesis.id.to_string(),
                 },
+                &correlation_id,
             )?;
         }
 
@@ -381,11 +386,19 @@ impl ResearchLoop {
     }
 
     /// Helper to publish a domain event with a typed payload.
-    fn publish_event(&self, event_type: EventType, payload: &impl Serialize) -> Result<()> {
+    ///
+    /// All events within a single pipeline run share the same `correlation_id`,
+    /// which is generated once when the hypothesis is created and passed here.
+    fn publish_event(
+        &self,
+        event_type: EventType,
+        payload: &impl Serialize,
+        correlation_id: &str,
+    ) -> Result<()> {
         let event = Event::builder()
             .event_type(event_type)
             .source("research_loop")
-            .correlation_id(uuid::Uuid::new_v4().to_string())
+            .correlation_id(correlation_id)
             .payload(serde_json::to_value(payload).expect("event payload must serialize"))
             .build();
         self.event_bus.publish(&event).context(EventBusSnafu)?;

@@ -74,6 +74,9 @@ impl FeedbackBridge {
     /// Evaluate a strategy over the given time window and publish the
     /// appropriate lifecycle event.
     ///
+    /// `correlation_id` links the feedback event to the originating research
+    /// pipeline run. Pass `None` to generate a fresh UUID for the event.
+    ///
     /// Flow:
     /// 1. Aggregate trading metrics for the strategy
     /// 2. Check sentinel events for critical severity
@@ -88,6 +91,7 @@ impl FeedbackBridge {
         window_start: jiff::Timestamp,
         window_end: jiff::Timestamp,
         sentinel_event_ids: Vec<Uuid>,
+        correlation_id: Option<String>,
     ) -> Result<StrategyReport> {
         // 1. Aggregate metrics
         let metrics = self
@@ -124,7 +128,7 @@ impl FeedbackBridge {
         let event = Event::builder()
             .event_type(event_type)
             .source("feedback-bridge")
-            .correlation_id(uuid::Uuid::new_v4().to_string())
+            .correlation_id(correlation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()))
             .strategy_id(strategy_id.to_owned())
             .strategy_version(strategy_version)
             .payload(
@@ -225,7 +229,7 @@ mod tests {
         let fb = bridge(Arc::clone(&bus));
         let (start, end) = window();
         let report = fb
-            .evaluate_strategy("strat-1", 1, start, end, vec![])
+            .evaluate_strategy("strat-1", 1, start, end, vec![], None)
             .unwrap();
 
         assert_eq!(report.decision, FeedbackDecision::Promote);
@@ -255,7 +259,7 @@ mod tests {
         let fb = bridge(Arc::clone(&bus));
         let (start, end) = window();
         let report = fb
-            .evaluate_strategy("strat-1", 1, start, end, vec![sentinel_id])
+            .evaluate_strategy("strat-1", 1, start, end, vec![sentinel_id], None)
             .unwrap();
 
         assert_eq!(report.decision, FeedbackDecision::Demote);
@@ -270,7 +274,7 @@ mod tests {
         let fb = bridge(Arc::clone(&bus));
         let (start, end) = window();
         let report = fb
-            .evaluate_strategy("strat-1", 1, start, end, vec![])
+            .evaluate_strategy("strat-1", 1, start, end, vec![], None)
             .unwrap();
 
         assert_eq!(report.decision, FeedbackDecision::Hold);
@@ -288,7 +292,7 @@ mod tests {
         let fb = bridge(Arc::clone(&bus));
         let (start, end) = window();
         let report = fb
-            .evaluate_strategy("strat-1", 1, start, end, vec![])
+            .evaluate_strategy("strat-1", 1, start, end, vec![], None)
             .unwrap();
 
         assert_eq!(report.decision, FeedbackDecision::Retire);

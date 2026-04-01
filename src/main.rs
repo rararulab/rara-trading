@@ -12,8 +12,8 @@ use rara_trading::{
     agent::{CliBackend, CliExecutor},
     app_config,
     cli::{
-        Cli, Command, ConfigAction, DataAction, FeedbackAction, PaperAction, ResearchAction,
-        SetupAccountAction, SetupAction, StrategyAction,
+        Cli, Command, ConfigAction, DataAction, EventsAction, FeedbackAction, PaperAction,
+        ResearchAction, SetupAccountAction, SetupAction, StrategyAction,
     },
     error::{
         self, AgentBackendSnafu, AgentExecutionSnafu, AppError, ConfigSnafu, DataFetchSnafu,
@@ -455,6 +455,9 @@ async fn run() -> error::Result<()> {
         }
         Command::Strategy { action } => {
             run_strategy(action).await?;
+        }
+        Command::Events { action } => {
+            run_events(action)?;
         }
         Command::Agent { prompt, backend } => {
             let cfg = app_config::load();
@@ -2295,4 +2298,78 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Events command handler
+// ---------------------------------------------------------------------------
+
+/// JSON response for a single event returned by the events query.
+#[derive(Serialize)]
+struct EventQueryItem {
+    /// Sequence number in the event store.
+    seq:            u64,
+    /// Event identifier.
+    event_id:       String,
+    /// Event type.
+    event_type:     String,
+    /// Correlation ID.
+    correlation_id: String,
+    /// Source component.
+    source:         String,
+    /// ISO-8601 timestamp.
+    timestamp:      String,
+    /// Arbitrary event payload.
+    payload:        serde_json::Value,
+}
+
+/// JSON response for the events query command.
+#[derive(Serialize)]
+struct EventQueryResponse {
+    ok:             bool,
+    correlation_id: String,
+    count:          usize,
+    events:         Vec<EventQueryItem>,
+}
+
+fn run_events(action: EventsAction) -> error::Result<()> {
+    match action {
+        EventsAction::Query {
+            correlation_id,
+            limit,
+        } => {
+            let bus = EventBus::open(&paths::event_bus_dir()).context(EventBusSnafu)?;
+            let all_events = bus
+                .read_by_correlation_id(&correlation_id)
+                .context(EventBusSnafu)?;
+
+            let events: Vec<EventQueryItem> = all_events
+                .into_iter()
+                .take(limit)
+                .enumerate()
+                .map(|(i, e)| EventQueryItem {
+                    // seq is not directly exposed; use index as a stable surrogate
+                    seq:            i as u64,
+                    event_id:       e.event_id.to_string(),
+                    event_type:     e.event_type.to_string(),
+                    correlation_id: e.correlation_id.clone(),
+                    source:         e.source.clone(),
+                    timestamp:      e.timestamp.to_string(),
+                    payload:        e.payload,
+                })
+                .collect();
+
+            let resp = EventQueryResponse {
+                ok: true,
+                correlation_id,
+                count: events.len(),
+                events,
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resp).expect("response must serialize")
+            );
+            Ok(())
+        }
+    }
 }

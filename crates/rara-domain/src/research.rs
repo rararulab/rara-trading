@@ -13,24 +13,29 @@ use crate::timeframe::Timeframe;
 pub struct Hypothesis {
     /// Hypothesis identifier.
     #[builder(default = Uuid::new_v4())]
-    pub id:          Uuid,
+    pub id:             Uuid,
     /// Hypothesis statement to validate.
     #[builder(into)]
-    pub text:        String,
+    pub text:           String,
     /// Rationale for proposing the hypothesis.
     #[builder(into)]
-    pub reason:      String,
+    pub reason:         String,
     /// What was observed in prior experiment results.
     #[builder(default, into)]
-    pub observation: String,
+    pub observation:    String,
     /// Domain knowledge applied when forming this hypothesis.
     #[builder(default, into)]
-    pub knowledge:   String,
+    pub knowledge:      String,
     /// Optional parent hypothesis for lineage tracking.
-    pub parent:      Option<Uuid>,
+    pub parent:         Option<Uuid>,
+    /// Correlation ID for tracing this hypothesis through the full pipeline.
+    /// Defaults to a freshly generated UUID v4, ensuring every hypothesis
+    /// starts a distinct pipeline run unless the caller explicitly sets one.
+    #[builder(default = Uuid::new_v4().to_string(), into)]
+    pub correlation_id: String,
     /// Creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at:  jiff::Timestamp,
+    pub created_at:     jiff::Timestamp,
 }
 
 /// Lifecycle status of an experiment.
@@ -138,16 +143,19 @@ pub enum ResearchStrategyStatus {
 pub struct ResearchStrategy {
     /// Strategy identifier.
     #[builder(default = Uuid::new_v4())]
-    pub id:            Uuid,
+    pub id:             Uuid,
     /// Hypothesis that generated this strategy.
-    pub hypothesis_id: Uuid,
+    pub hypothesis_id:  Uuid,
     /// Generated source code.
     #[builder(into)]
-    pub source_code:   String,
+    pub source_code:    String,
+    /// Correlation ID inherited from the originating hypothesis.
+    #[builder(into)]
+    pub correlation_id: Option<String>,
     /// Current lifecycle status.
     #[builder(default)]
-    pub status:        ResearchStrategyStatus,
+    pub status:         ResearchStrategyStatus,
     /// Creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at:    jiff::Timestamp,
+    pub created_at:     jiff::Timestamp,
 }

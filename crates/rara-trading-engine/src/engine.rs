@@ -125,7 +125,11 @@ impl TradingEngine {
             let event = Event::builder()
                 .event_type(EventType::TradingOrderSubmitted)
                 .source("trading-engine")
-                .correlation_id(&commit.hash)
+                // Use the pipeline correlation_id if present; fall back to the
+                // git-style commit hash so older code paths still correlate.
+                .correlation_id(
+                    commit.correlation_id.as_deref().unwrap_or(&commit.hash),
+                )
                 .strategy_id(commit.strategy_id.clone())
                 .payload(
                     serde_json::to_value(OrderSubmittedPayload {
@@ -162,7 +166,7 @@ impl TradingEngine {
             let event = Event::builder()
                 .event_type(event_type)
                 .source("trading-engine")
-                .correlation_id(&commit.hash)
+                .correlation_id(commit.correlation_id.as_deref().unwrap_or(&commit.hash))
                 .strategy_id(commit.strategy_id.clone())
                 .payload(
                     serde_json::to_value(OrderOutcomePayload {
