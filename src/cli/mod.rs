@@ -107,6 +107,12 @@ pub enum Command {
         #[command(subcommand)]
         action: StrategyAction,
     },
+
+    /// Query events stored in the event bus.
+    Events {
+        #[command(subcommand)]
+        action: EventsAction,
+    },
 }
 
 /// Feedback loop subcommands.
@@ -230,6 +236,23 @@ pub enum StrategyAction {
 
     /// List locally installed strategies fetched from the registry.
     Installed,
+}
+
+/// Event bus query subcommands.
+#[derive(Subcommand, Debug)]
+pub enum EventsAction {
+    /// List all events that share a given correlation ID.
+    ///
+    /// Performs a full scan of the event store. Intended for debugging and
+    /// pipeline tracing, not high-frequency use.
+    Query {
+        /// Correlation ID to filter by.
+        #[arg(long)]
+        correlation_id: String,
+        /// Maximum number of events to show.
+        #[arg(long, default_value = "50")]
+        limit:          usize,
+    },
 }
 
 /// Config management subcommands.

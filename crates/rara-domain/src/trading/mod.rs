@@ -82,6 +82,10 @@ pub struct TradingCommit {
     pub strategy_id:      String,
     /// Strategy version used for generation.
     pub strategy_version: u32,
+    /// Correlation ID linking this commit to the originating research pipeline
+    /// run.
+    #[builder(into)]
+    pub correlation_id:   Option<String>,
     /// Commit creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
     pub created_at:       jiff::Timestamp,

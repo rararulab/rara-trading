@@ -142,6 +142,25 @@ impl EventStore {
             });
         Ok(offset)
     }
+
+    /// Read all events matching a given correlation ID.
+    ///
+    /// Performs a full scan of the events tree, filtering by `correlation_id`.
+    /// Suitable for debugging and tracing, not high-frequency queries.
+    pub fn read_by_correlation_id(&self, correlation_id: &str) -> Result<Vec<Event>> {
+        self.events
+            .iter()
+            .map(|res| {
+                let (_, bytes) = res.context(SledSnafu)?;
+                serde_json::from_slice(&bytes).context(SerializeSnafu)
+            })
+            .filter(|res| {
+                res.as_ref()
+                    .map(|e: &Event| e.correlation_id == correlation_id)
+                    .unwrap_or(true)
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
