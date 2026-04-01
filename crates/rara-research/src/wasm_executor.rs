@@ -3,7 +3,7 @@
 //! files.
 
 use bon::Builder;
-use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
+use strategy_api::{Candle, StrategyMeta, StrategyOutput};
 use wasmtime::{Engine, Linker, Memory, Module, Store, TypedFunc};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
@@ -24,17 +24,16 @@ pub struct WasmExecutor {
 /// A loaded WASM strategy ready to execute.
 ///
 /// Wraps a `wasmtime` store and cached function handles for the strategy
-/// protocol.
+/// protocol. v2 API exports only `wasm_meta()` and `wasm_on_candles()`.
 pub struct WasmStrategyHandle {
-    store:               Store<WasiP1Ctx>,
-    memory:              Memory,
+    store:              Store<WasiP1Ctx>,
+    memory:             Memory,
     // Cached typed function handles
-    fn_alloc:            TypedFunc<u32, u32>,
-    fn_get_output_ptr:   TypedFunc<(), u32>,
-    fn_get_output_len:   TypedFunc<(), u32>,
-    fn_wasm_meta:        TypedFunc<(), u32>,
-    fn_wasm_on_candles:  TypedFunc<(), u32>,
-    fn_wasm_risk_levels: TypedFunc<(), u32>,
+    fn_alloc:           TypedFunc<u32, u32>,
+    fn_get_output_ptr:  TypedFunc<(), u32>,
+    fn_get_output_len:  TypedFunc<(), u32>,
+    fn_wasm_meta:       TypedFunc<(), u32>,
+    fn_wasm_on_candles: TypedFunc<(), u32>,
 }
 
 /// Map a wasmtime error to an `ExecutorError::Load`.
@@ -93,8 +92,6 @@ impl StrategyExecutor for WasmExecutor {
                     message: "missing WASM export: memory".into(),
                 })?;
 
-        // Resolve each exported function handle individually to preserve type
-        // information
         let fn_alloc: TypedFunc<u32, u32> = instance
             .get_typed_func(&mut store, "alloc")
             .map_err(|e| load_err("missing export: alloc", e))?;
@@ -110,9 +107,6 @@ impl StrategyExecutor for WasmExecutor {
         let fn_wasm_on_candles: TypedFunc<(), u32> = instance
             .get_typed_func(&mut store, "wasm_on_candles")
             .map_err(|e| load_err("missing export: wasm_on_candles", e))?;
-        let fn_wasm_risk_levels: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, "wasm_risk_levels")
-            .map_err(|e| load_err("missing export: wasm_risk_levels", e))?;
 
         Ok(Box::new(WasmStrategyHandle {
             store,
@@ -122,7 +116,6 @@ impl StrategyExecutor for WasmExecutor {
             fn_get_output_len,
             fn_wasm_meta,
             fn_wasm_on_candles,
-            fn_wasm_risk_levels,
         }))
     }
 }
@@ -137,8 +130,8 @@ impl StrategyHandle for WasmStrategyHandle {
         serde_json::from_slice(&output).map_err(|e| serde_err("failed to deserialize meta", e))
     }
 
-    /// Process candle history and return a trading signal.
-    fn on_candles(&mut self, candles: &[Candle]) -> Result<Signal> {
+    /// Process candle history and return strategy output.
+    fn on_candles(&mut self, candles: &[Candle]) -> Result<StrategyOutput> {
         let input =
             serde_json::to_vec(candles).map_err(|e| serde_err("failed to serialize candles", e))?;
         self.write_input(&input)?;
@@ -148,24 +141,6 @@ impl StrategyHandle for WasmStrategyHandle {
         let output = self.read_output()?;
         serde_json::from_slice(&output)
             .map_err(|e| serde_err("failed to deserialize on_candles output", e))
-    }
-
-    /// Compute risk levels for a position entry.
-    fn risk_levels(&mut self, entry_price: f64, side: Side) -> Result<RiskLevels> {
-        #[derive(serde::Serialize)]
-        struct Input {
-            entry_price: f64,
-            side:        Side,
-        }
-        let input = serde_json::to_vec(&Input { entry_price, side })
-            .map_err(|e| serde_err("failed to serialize risk_levels input", e))?;
-        self.write_input(&input)?;
-        self.fn_wasm_risk_levels
-            .call(&mut self.store, ())
-            .map_err(|e| exec_err("wasm_risk_levels call failed", e))?;
-        let output = self.read_output()?;
-        serde_json::from_slice(&output)
-            .map_err(|e| serde_err("failed to deserialize risk_levels output", e))
     }
 }
 

@@ -22,7 +22,7 @@ use barter_execution::{
     AccountEvent,
     order::request::{OrderRequestCancel, OrderRequestOpen},
 };
-use rara_strategy_api::Candle as ApiCandle;
+use strategy_api::Candle as ApiCandle;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::{Deserialize, Serialize};
 

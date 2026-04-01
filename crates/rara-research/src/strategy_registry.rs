@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use bon::Builder;
-use rara_strategy_api::API_VERSION;
+use strategy_api::API_VERSION;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use tracing::{debug, info};
@@ -103,7 +103,7 @@ pub struct FetchedStrategy {
     /// Original registry entry.
     pub entry:     RegistryEntry,
     /// Strategy metadata extracted from the WASM module.
-    pub meta:      rara_strategy_api::StrategyMeta,
+    pub meta:      strategy_api::StrategyMeta,
     /// Local filesystem path to the saved WASM binary.
     pub wasm_path: PathBuf,
 }

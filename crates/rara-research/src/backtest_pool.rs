@@ -151,7 +151,9 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use async_trait::async_trait;
-    use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
+    use std::collections::BTreeMap;
+
+    use strategy_api::{Candle, StrategyMeta, StrategyOutput};
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -165,23 +167,15 @@ mod tests {
             Ok(StrategyMeta {
                 name:        "mock".to_string(),
                 version:     1,
-                api_version: 1,
+                api_version: 2,
                 description: "mock strategy".to_string(),
             })
         }
 
-        fn on_candles(&mut self, _candles: &[Candle]) -> strategy_executor::Result<Signal> {
-            Ok(Signal::Hold)
-        }
-
-        fn risk_levels(
-            &mut self,
-            _entry_price: f64,
-            _side: Side,
-        ) -> strategy_executor::Result<RiskLevels> {
-            Ok(RiskLevels {
-                stop_loss:   0.0,
-                take_profit: 0.0,
+        fn on_candles(&mut self, _candles: &[Candle]) -> strategy_executor::Result<StrategyOutput> {
+            Ok(StrategyOutput {
+                score:   0.0,
+                factors: BTreeMap::new(),
             })
         }
     }

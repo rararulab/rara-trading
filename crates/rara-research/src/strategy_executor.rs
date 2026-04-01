@@ -1,7 +1,7 @@
 //! Abstract strategy execution interface, decoupled from any specific runtime
 //! (WASM, Python, etc.).
 
-use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
+use strategy_api::{Candle, StrategyMeta, StrategyOutput};
 use snafu::Snafu;
 
 /// Errors from strategy execution.
@@ -36,11 +36,12 @@ pub trait StrategyExecutor: Send + Sync {
 
 /// Executable strategy handle — runtime-agnostic interface for calling strategy
 /// functions.
+///
+/// v2 API: strategies return a [`StrategyOutput`] with a directional score and
+/// named factors. The engine decides entries/exits based on the score.
 pub trait StrategyHandle: Send {
     /// Return strategy metadata.
     fn meta(&mut self) -> Result<StrategyMeta>;
-    /// Process candle history and return a trading signal.
-    fn on_candles(&mut self, candles: &[Candle]) -> Result<Signal>;
-    /// Compute risk levels for a position entry.
-    fn risk_levels(&mut self, entry_price: f64, side: Side) -> Result<RiskLevels>;
+    /// Process candle history and return strategy output with directional score.
+    fn on_candles(&mut self, candles: &[Candle]) -> Result<StrategyOutput>;
 }

@@ -21,7 +21,6 @@ jiff.workspace = true
 rust_decimal.workspace = true
 toml.workspace = true
 tracing.workspace = true
-tempfile.workspace = true
 tokio.workspace = true
 num_cpus = "1"
 barter = "0.12"
@@ -32,13 +31,13 @@ chrono.workspace = true
 smol_str = "0.3"
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
-rara-strategy-api.workspace = true
+strategy-api.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 rara-agent.workspace = true
 rust_decimal_macros = "1"
-tempfile.workspace = true
 tokio.workspace = true
 
 [lints]

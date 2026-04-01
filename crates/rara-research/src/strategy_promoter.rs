@@ -8,13 +8,13 @@
 use std::path::{Path, PathBuf};
 
 use bon::Builder;
-use rara_strategy_api::StrategyMeta;
+use strategy_api::StrategyMeta;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
 
 use crate::{
-    compiler::StrategyCompiler, strategy_executor::StrategyExecutor, trace::Trace,
+    strategy_executor::StrategyExecutor, strategy_store::StrategyStore, trace::Trace,
     wasm_executor::WasmExecutor,
 };
 
@@ -36,18 +36,11 @@ pub enum PromoterError {
         id: Uuid,
     },
 
-    /// Failed to compile strategy code to WASM.
-    #[snafu(display("compilation failed: {source}"))]
-    Compile {
-        /// The underlying compiler error.
-        source: crate::compiler::CompilerError,
-    },
-
-    /// Compilation produced errors instead of a valid WASM binary.
-    #[snafu(display("compilation returned errors: {}", errors.join("; ")))]
-    CompileErrors {
-        /// Compiler error messages.
-        errors: Vec<String>,
+    /// No compiled WASM artifact found for the experiment's strategy.
+    #[snafu(display("no WASM artifact found for experiment {id}"))]
+    ArtifactNotFound {
+        /// The experiment ID whose artifact is missing.
+        id: Uuid,
     },
 
     /// WASM runtime validation failed.
@@ -62,6 +55,13 @@ pub enum PromoterError {
     Trace {
         /// The underlying trace error.
         source: crate::trace::TraceError,
+    },
+
+    /// Strategy store lookup failed.
+    #[snafu(display("store error: {source}"))]
+    Store {
+        /// The underlying store error.
+        source: crate::strategy_store::StrategyStoreError,
     },
 
     /// Filesystem I/O failed.
@@ -116,17 +116,17 @@ impl PromotedStrategy {
 
 /// Handles promotion of candidate strategies from research to paper trading.
 ///
-/// When a research experiment is accepted, the promoter recompiles its source
-/// code to WASM, validates the module, and saves both the binary and metadata
-/// to `strategies/promoted/` for downstream consumption.
+/// When a research experiment is accepted, the promoter loads the pre-compiled
+/// WASM artifact from the strategy store, validates the module, and saves both
+/// the binary and metadata to `strategies/promoted/` for downstream consumption.
 #[derive(Builder)]
 pub struct StrategyPromoter {
     /// Trace storage for looking up experiments and hypotheses.
     trace:        Trace,
     /// WASM runtime for validating promoted modules.
     runtime:      WasmExecutor,
-    /// Strategy compiler for producing WASM from source code.
-    compiler:     StrategyCompiler,
+    /// Strategy store for loading compiled WASM artifacts.
+    store:        StrategyStore,
     /// Base directory for promoted strategies (e.g. `strategies/promoted/`).
     promoted_dir: PathBuf,
 }
@@ -134,10 +134,10 @@ pub struct StrategyPromoter {
 impl StrategyPromoter {
     /// Promote a candidate strategy by experiment ID.
     ///
-    /// Looks up the experiment in the trace, recompiles its code to WASM,
-    /// validates the module, and saves the binary + metadata to the promoted
-    /// directory. Returns metadata about the promoted strategy.
-    pub async fn promote(&self, experiment_id: Uuid) -> Result<PromotedStrategy> {
+    /// Looks up the experiment in the trace, loads the pre-compiled WASM
+    /// artifact from the strategy store, validates the module, and saves the
+    /// binary + metadata to the promoted directory.
+    pub fn promote(&self, experiment_id: Uuid) -> Result<PromotedStrategy> {
         // 1. Look up experiment from trace
         let experiment = self
             .trace
@@ -147,22 +147,12 @@ impl StrategyPromoter {
 
         let hypothesis_id = experiment.hypothesis_id;
 
-        // 2. Compile strategy code to WASM
-        let compile_result = self
-            .compiler
-            .compile(&experiment.strategy_code)
-            .await
-            .context(CompileSnafu)?;
-
-        if !compile_result.success {
-            return Err(PromoterError::CompileErrors {
-                errors: compile_result.errors,
-            });
-        }
-
-        let wasm_bytes = compile_result
-            .wasm_bytes
-            .expect("success implies wasm_bytes");
+        // 2. Load pre-compiled WASM artifact from store
+        let wasm_bytes = self
+            .store
+            .load_artifact(experiment_id)
+            .context(StoreSnafu)
+            .map_err(|_| PromoterError::ArtifactNotFound { id: experiment_id })?;
 
         // 3. Load into runtime to validate and extract metadata
         let mut loaded = self.runtime.load(&wasm_bytes).context(RuntimeSnafu)?;
@@ -195,10 +185,10 @@ impl StrategyPromoter {
         Ok(promoted)
     }
 
-    /// Promote a strategy directly from WASM bytes, skipping recompilation.
+    /// Promote a strategy directly from WASM bytes, skipping store lookup.
     ///
     /// Used when WASM bytes are already available (e.g. immediately after
-    /// compilation in the research loop) to avoid a redundant compile step.
+    /// compilation in the research loop) to avoid a redundant store lookup.
     /// When `source_code` is provided, the `.rs` source is saved alongside the
     /// binary.
     pub fn promote_from_wasm(
@@ -288,11 +278,7 @@ mod tests {
         let sut = StrategyPromoter::builder()
             .trace(Trace::open(&dir.path().join("trace")).unwrap())
             .runtime(WasmExecutor::builder().build())
-            .compiler(
-                StrategyCompiler::builder()
-                    .template_dir(PathBuf::from("nonexistent"))
-                    .build(),
-            )
+            .store(StrategyStore::open_path(&dir.path().join("store_db"), &dir.path().join("store_artifacts")).unwrap())
             .promoted_dir(promoted_dir)
             .build();
 
@@ -311,7 +297,7 @@ mod tests {
         let meta = StrategyMeta {
             name:        "test-strategy".into(),
             version:     1,
-            api_version: rara_strategy_api::API_VERSION,
+            api_version: strategy_api::API_VERSION,
             description: "A test".into(),
         };
 
@@ -328,11 +314,7 @@ mod tests {
         let sut = StrategyPromoter::builder()
             .trace(Trace::open(&dir.path().join("trace")).unwrap())
             .runtime(WasmExecutor::builder().build())
-            .compiler(
-                StrategyCompiler::builder()
-                    .template_dir(PathBuf::from("nonexistent"))
-                    .build(),
-            )
+            .store(StrategyStore::open_path(&dir.path().join("store_db"), &dir.path().join("store_artifacts")).unwrap())
             .promoted_dir(promoted_dir)
             .build();
 
