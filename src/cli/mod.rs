@@ -268,6 +268,11 @@ pub enum SetupAction {
     },
     /// Validate all configuration files.
     Validate,
+    /// Download historical market data required for backtesting.
+    ///
+    /// Fetches 10 years of 1m candles for BTC and ETH from Binance.
+    /// Resumable — already-stored data is skipped automatically.
+    Data,
 }
 
 /// Account management subcommands.
