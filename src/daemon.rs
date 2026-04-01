@@ -105,12 +105,15 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
     // --- Feedback consumer task ---
     {
         let bus = Arc::clone(&event_bus);
+        let feedback_cfg = app_config::load().feedback.clone();
         tasks.spawn(async move {
-            info!("feedback consumer placeholder — wire up event-driven feedback loop");
-            // TODO: subscribe to event bus, consume paper-trading fills,
-            // generate feedback, and publish results.
-            let _ = bus;
-            std::future::pending::<()>().await;
+            info!("feedback loop starting");
+            let evaluator = build_strategy_evaluator(&feedback_cfg);
+            let loop_config = rara_feedback::feedback_loop::FeedbackLoopConfig::builder()
+                .eval_interval(std::time::Duration::from_secs(feedback_cfg.eval_interval_secs))
+                .min_trades_between_evals(feedback_cfg.min_trades_between_evals)
+                .build();
+            rara_feedback::feedback_loop::run_feedback_loop(bus, evaluator, loop_config).await;
             Ok::<(), error::AppError>(())
         });
     }
@@ -271,4 +274,23 @@ async fn run_research_iterations(
     );
 
     Ok(())
+}
+
+
+/// Build a [`StrategyEvaluator`](rara_feedback::evaluator::StrategyEvaluator)
+/// from the application's feedback configuration.
+fn build_strategy_evaluator(
+    cfg: &crate::app_config::FeedbackConfig,
+) -> rara_feedback::evaluator::StrategyEvaluator {
+    // Config stores drawdown as a percentage (e.g. 20.0 for 20%); the evaluator
+    // compares against absolute Decimal values from the accumulator, so we
+    // convert percentage → fraction (20.0 → 0.20).
+    let demote_drawdown = rust_decimal::Decimal::try_from(cfg.max_drawdown_for_retirement / 100.0)
+        .expect("drawdown config must be a valid decimal");
+
+    rara_feedback::evaluator::StrategyEvaluator::new(
+        cfg.min_sharpe_for_promotion,
+        demote_drawdown,
+        cfg.min_trades,
+    )
 }

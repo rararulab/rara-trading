@@ -103,6 +103,10 @@ pub struct FeedbackConfig {
     pub min_trades: u32,
     /// Maximum drawdown percentage for retirement.
     pub max_drawdown_for_retirement: f64,
+    /// Interval in seconds between feedback evaluation ticks.
+    pub eval_interval_secs: u64,
+    /// Minimum new trades since last evaluation before re-evaluating a strategy.
+    pub min_trades_between_evals: u32,
 }
 
 impl Default for FeedbackConfig {
@@ -112,6 +116,8 @@ impl Default for FeedbackConfig {
             min_win_rate: 0.45,
             min_trades: 30,
             max_drawdown_for_retirement: 20.0,
+            eval_interval_secs: 3600,
+            min_trades_between_evals: 100,
         }
     }
 }
@@ -258,6 +264,10 @@ min_win_rate = 0.45
 min_trades = 30
 # Maximum drawdown percentage before retiring a strategy
 max_drawdown_for_retirement = 20.0
+# Interval in seconds between feedback evaluation ticks in daemon mode
+eval_interval_secs = 3600
+# Minimum new trades since last evaluation before re-evaluating a strategy
+min_trades_between_evals = 100
 
 # ─── Sentinel Monitoring ─────────────────────────────────────────
 [sentinel]
