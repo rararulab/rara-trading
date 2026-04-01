@@ -2142,17 +2142,15 @@ async fn run_setup_validate() -> error::Result<()> {
 #[allow(clippy::too_many_lines)]
 async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
     use rara_trading_engine::account_config::{
-        AccountConfig, BrokerConfig, CcxtBrokerConfig, PaperBrokerConfig,
+        AccountConfig, BrokerConfig, CcxtBrokerConfig,
     };
 
     match action {
         SetupAccountAction::Add {
             id,
-            broker,
             label,
             contracts,
             enabled,
-            fill_price,
             exchange,
             api_key,
             secret,
@@ -2176,44 +2174,13 @@ async fn run_setup_account(action: SetupAccountAction) -> error::Result<()> {
                 return Ok(());
             }
 
-            let broker_config = match broker.as_str() {
-                "paper" => BrokerConfig::Paper(PaperBrokerConfig { fill_price }),
-                "ccxt" => {
-                    let Some(exchange) = exchange else {
-                        println!(
-                            "{}",
-                            serde_json::to_string(&ErrorResponse {
-                                ok:         false,
-                                error:      "--exchange is required for ccxt broker".to_string(),
-                                suggestion: Some(
-                                    "add --exchange binance (or bybit, okx)".to_string()
-                                ),
-                            })
-                            .expect("ErrorResponse must serialize")
-                        );
-                        std::process::exit(1);
-                    };
-                    BrokerConfig::Ccxt(CcxtBrokerConfig {
-                        exchange,
-                        sandbox,
-                        api_key: api_key.unwrap_or_default(),
-                        secret: secret.unwrap_or_default(),
-                        passphrase,
-                    })
-                }
-                other => {
-                    println!(
-                        "{}",
-                        serde_json::to_string(&ErrorResponse {
-                            ok:         false,
-                            error:      format!("unknown broker type \"{other}\""),
-                            suggestion: Some("use --broker paper or --broker ccxt".to_string()),
-                        })
-                        .expect("ErrorResponse must serialize")
-                    );
-                    std::process::exit(1);
-                }
-            };
+            let broker_config = BrokerConfig::Ccxt(CcxtBrokerConfig {
+                exchange,
+                sandbox,
+                api_key: api_key.unwrap_or_default(),
+                secret: secret.unwrap_or_default(),
+                passphrase,
+            });
 
             cfg.accounts.push(AccountConfig {
                 id: id.clone(),

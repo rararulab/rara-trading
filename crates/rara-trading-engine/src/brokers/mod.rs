@@ -6,6 +6,9 @@ pub mod ccxt;
 pub mod paper;
 
 /// Collect all broker registry entries.
+///
+/// Only real exchange brokers are registered. The `paper` module provides a
+/// test-only broker that is not user-configurable.
 pub fn register_all() -> Vec<BrokerRegistryEntry> {
-    vec![paper::registry_entry(), ccxt::registry_entry()]
+    vec![ccxt::registry_entry()]
 }

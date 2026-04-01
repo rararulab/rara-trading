@@ -1,4 +1,4 @@
-//! Unified daemon orchestrator — runs research, paper trading, feedback, and
+//! Unified daemon orchestrator — runs research, trading, feedback, and
 //! gRPC server as concurrent tokio tasks in a single process.
 
 use std::{
@@ -21,7 +21,6 @@ use rara_sentinel::{
     sources::{rss::RssDataSource, trump_code::TrumpCodeDataSource},
 };
 use rara_trading_engine::{
-    brokers::paper::PaperBroker,
     engine::TradingEngine,
     guard_pipeline::GuardPipeline,
     signal_loop::{self, LoadedStrategy},
@@ -102,16 +101,16 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
         });
     }
 
-    // --- Paper trading tasks (one per contract) ---
+    // --- Live/sandbox trading tasks (one per contract) ---
     for contract in &contract_list {
         let contract = contract.clone();
         let bus = Arc::clone(&event_bus);
         let trace_path_clone = paths::data_dir().join("trace");
         let cfg = app_config::load();
         tasks.spawn(async move {
-            info!(contract = %contract, "paper trading task starting");
-            if let Err(e) = run_paper_trading(&contract, bus, &trace_path_clone, cfg).await {
-                error!(contract = %contract, error = %e, "paper trading task failed");
+            info!(contract = %contract, "live trading task starting");
+            if let Err(e) = run_live_trading(&contract, bus, &trace_path_clone, cfg).await {
+                error!(contract = %contract, error = %e, "live trading task failed");
             }
             Ok::<(), error::AppError>(())
         });
@@ -137,7 +136,7 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
 
     // --- Lifecycle event consumer task ---
     // Listens for FeedbackStrategyPromote/Demote events and updates the
-    // strategy store so paper trading can pick up newly promoted strategies.
+    // strategy store so live trading can pick up newly promoted strategies.
     {
         let bus = Arc::clone(&event_bus);
         let trace_path_clone = paths::data_dir().join("trace");
@@ -531,14 +530,16 @@ async fn run_sentinel_loop<L: rara_infra::llm::LlmClient>(
     }
 }
 
-/// Run paper trading for a single contract.
+/// Run live trading for a single contract.
 ///
 /// Connects to Binance WebSocket for live kline data, aggregates into
 /// multi-timeframe candles, loads promoted strategies from the store,
-/// and runs the signal loop to generate and execute trades through a
-/// paper broker. If no promoted strategies exist, retries every 30 seconds
-/// until at least one becomes available.
-async fn run_paper_trading(
+/// and runs the signal loop to generate and execute trades through the
+/// broker configured in `accounts.toml`. Use `sandbox = true` in account
+/// config for live trading against exchange testnets. If no promoted
+/// strategies exist, retries every 30 seconds until at least one becomes
+/// available.
+async fn run_live_trading(
     contract: &str,
     event_bus: Arc<EventBus>,
     trace_path: &Path,
@@ -560,7 +561,7 @@ async fn run_paper_trading(
     info!(
         contract = %contract,
         strategy_count = strategies.len(),
-        "loaded promoted strategies for paper trading"
+        "loaded promoted strategies for live trading"
     );
 
     // Set up candle aggregation (5m, 15m, 1h from 1m klines)
@@ -599,11 +600,43 @@ async fn run_paper_trading(
         }
     });
 
-    // Build paper broker + trading engine
-    let paper_broker = PaperBroker::new(rust_decimal::Decimal::ZERO);
+    // Build broker from account configuration
+    let accounts_cfg = crate::accounts_config::load_accounts();
+    let account = accounts_cfg
+        .accounts
+        .iter()
+        .find(|a| {
+            a.enabled
+                && (a.contracts.is_empty()
+                    || a.contracts.iter().any(|c| c == contract))
+        })
+        .ok_or_else(|| error::AppError::Config {
+            message: format!(
+                "no enabled account configured for contract {contract} \
+                 — run `rara setup account add --broker ccxt --exchange binance --sandbox`"
+            ),
+        })?;
+    let fields = account.broker_config.to_field_map();
+    let type_key = account.broker_config.type_key();
+    let entry =
+        rara_trading_engine::broker_registry::find_broker(type_key).ok_or_else(|| {
+            error::AppError::Config {
+                message: format!("unknown broker type: {type_key}"),
+            }
+        })?;
+    let broker = (entry.create_broker)(&fields).map_err(|e| error::AppError::Config {
+        message: format!("failed to create broker for account '{}': {e}", account.id),
+    })?;
+    info!(
+        account_id = %account.id,
+        broker_type = type_key,
+        contract = %contract,
+        "broker created from account config"
+    );
+
     let guard_pipeline = GuardPipeline::new(vec![]);
     let engine = Arc::new(TradingEngine::new(
-        Box::new(paper_broker),
+        broker,
         guard_pipeline,
         Arc::clone(&event_bus),
     ));
@@ -631,14 +664,14 @@ fn load_promoted_strategies(
     let strategy_db_path = trace_path.join("strategy_db");
     let artifact_dir = paths::data_dir().join("artifacts");
     let store = StrategyStore::open_path(&strategy_db_path, &artifact_dir).map_err(|e| {
-        error::AppError::PaperTrading {
+        error::AppError::Trading {
             message: format!("failed to open strategy store: {e}"),
         }
     })?;
 
     let promoted = store
         .list(Some(ResearchStrategyStatus::Promoted))
-        .map_err(|e| error::AppError::PaperTrading {
+        .map_err(|e| error::AppError::Trading {
             message: format!("failed to list promoted strategies: {e}"),
         })?;
 
@@ -689,7 +722,7 @@ fn load_promoted_strategies(
             strategy_id = %strategy.id,
             name = meta.name,
             version = meta.version,
-            "loaded promoted strategy for paper trading"
+            "loaded promoted strategy for live trading"
         );
 
         loaded.push(LoadedStrategy {
@@ -803,7 +836,7 @@ fn build_strategy_evaluator(
 /// Listens on the event bus for [`FeedbackStrategyPromote`] and
 /// [`FeedbackStrategyDemote`] events. When a promote event arrives the
 /// referenced strategy is moved to `Promoted`; demote events move it to
-/// `Archived`. This closes the loop so paper trading can hot-reload newly
+/// `Archived`. This closes the loop so live trading can hot-reload newly
 /// promoted strategies.
 async fn run_lifecycle_consumer(event_bus: Arc<EventBus>, trace_path: &Path) {
     let mut rx = event_bus.subscribe();

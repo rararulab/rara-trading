@@ -262,7 +262,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        account_config::{BrokerConfig, PaperBrokerConfig},
+        account_config::{BrokerConfig, CcxtBrokerConfig},
         brokers::paper::PaperBroker,
         uta::UnifiedTradingAccount,
     };
@@ -361,7 +361,7 @@ mod tests {
 
         let agg = mgr.aggregated_equity().await;
 
-        // PaperBroker returns 100_000 equity per account
+        // Test PaperBroker returns 100_000 equity per account
         assert_eq!(agg.total_equity, dec!(200_000));
         assert_eq!(agg.total_cash, dec!(200_000));
         assert_eq!(agg.total_unrealized_pnl, dec!(0));
@@ -374,30 +374,38 @@ mod tests {
         }
     }
 
+    fn ccxt_sandbox_config() -> BrokerConfig {
+        BrokerConfig::Ccxt(CcxtBrokerConfig {
+            exchange:   "binance".to_string(),
+            sandbox:    true,
+            api_key:    "test".to_string(),
+            secret:     "test".to_string(),
+            passphrase: None,
+        })
+    }
+
     #[test]
     fn from_config_creates_enabled_accounts() {
         let accounts = vec![
             AccountConfig {
-                id:            "paper-1".to_string(),
-                label:         Some("Paper One".to_string()),
-                broker_config: BrokerConfig::Paper(PaperBrokerConfig {
-                    fill_price: Some(100.0),
-                }),
+                id:            "sandbox-1".to_string(),
+                label:         Some("Sandbox One".to_string()),
+                broker_config: ccxt_sandbox_config(),
                 enabled:       true,
                 contracts:     vec!["BTC-USDT".to_string()],
             },
             AccountConfig {
-                id:            "paper-2".to_string(),
+                id:            "sandbox-2".to_string(),
                 label:         None,
-                broker_config: BrokerConfig::Paper(PaperBrokerConfig { fill_price: None }),
+                broker_config: ccxt_sandbox_config(),
                 enabled:       false,
                 contracts:     vec![],
             },
         ];
         let mgr = AccountManager::from_config(&accounts).unwrap();
         assert_eq!(mgr.size(), 1);
-        assert!(mgr.has("paper-1"));
-        assert!(!mgr.has("paper-2"));
+        assert!(mgr.has("sandbox-1"));
+        assert!(!mgr.has("sandbox-2"));
     }
 
     #[test]
@@ -405,7 +413,7 @@ mod tests {
         let accounts = vec![AccountConfig {
             id:            "test".to_string(),
             label:         Some("My Label".to_string()),
-            broker_config: BrokerConfig::Paper(PaperBrokerConfig { fill_price: None }),
+            broker_config: ccxt_sandbox_config(),
             enabled:       true,
             contracts:     vec![],
         }];

@@ -318,17 +318,14 @@ pub enum SetupAccountAction {
     /// Add a trading account.
     ///
     /// EXAMPLES:
-    ///     rara setup account add --id paper-btc --broker paper --contracts
-    /// BTC-USDT --fill-price 50000     rara setup account add --id
-    /// binance-prod --broker ccxt --exchange binance --api-key "$KEY" --secret
-    /// "$SECRET" --sandbox
+    ///     rara setup account add --id binance-sandbox --exchange binance
+    /// --sandbox --api-key "$KEY" --secret "$SECRET"     rara setup account
+    /// add --id binance-prod --exchange binance --api-key "$KEY" --secret
+    /// "$SECRET"
     Add {
         /// Account identifier.
         #[arg(long)]
         id:         String,
-        /// Broker type: "paper" or "ccxt".
-        #[arg(long)]
-        broker:     String,
         /// Human-readable label.
         #[arg(long)]
         label:      Option<String>,
@@ -338,24 +335,19 @@ pub enum SetupAccountAction {
         /// Enable/disable the account.
         #[arg(long, default_value = "true")]
         enabled:    bool,
-        // Paper broker options
-        /// Fixed fill price (paper broker only).
+        /// Exchange: "binance", "bybit", "okx".
         #[arg(long)]
-        fill_price: Option<f64>,
-        // CCXT broker options
-        /// Exchange: "binance", "bybit", "okx" (ccxt only).
-        #[arg(long)]
-        exchange:   Option<String>,
-        /// API key (ccxt only).
+        exchange:   String,
+        /// API key.
         #[arg(long)]
         api_key:    Option<String>,
-        /// API secret (ccxt only).
+        /// API secret.
         #[arg(long)]
         secret:     Option<String>,
-        /// API passphrase, OKX only (ccxt only).
+        /// API passphrase (OKX only).
         #[arg(long)]
         passphrase: Option<String>,
-        /// Use sandbox/testnet (ccxt only).
+        /// Use sandbox/testnet for paper trading.
         #[arg(long)]
         sandbox:    bool,
     },
