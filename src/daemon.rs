@@ -94,7 +94,8 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
         let cycle_delay = std::time::Duration::from_secs(cfg.research.cycle_delay_secs);
         tasks.spawn(async move {
             info!(iterations, contract = %contract, "research loop starting");
-            let research_loop = build_research_loop(&trace_path, Arc::clone(&bus)).await?;
+            let research_loop =
+                build_research_loop(&trace_path, Arc::clone(&bus), &contract).await?;
             run_research_loop(&research_loop, &bus, iterations, &contract, cycle_delay).await
         });
     }
@@ -175,6 +176,7 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
 async fn build_research_loop(
     trace_path: &Path,
     event_bus: Arc<EventBus>,
+    contract: &str,
 ) -> error::Result<ResearchLoop> {
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies/template");
     let prompts_dir =
@@ -232,6 +234,7 @@ async fn build_research_loop(
         .trace(trace)
         .event_bus(event_bus)
         .generated_dir(paths::strategies_generated_dir())
+        .contract(contract)
         .build())
 }
 
@@ -682,7 +685,83 @@ fn load_promoted_strategies(
         });
     }
 
+    // Fallback: also check the promoted directory where `strategy fetch` saves
+    // downloaded WASM files, so externally fetched strategies are usable too.
+    if loaded.is_empty() {
+        let promoted_dir = paths::strategies_promoted_dir();
+        if promoted_dir.exists() {
+            load_wasm_from_dir(
+                &promoted_dir,
+                contract,
+                position_size,
+                &executor,
+                &mut loaded,
+            );
+        }
+    }
+
     Ok(loaded)
+}
+
+/// Load `.wasm` files directly from a directory as fallback strategies.
+fn load_wasm_from_dir(
+    dir: &Path,
+    contract: &str,
+    position_size: rust_decimal::Decimal,
+    executor: &WasmExecutor,
+    loaded: &mut Vec<LoadedStrategy>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!(dir = %dir.display(), error = %e, "failed to read promoted directory");
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "wasm") {
+            let wasm_bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "failed to read WASM file");
+                    continue;
+                }
+            };
+
+            let mut handle = match executor.load(&wasm_bytes) {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "failed to load WASM module");
+                    continue;
+                }
+            };
+
+            let meta = match handle.meta() {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "failed to read WASM metadata");
+                    continue;
+                }
+            };
+
+            info!(
+                name = meta.name,
+                version = meta.version,
+                path = %path.display(),
+                "loaded fetched strategy from promoted directory"
+            );
+
+            loaded.push(LoadedStrategy {
+                name: meta.name,
+                version: meta.version,
+                contract_id: contract.to_string(),
+                position_size,
+                handle,
+            });
+        }
+    }
 }
 
 /// Build a [`StrategyEvaluator`](rara_feedback::evaluator::StrategyEvaluator)
