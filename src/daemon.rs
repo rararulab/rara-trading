@@ -4,6 +4,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 
 use chrono::NaiveDate;
@@ -29,6 +30,7 @@ use rust_decimal_macros::dec;
 use snafu::ResultExt;
 use tokio::task::JoinSet;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::{
     accounts_config,
@@ -128,6 +130,19 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
                 .min_trades_between_evals(feedback_cfg.min_trades_between_evals)
                 .build();
             rara_feedback::feedback_loop::run_feedback_loop(bus, evaluator, loop_config).await;
+            Ok::<(), error::AppError>(())
+        });
+    }
+
+    // --- Lifecycle event consumer task ---
+    // Listens for FeedbackStrategyPromote/Demote events and updates the
+    // strategy store so paper trading can pick up newly promoted strategies.
+    {
+        let bus = Arc::clone(&event_bus);
+        let trace_path_clone = paths::data_dir().join("trace");
+        tasks.spawn(async move {
+            info!("lifecycle event consumer starting");
+            run_lifecycle_consumer(bus, &trace_path_clone).await;
             Ok::<(), error::AppError>(())
         });
     }
@@ -518,25 +533,26 @@ async fn run_sentinel_loop<L: rara_infra::llm::LlmClient>(
 /// Connects to Binance WebSocket for live kline data, aggregates into
 /// multi-timeframe candles, loads promoted strategies from the store,
 /// and runs the signal loop to generate and execute trades through a
-/// paper broker.
+/// paper broker. If no promoted strategies exist, retries every 30 seconds
+/// until at least one becomes available.
 async fn run_paper_trading(
     contract: &str,
     event_bus: Arc<EventBus>,
     trace_path: &Path,
     cfg: &crate::app_config::AppConfig,
 ) -> error::Result<()> {
-    // Load promoted strategies from the store
-    let strategies = load_promoted_strategies(trace_path, contract, cfg)?;
-
-    if strategies.is_empty() {
+    // Retry until at least one promoted strategy is available
+    let strategies = loop {
+        let loaded = load_promoted_strategies(trace_path, contract, cfg)?;
+        if !loaded.is_empty() {
+            break loaded;
+        }
         info!(
             contract = %contract,
-            "no promoted strategies found — paper trading will idle until strategies are promoted"
+            "no promoted strategies found — retrying in 30s"
         );
-        // Block until cancelled; a future enhancement could poll the store periodically
-        std::future::pending::<()>().await;
-        return Ok(());
-    }
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    };
 
     info!(
         contract = %contract,
@@ -701,4 +717,79 @@ fn build_strategy_evaluator(
         demote_drawdown,
         cfg.min_trades,
     )
+}
+
+/// Consume feedback lifecycle events and update strategy status accordingly.
+///
+/// Listens on the event bus for [`FeedbackStrategyPromote`] and
+/// [`FeedbackStrategyDemote`] events. When a promote event arrives the
+/// referenced strategy is moved to `Promoted`; demote events move it to
+/// `Archived`. This closes the loop so paper trading can hot-reload newly
+/// promoted strategies.
+async fn run_lifecycle_consumer(event_bus: Arc<EventBus>, trace_path: &Path) {
+    let mut rx = event_bus.subscribe();
+    let strategy_db_path = trace_path.join("strategy_db");
+    let artifact_dir = paths::data_dir().join("artifacts");
+
+    let store = match StrategyStore::open_path(&strategy_db_path, &artifact_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error = %e, "lifecycle consumer failed to open strategy store — exiting");
+            return;
+        }
+    };
+
+    loop {
+        let seq = match rx.recv().await {
+            Ok(seq) => seq,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                warn!(
+                    skipped = n,
+                    "lifecycle consumer lagged — some events may have been missed"
+                );
+                continue;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                info!("event bus closed — lifecycle consumer exiting");
+                return;
+            }
+        };
+
+        let Ok(Some(event)) = event_bus.store().get(seq) else {
+            continue;
+        };
+
+        let (new_status, label) = match event.event_type {
+            EventType::FeedbackStrategyPromote => (ResearchStrategyStatus::Promoted, "promoted"),
+            EventType::FeedbackStrategyDemote => (ResearchStrategyStatus::Archived, "archived"),
+            _ => continue,
+        };
+
+        let Some(strategy_id_str) = event.strategy_id.as_deref() else {
+            warn!(seq, "lifecycle event missing strategy_id — skipping");
+            continue;
+        };
+
+        let Ok(uuid) = Uuid::parse_str(strategy_id_str) else {
+            warn!(
+                strategy_id = %strategy_id_str,
+                "lifecycle event has non-UUID strategy_id — skipping"
+            );
+            continue;
+        };
+
+        if let Err(e) = store.update_status(uuid, new_status) {
+            warn!(
+                strategy_id = %uuid,
+                error = %e,
+                "lifecycle consumer failed to update strategy status"
+            );
+        } else {
+            info!(
+                strategy_id = %uuid,
+                status = label,
+                "lifecycle consumer updated strategy status"
+            );
+        }
+    }
 }

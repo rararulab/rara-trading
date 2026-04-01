@@ -258,7 +258,7 @@ impl ResearchLoop {
         // 15. If accepted, update status and publish candidate event
         if accepted {
             self.strategy_manager
-                .update_status(strategy.id, ResearchStrategyStatus::Accepted)
+                .update_status(strategy.id, ResearchStrategyStatus::Promoted)
                 .context(StrategyManagerSnafu)?;
 
             self.publish_event(
