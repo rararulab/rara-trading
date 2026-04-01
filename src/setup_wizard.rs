@@ -176,7 +176,7 @@ const DATA_SOURCE_OPTIONS: &[&str] = &["binance", "yahoo"];
 /// in parallel with progress bars.
 async fn step_market_data(database_url: &str) -> error::Result<()> {
     if !confirm(
-        "  Download historical market data for backtesting? (BTC + ETH, ~10 years)",
+        "  Download historical market data for backtesting?",
         true,
     )? {
         eprintln!("  Skipped. You can add data later with: rara setup data");
@@ -187,8 +187,43 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
     let source_idx = select("  Data source", DATA_SOURCE_OPTIONS, 0)?;
     let source = DATA_SOURCE_OPTIONS[source_idx];
 
-    let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-    download_symbols_parallel(database_url, source, &symbols, None, None).await
+    let symbols_raw = input(
+        "  Symbols (comma-separated)",
+        Some("BTCUSDT,ETHUSDT"),
+    )?;
+    let symbols: Vec<String> = symbols_raw
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if symbols.is_empty() {
+        eprintln!("  No symbols specified, skipping.");
+        eprintln!();
+        return Ok(());
+    }
+
+    let date_mode_options = &["Auto-detect (earliest available per symbol)", "Custom range"];
+    let date_mode = select("  Date range", date_mode_options, 0)?;
+
+    let (start, end) = if date_mode == 1 {
+        let start_str = input("  Start date (YYYY-MM-DD)", Some("2020-01-01"))?;
+        let end_str = input("  End date (YYYY-MM-DD)", Some(&Utc::now().format("%Y-%m-%d").to_string()))?;
+        let start = NaiveDate::parse_from_str(&start_str, "%Y-%m-%d")
+            .map_err(|_| error::AppError::Config {
+                message: format!("invalid start date: {start_str}"),
+            })?;
+        let end = NaiveDate::parse_from_str(&end_str, "%Y-%m-%d")
+            .map_err(|_| error::AppError::Config {
+                message: format!("invalid end date: {end_str}"),
+            })?;
+        (Some(start), Some(end))
+    } else {
+        (None, None)
+    };
+
+    eprintln!();
+    download_symbols_parallel(database_url, source, &symbols, start, end).await
 }
 
 /// Download multiple symbols in parallel with per-symbol progress bars.
