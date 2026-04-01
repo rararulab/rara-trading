@@ -21,3 +21,5 @@ Thumbs.db
 .worktrees/
 .agents/
 docs/plans/
+
+vendor/
