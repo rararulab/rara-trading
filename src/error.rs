@@ -77,6 +77,11 @@ pub enum AppError {
     BrokerRegistry {
         source: rara_trading_engine::broker_registry::BrokerRegistryError,
     },
+
+    #[snafu(display("sentinel error: {source}"))]
+    Sentinel {
+        source: rara_sentinel::engine::SentinelError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

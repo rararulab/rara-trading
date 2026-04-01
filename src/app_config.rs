@@ -128,8 +128,23 @@ impl Default for FeedbackConfig {
 pub struct SentinelConfig {
     /// Whether sentinel monitoring is enabled.
     pub enabled: bool,
-    /// Interval in seconds between health checks.
+    /// Interval in seconds between sentinel poll cycles.
     pub check_interval_secs: u64,
+    /// RSS/Atom feed URLs to monitor for market-moving news.
+    pub rss_feeds: Vec<RssFeedEntry>,
+    /// Whether the trump-code political signal source is enabled.
+    pub trump_code_enabled: bool,
+    /// Base URL of the trump-code API service.
+    pub trump_code_url: String,
+}
+
+/// A single RSS/Atom feed entry for sentinel monitoring.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RssFeedEntry {
+    /// Human-readable name for this feed.
+    pub name: String,
+    /// URL of the RSS/Atom feed.
+    pub url: String,
 }
 
 impl Default for SentinelConfig {
@@ -137,6 +152,9 @@ impl Default for SentinelConfig {
         Self {
             enabled: false,
             check_interval_secs: 30,
+            rss_feeds: Vec::new(),
+            trump_code_enabled: false,
+            trump_code_url: "https://trumpcode.washinmura.jp".to_string(),
         }
     }
 }
@@ -271,10 +289,18 @@ min_trades_between_evals = 100
 
 # ─── Sentinel Monitoring ─────────────────────────────────────────
 [sentinel]
-# Enable or disable sentinel health monitoring
+# Enable or disable sentinel monitoring
 enabled = false
-# Interval in seconds between health checks
+# Interval in seconds between sentinel poll cycles
 check_interval_secs = 30
+# RSS/Atom feeds to monitor (array of {name, url} tables)
+# [[sentinel.rss_feeds]]
+# name = "coindesk"
+# url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+# Enable trump-code political signal source
+trump_code_enabled = false
+# Base URL of the trump-code API
+trump_code_url = "https://trumpcode.washinmura.jp"
 
 # ─── gRPC Server ─────────────────────────────────────────────────
 [server]
