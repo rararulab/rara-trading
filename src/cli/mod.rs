@@ -236,6 +236,18 @@ pub enum StrategyAction {
 
     /// List locally installed strategies fetched from the registry.
     Installed,
+
+    /// Run a backtest on a fetched strategy against historical data.
+    Backtest {
+        /// Strategy name (e.g. "btc-momentum").
+        name:      String,
+        /// Contract/instrument to backtest against (e.g. "BTCUSDT").
+        #[arg(long)]
+        contract:  String,
+        /// Timeframe for the backtest (e.g. "1h", "4h", "1d").
+        #[arg(long, default_value = "1h")]
+        timeframe: String,
+    },
 }
 
 /// Event bus query subcommands.
@@ -297,16 +309,16 @@ pub enum SetupAction {
     Data {
         /// Data source: "binance" or "yahoo".
         #[arg(long, default_value = "binance")]
-        source: String,
+        source:  String,
         /// Search for a symbol (e.g. "SOL", "DOGE").
         #[arg(long)]
-        search: Option<String>,
+        search:  Option<String>,
         /// Start date (YYYY-MM-DD). Defaults to earliest available on exchange.
         #[arg(long)]
-        start: Option<String>,
+        start:   Option<String>,
         /// End date (YYYY-MM-DD). Defaults to today.
         #[arg(long)]
-        end: Option<String>,
+        end:     Option<String>,
         /// Symbols to download (e.g. BTCUSDT ETHUSDT). Defaults to BTC + ETH.
         symbols: Vec<String>,
     },
