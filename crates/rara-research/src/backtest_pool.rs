@@ -2,13 +2,14 @@
 
 use std::sync::Arc;
 
+use rara_domain::{research::BacktestResult, timeframe::Timeframe};
 use snafu::Snafu;
 use tokio::sync::Semaphore;
 
-use crate::backtester::{BacktestError, Backtester};
-use crate::strategy_executor::StrategyExecutor;
-use rara_domain::research::BacktestResult;
-use rara_domain::timeframe::Timeframe;
+use crate::{
+    backtester::{BacktestError, Backtester},
+    strategy_executor::StrategyExecutor,
+};
 
 /// Errors from pool operations.
 #[derive(Debug, Snafu)]
@@ -20,7 +21,7 @@ pub enum PoolError {
         /// Identifier of the failed task.
         task_id: String,
         /// Underlying backtest error.
-        source: BacktestError,
+        source:  BacktestError,
     },
 }
 
@@ -28,13 +29,13 @@ pub enum PoolError {
 #[derive(Debug, Clone)]
 pub struct BacktestTask {
     /// Unique identifier for this task.
-    pub id: String,
+    pub id:                String,
     /// Compiled WASM strategy bytes.
     pub strategy_artifact: Arc<Vec<u8>>,
     /// Contract to run the backtest against.
-    pub contract_id: String,
+    pub contract_id:       String,
     /// Target timeframe for candle aggregation.
-    pub timeframe: Timeframe,
+    pub timeframe:         Timeframe,
 }
 
 /// Parallel backtest scheduler that limits concurrency via a semaphore.
@@ -42,14 +43,14 @@ pub struct BacktestPool<B: Backtester> {
     /// Maximum number of concurrent backtests.
     concurrency: usize,
     /// Shared backtester implementation.
-    backtester: Arc<B>,
+    backtester:  Arc<B>,
     /// Strategy executor for loading artifacts into handles.
-    executor: Arc<dyn StrategyExecutor>,
+    executor:    Arc<dyn StrategyExecutor>,
 }
 
 impl<B: Backtester + 'static> BacktestPool<B> {
-    /// Create a new pool with the given backtester, executor, and default concurrency
-    /// (`num_cpus` - 1, minimum 1).
+    /// Create a new pool with the given backtester, executor, and default
+    /// concurrency (`num_cpus` - 1, minimum 1).
     pub fn new(backtester: Arc<B>, executor: Arc<dyn StrategyExecutor>) -> Self {
         let concurrency = num_cpus::get().saturating_sub(1).max(1);
         Self {
@@ -72,7 +73,8 @@ impl<B: Backtester + 'static> BacktestPool<B> {
         }
     }
 
-    /// Run a batch of backtest tasks in parallel, respecting the concurrency limit.
+    /// Run a batch of backtest tasks in parallel, respecting the concurrency
+    /// limit.
     ///
     /// Returns results in the same order as the input tasks.
     pub async fn run_batch(
@@ -89,14 +91,14 @@ impl<B: Backtester + 'static> BacktestPool<B> {
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
                 let strategy_handle =
-                    executor.load(&task.strategy_artifact).map_err(|e| {
-                        PoolError::TaskFailed {
+                    executor
+                        .load(&task.strategy_artifact)
+                        .map_err(|e| PoolError::TaskFailed {
                             task_id: task.id.clone(),
-                            source: BacktestError::ExecutionFailed {
+                            source:  BacktestError::ExecutionFailed {
                                 message: format!("failed to load strategy: {e}"),
                             },
-                        }
-                    })?;
+                        })?;
                 backtester
                     .run(strategy_handle, &task.contract_id, task.timeframe)
                     .await
@@ -113,7 +115,7 @@ impl<B: Backtester + 'static> BacktestPool<B> {
             let result = handle.await.unwrap_or_else(|e| {
                 Err(PoolError::TaskFailed {
                     task_id: "unknown".to_string(),
-                    source: BacktestError::ExecutionFailed {
+                    source:  BacktestError::ExecutionFailed {
                         message: format!("task panicked: {e}"),
                     },
                 })
@@ -124,19 +126,16 @@ impl<B: Backtester + 'static> BacktestPool<B> {
     }
 
     /// Run a single backtest task.
-    pub async fn run_single(
-        &self,
-        task: BacktestTask,
-    ) -> Result<BacktestResult, PoolError> {
+    pub async fn run_single(&self, task: BacktestTask) -> Result<BacktestResult, PoolError> {
         let strategy_handle =
-            self.executor.load(&task.strategy_artifact).map_err(|e| {
-                PoolError::TaskFailed {
+            self.executor
+                .load(&task.strategy_artifact)
+                .map_err(|e| PoolError::TaskFailed {
                     task_id: task.id.clone(),
-                    source: BacktestError::ExecutionFailed {
+                    source:  BacktestError::ExecutionFailed {
                         message: format!("failed to load strategy: {e}"),
                     },
-                }
-            })?;
+                })?;
         self.backtester
             .run(strategy_handle, &task.contract_id, task.timeframe)
             .await
@@ -152,13 +151,11 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use async_trait::async_trait;
+    use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
     use rust_decimal_macros::dec;
 
-    use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
-
-    use crate::strategy_executor::{self, StrategyHandle};
-
     use super::*;
+    use crate::strategy_executor::{self, StrategyHandle};
 
     /// Mock strategy handle for tests.
     struct MockHandle;
@@ -166,8 +163,8 @@ mod tests {
     impl StrategyHandle for MockHandle {
         fn meta(&mut self) -> strategy_executor::Result<StrategyMeta> {
             Ok(StrategyMeta {
-                name: "mock".to_string(),
-                version: 1,
+                name:        "mock".to_string(),
+                version:     1,
                 api_version: 1,
                 description: "mock strategy".to_string(),
             })
@@ -183,7 +180,7 @@ mod tests {
             _side: Side,
         ) -> strategy_executor::Result<RiskLevels> {
             Ok(RiskLevels {
-                stop_loss: 0.0,
+                stop_loss:   0.0,
                 take_profit: 0.0,
             })
         }
@@ -193,16 +190,13 @@ mod tests {
     struct MockExecutor;
 
     impl StrategyExecutor for MockExecutor {
-        fn load(
-            &self,
-            _artifact: &[u8],
-        ) -> strategy_executor::Result<Box<dyn StrategyHandle>> {
+        fn load(&self, _artifact: &[u8]) -> strategy_executor::Result<Box<dyn StrategyHandle>> {
             Ok(Box::new(MockHandle))
         }
     }
 
     struct CountingBacktester {
-        current: AtomicU32,
+        current:        AtomicU32,
         max_concurrent: Arc<AtomicU32>,
     }
 
@@ -226,8 +220,7 @@ mod tests {
             let prev = self.current.fetch_add(1, Ordering::SeqCst);
             let running = prev + 1;
             // Update max if this is a new high-water mark
-            self.max_concurrent
-                .fetch_max(running, Ordering::SeqCst);
+            self.max_concurrent.fetch_max(running, Ordering::SeqCst);
 
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -253,10 +246,10 @@ mod tests {
 
         let tasks: Vec<BacktestTask> = (0..8)
             .map(|i| BacktestTask {
-                id: format!("task-{i}"),
+                id:                format!("task-{i}"),
                 strategy_artifact: Arc::new(vec![]),
-                contract_id: "contract".to_string(),
-                timeframe: Timeframe::Min1,
+                contract_id:       "contract".to_string(),
+                timeframe:         Timeframe::Min1,
             })
             .collect();
 
@@ -281,10 +274,10 @@ mod tests {
         let pool = BacktestPool::with_concurrency(backtester, executor, 2);
 
         let task = BacktestTask {
-            id: "single".to_string(),
+            id:                "single".to_string(),
             strategy_artifact: Arc::new(vec![]),
-            contract_id: "contract".to_string(),
-            timeframe: Timeframe::Min1,
+            contract_id:       "contract".to_string(),
+            timeframe:         Timeframe::Min1,
         };
 
         let result = pool.run_single(task).await;

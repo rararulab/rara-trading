@@ -2,9 +2,8 @@
 
 use std::path::Path;
 
-use snafu::{ResultExt, Snafu};
-
 use rara_domain::event::Event;
+use snafu::{ResultExt, Snafu};
 
 /// Errors that can occur in the event store.
 #[derive(Debug, Snafu)]
@@ -31,13 +30,13 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 /// consumer offset tracking.
 pub struct EventStore {
     /// Primary store: seq (u64 BE bytes) -> Event JSON bytes.
-    events: sled::Tree,
+    events:  sled::Tree,
     /// Topic index: "{topic}/{seq:020}" -> seq bytes.
-    topics: sled::Tree,
+    topics:  sled::Tree,
     /// Consumer offsets: `"{consumer_id}/{topic}"` -> u64 BE bytes.
     offsets: sled::Tree,
     /// The underlying sled database, used for monotonic ID generation.
-    db: sled::Db,
+    db:      sled::Db,
 }
 
 impl EventStore {
@@ -147,9 +146,8 @@ impl EventStore {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use rara_domain::event::EventType;
+    use serde_json::json;
 
     use super::*;
 

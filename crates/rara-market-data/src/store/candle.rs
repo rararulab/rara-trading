@@ -13,36 +13,36 @@ pub struct CandleCoverage {
     /// Instrument identifier.
     pub instrument_id: String,
     /// Candle interval.
-    pub interval: String,
+    pub interval:      String,
     /// Total candle count.
-    pub count: i64,
+    pub count:         i64,
     /// Earliest candle timestamp.
-    pub min_ts: Option<DateTime<Utc>>,
+    pub min_ts:        Option<DateTime<Utc>>,
     /// Latest candle timestamp.
-    pub max_ts: Option<DateTime<Utc>>,
+    pub max_ts:        Option<DateTime<Utc>>,
 }
 
 /// A single OHLCV candle row, used for both insert and query.
 #[derive(Debug, Clone)]
 pub struct CandleRow {
     /// Candle open timestamp (UTC).
-    pub ts: DateTime<Utc>,
+    pub ts:            DateTime<Utc>,
     /// Instrument identifier, e.g. `"binance-BTCUSDT"`.
     pub instrument_id: String,
     /// Candle interval, e.g. `"1m"`, `"1d"`.
-    pub interval: String,
+    pub interval:      String,
     /// Open price.
-    pub open: f64,
+    pub open:          f64,
     /// High price.
-    pub high: f64,
+    pub high:          f64,
     /// Low price.
-    pub low: f64,
+    pub low:           f64,
     /// Close price.
-    pub close: f64,
+    pub close:         f64,
     /// Volume.
-    pub volume: f64,
+    pub volume:        f64,
     /// Number of trades.
-    pub trade_count: i32,
+    pub trade_count:   i32,
 }
 
 impl MarketStore {
@@ -66,8 +66,10 @@ impl MarketStore {
         let trade_counts: Vec<i32> = candles.iter().map(|c| c.trade_count).collect();
 
         let result = sqlx::query(
-            "INSERT INTO candles (ts, instrument_id, interval, open, high, low, close, volume, trade_count)
-             SELECT * FROM UNNEST($1::timestamptz[], $2::text[], $3::text[], $4::float8[], $5::float8[], $6::float8[], $7::float8[], $8::float8[], $9::int4[])
+            "INSERT INTO candles (ts, instrument_id, interval, open, high, low, close, volume, \
+             trade_count)
+             SELECT * FROM UNNEST($1::timestamptz[], $2::text[], $3::text[], $4::float8[], \
+             $5::float8[], $6::float8[], $7::float8[], $8::float8[], $9::int4[])
              ON CONFLICT (ts, instrument_id, interval) DO NOTHING",
         )
         .bind(&ts)
@@ -87,7 +89,8 @@ impl MarketStore {
         Ok(result.rows_affected())
     }
 
-    /// Query candles for a given instrument and time range, ordered by time ascending.
+    /// Query candles for a given instrument and time range, ordered by time
+    /// ascending.
     #[tracing::instrument(skip(self))]
     pub async fn query_candles(
         &self,
@@ -126,7 +129,8 @@ impl MarketStore {
     /// Get coverage summary for all instrument+interval pairs in the store.
     pub async fn get_coverage(&self) -> Result<Vec<CandleCoverage>> {
         let rows = sqlx::query_as::<_, CoverageRow>(
-            "SELECT instrument_id, interval, count(*) as count, min(ts) as min_ts, max(ts) as max_ts
+            "SELECT instrument_id, interval, count(*) as count, min(ts) as min_ts, max(ts) as \
+             max_ts
              FROM candles
              GROUP BY instrument_id, interval
              ORDER BY instrument_id, interval",
@@ -139,10 +143,10 @@ impl MarketStore {
             .into_iter()
             .map(|r| CandleCoverage {
                 instrument_id: r.instrument_id,
-                interval: r.interval,
-                count: r.count.unwrap_or(0),
-                min_ts: r.min_ts,
-                max_ts: r.max_ts,
+                interval:      r.interval,
+                count:         r.count.unwrap_or(0),
+                min_ts:        r.min_ts,
+                max_ts:        r.max_ts,
             })
             .collect())
     }
@@ -174,38 +178,38 @@ impl MarketStore {
 #[derive(sqlx::FromRow)]
 struct CoverageRow {
     instrument_id: String,
-    interval: String,
-    count: Option<i64>,
-    min_ts: Option<DateTime<Utc>>,
-    max_ts: Option<DateTime<Utc>>,
+    interval:      String,
+    count:         Option<i64>,
+    min_ts:        Option<DateTime<Utc>>,
+    max_ts:        Option<DateTime<Utc>>,
 }
 
 /// Internal query result type that implements `sqlx::FromRow`.
 #[derive(sqlx::FromRow)]
 struct CandleQueryRow {
-    ts: DateTime<Utc>,
+    ts:            DateTime<Utc>,
     instrument_id: String,
-    interval: String,
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
-    volume: f64,
-    trade_count: i32,
+    interval:      String,
+    open:          f64,
+    high:          f64,
+    low:           f64,
+    close:         f64,
+    volume:        f64,
+    trade_count:   i32,
 }
 
 impl From<CandleQueryRow> for CandleRow {
     fn from(row: CandleQueryRow) -> Self {
         Self {
-            ts: row.ts,
+            ts:            row.ts,
             instrument_id: row.instrument_id,
-            interval: row.interval,
-            open: row.open,
-            high: row.high,
-            low: row.low,
-            close: row.close,
-            volume: row.volume,
-            trade_count: row.trade_count,
+            interval:      row.interval,
+            open:          row.open,
+            high:          row.high,
+            low:           row.low,
+            close:         row.close,
+            volume:        row.volume,
+            trade_count:   row.trade_count,
         }
     }
 }

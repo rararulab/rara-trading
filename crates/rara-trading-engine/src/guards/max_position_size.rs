@@ -2,18 +2,17 @@
 //! of total equity.
 
 use async_trait::async_trait;
+use rara_domain::trading::TradingCommit;
 use rust_decimal::Decimal;
 
-use rara_domain::trading::TradingCommit;
-use crate::broker::AccountInfo;
-
 use super::{Guard, GuardResult};
+use crate::broker::AccountInfo;
 
 /// Rejects commits where any single action's notional value exceeds a maximum
 /// percentage of total equity.
 pub struct MaxPositionSize {
     /// Maximum allowed position size as a fraction (e.g. 0.10 = 10%).
-    max_pct: Decimal,
+    max_pct:         Decimal,
     /// Assumed price for notional calculation. In production this would come
     /// from a market data feed; here we use a fixed estimate.
     estimated_price: Decimal,
@@ -32,9 +31,7 @@ impl MaxPositionSize {
 
 #[async_trait]
 impl Guard for MaxPositionSize {
-    fn name(&self) -> &'static str {
-        "MaxPositionSize"
-    }
+    fn name(&self) -> &'static str { "MaxPositionSize" }
 
     async fn check(&self, commit: &TradingCommit, account: &AccountInfo) -> GuardResult {
         let max_notional = account.total_equity * self.max_pct;
@@ -44,10 +41,9 @@ impl Guard for MaxPositionSize {
             if notional > max_notional {
                 return GuardResult::Reject {
                     reason: format!(
-                        "action on {} has notional {notional} exceeding max {max_notional} \
-                         ({} of equity)",
-                        action.contract_id,
-                        self.max_pct,
+                        "action on {} has notional {notional} exceeding max {max_notional} ({} of \
+                         equity)",
+                        action.contract_id, self.max_pct,
                     ),
                 };
             }

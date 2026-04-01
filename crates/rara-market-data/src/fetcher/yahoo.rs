@@ -12,8 +12,7 @@ use snafu::ResultExt;
 use tracing::info;
 
 use super::{HistoryFetcher, HttpSnafu, ParseSnafu, Result, StoreSnafu};
-use crate::store::candle::CandleRow;
-use crate::store::MarketStore;
+use crate::store::{MarketStore, candle::CandleRow};
 
 /// Yahoo Finance chart API base URL.
 const BASE_URL: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
@@ -174,7 +173,7 @@ struct YahooChart {
 
 #[derive(Deserialize)]
 struct YahooResult {
-    timestamp: Vec<i64>,
+    timestamp:  Vec<i64>,
     indicators: YahooIndicators,
 }
 
@@ -185,9 +184,9 @@ struct YahooIndicators {
 
 #[derive(Deserialize)]
 struct YahooQuote {
-    open: Vec<Option<f64>>,
-    high: Vec<Option<f64>>,
-    low: Vec<Option<f64>>,
-    close: Vec<Option<f64>>,
+    open:   Vec<Option<f64>>,
+    high:   Vec<Option<f64>>,
+    low:    Vec<Option<f64>>,
+    close:  Vec<Option<f64>>,
     volume: Vec<Option<f64>>,
 }

@@ -8,14 +8,15 @@
 //!
 //! **Narrow layout** (<120 cols): single-column stacked
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Modifier;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Table};
-use ratatui::Frame;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::Modifier,
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Table},
+};
 
-use crate::app::App;
-use crate::theme;
+use crate::{app::App, theme};
 
 /// Minimum width (in columns) to use the dual-column layout.
 const WIDE_THRESHOLD: u16 = 120;
@@ -31,8 +32,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Dual-column layout for wide terminals (≥120 cols).
 fn render_wide(frame: &mut Frame, app: &App, area: Rect) {
-    let columns = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(area);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
 
     // Left column: strategies, positions, recent events
     let left_panes = Layout::vertical([
@@ -65,10 +66,10 @@ fn render_wide(frame: &mut Frame, app: &App, area: Rect) {
 /// strategies, positions, alerts, and recent events vertically.
 fn render_narrow(frame: &mut Frame, app: &App, area: Rect) {
     let panes = Layout::vertical([
-        Constraint::Length(3),  // system + research compact bar
-        Constraint::Length(5),  // strategies (compact)
-        Constraint::Length(5),  // positions (compact)
-        Constraint::Length(4),  // alerts
+        Constraint::Length(3), // system + research compact bar
+        Constraint::Length(5), // strategies (compact)
+        Constraint::Length(5), // positions (compact)
+        Constraint::Length(4), // alerts
         Constraint::Min(3),    // recent events (fill)
     ])
     .split(area);
@@ -128,10 +129,9 @@ fn render_strategies(frame: &mut Frame, app: &App, area: Rect) {
     let block = pane_block(" Strategies ");
 
     if app.strategies.is_empty() {
-        let empty =
-            Paragraph::new("  No strategies yet. Run \"rara research run\" to start.")
-                .style(theme::muted())
-                .block(block);
+        let empty = Paragraph::new("  No strategies yet. Run \"rara research run\" to start.")
+            .style(theme::muted())
+            .block(block);
         frame.render_widget(empty, area);
         return;
     }
@@ -345,8 +345,12 @@ fn render_research_progress(frame: &mut Frame, app: &App, area: Rect) {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let panes = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
-            .split(inner);
+        let panes = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
 
         // Summary line
         let summary = Line::from(vec![
@@ -401,7 +405,8 @@ fn pane_block(title: &str) -> Block<'_> {
         .style(ratatui::style::Style::default().bg(theme::BASE))
 }
 
-/// Return a style for `PnL` values: positive → green, negative → red, zero → muted.
+/// Return a style for `PnL` values: positive → green, negative → red, zero →
+/// muted.
 fn pnl_style(pnl: f64) -> ratatui::style::Style {
     if pnl > 0.0 {
         theme::positive()

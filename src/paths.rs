@@ -1,7 +1,8 @@
 //! Centralized path management for application data directories.
 //!
 //! All paths derive from a single data root, resolved once via `OnceLock`.
-//! The root can be overridden by setting the `APP_DATA_DIR` environment variable.
+//! The root can be overridden by setting the `APP_DATA_DIR` environment
+//! variable.
 
 use std::{
     path::{Path, PathBuf},

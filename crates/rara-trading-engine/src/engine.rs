@@ -3,11 +3,12 @@
 
 use std::sync::Arc;
 
+use rara_domain::{
+    event::{Event, EventType},
+    trading::{Side, TradingCommit},
+};
 use serde::Serialize;
 use snafu::Snafu;
-
-use rara_domain::event::{Event, EventType};
-use rara_domain::trading::{Side, TradingCommit};
 
 /// Event payload for an order submission.
 #[derive(Debug, Serialize)]
@@ -15,34 +16,37 @@ struct OrderSubmittedPayload<'a> {
     /// Contract identifier.
     contract_id: &'a str,
     /// Order side (buy/sell).
-    side: &'a Side,
+    side:        &'a Side,
     /// Quantity as decimal string.
-    quantity: String,
+    quantity:    String,
 }
 
 /// Event payload for an order outcome.
 #[derive(Debug, Serialize)]
 struct OrderOutcomePayload<'a> {
     /// Broker-assigned order identifier.
-    order_id: &'a str,
+    order_id:     &'a str,
     /// Contract identifier.
-    contract_id: &'a str,
+    contract_id:  &'a str,
     /// Order status.
-    status: &'a OrderStatus,
+    status:       &'a OrderStatus,
     /// Trade direction.
-    side: &'a Side,
+    side:         &'a Side,
     /// Filled quantity as decimal string.
-    quantity: String,
+    quantity:     String,
     /// Execution price as decimal string.
-    price: String,
+    price:        String,
     /// Realized `PnL` as decimal string (zero for new positions).
     realized_pnl: String,
 }
 use rara_event_bus::bus::EventBus;
-use crate::binding::StrategyBinding;
-use crate::broker::{Broker, OrderResult, OrderStatus};
-use crate::guard_pipeline::GuardPipeline;
-use crate::guards::GuardResult;
+
+use crate::{
+    binding::StrategyBinding,
+    broker::{Broker, OrderResult, OrderStatus},
+    guard_pipeline::GuardPipeline,
+    guards::GuardResult,
+};
 
 /// Errors that can occur during trading engine operations.
 #[derive(Debug, Snafu)]
@@ -75,13 +79,13 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 /// trading commits.
 pub struct TradingEngine {
     /// Broker for order execution.
-    broker: Box<dyn Broker>,
+    broker:         Box<dyn Broker>,
     /// Pre-trade risk guard pipeline.
     guard_pipeline: GuardPipeline,
     /// Active strategy bindings.
-    bindings: Vec<StrategyBinding>,
+    bindings:       Vec<StrategyBinding>,
     /// Event bus for publishing trading events.
-    event_bus: Arc<EventBus>,
+    event_bus:      Arc<EventBus>,
 }
 
 impl TradingEngine {
@@ -100,9 +104,7 @@ impl TradingEngine {
     }
 
     /// Register a strategy binding.
-    pub fn add_binding(&mut self, binding: StrategyBinding) {
-        self.bindings.push(binding);
-    }
+    pub fn add_binding(&mut self, binding: StrategyBinding) { self.bindings.push(binding); }
 
     /// Execute a trading commit: run guards, push to broker, publish events.
     #[tracing::instrument(skip(self, commit), fields(strategy_id = %commit.strategy_id, actions = commit.actions.len()))]
@@ -128,8 +130,8 @@ impl TradingEngine {
                 .payload(
                     serde_json::to_value(OrderSubmittedPayload {
                         contract_id: &action.contract_id,
-                        side: &action.side,
-                        quantity: action.quantity.to_string(),
+                        side:        &action.side,
+                        quantity:    action.quantity.to_string(),
                     })
                     .expect("OrderSubmittedPayload must serialize"),
                 )
@@ -164,12 +166,12 @@ impl TradingEngine {
                 .strategy_id(commit.strategy_id.clone())
                 .payload(
                     serde_json::to_value(OrderOutcomePayload {
-                        order_id: &result.order_id,
-                        contract_id: &result.contract_id,
-                        status: &result.status,
-                        side: &result.side,
-                        quantity: result.quantity.to_string(),
-                        price: result.price.to_string(),
+                        order_id:     &result.order_id,
+                        contract_id:  &result.contract_id,
+                        status:       &result.status,
+                        side:         &result.side,
+                        quantity:     result.quantity.to_string(),
+                        price:        result.price.to_string(),
                         realized_pnl: result.realized_pnl.to_string(),
                     })
                     .expect("OrderOutcomePayload must serialize"),
@@ -189,27 +191,28 @@ impl TradingEngine {
 
 #[cfg(test)]
 mod tests {
+    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
     use rust_decimal::Decimal;
 
-    use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
-    use crate::broker::OrderStatus;
-    use crate::brokers::paper::PaperBroker;
-    use crate::guards::symbol_whitelist::SymbolWhitelist;
-
     use super::*;
+    use crate::{
+        broker::OrderStatus, brokers::paper::PaperBroker, guards::symbol_whitelist::SymbolWhitelist,
+    };
 
     fn test_commit(contract_id: &str) -> TradingCommit {
         TradingCommit::builder()
             .message("test")
             .strategy_id("strat-1")
             .strategy_version(1)
-            .actions(vec![StagedAction::builder()
-                .action_type(ActionType::PlaceOrder)
-                .contract_id(contract_id)
-                .side(Side::Buy)
-                .quantity(Decimal::ONE)
-                .order_type(OrderType::Market)
-                .build()])
+            .actions(vec![
+                StagedAction::builder()
+                    .action_type(ActionType::PlaceOrder)
+                    .contract_id(contract_id)
+                    .side(Side::Buy)
+                    .quantity(Decimal::ONE)
+                    .order_type(OrderType::Market)
+                    .build(),
+            ])
             .build()
     }
 
@@ -224,10 +227,7 @@ mod tests {
 
         let engine = TradingEngine::new(Box::new(broker), pipeline, event_bus);
 
-        let results = engine
-            .execute_commit(test_commit("BTC-USD"))
-            .await
-            .unwrap();
+        let results = engine.execute_commit(test_commit("BTC-USD")).await.unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, OrderStatus::Filled);

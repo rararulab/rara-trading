@@ -82,6 +82,18 @@ pub enum AppError {
     Sentinel {
         source: rara_sentinel::engine::SentinelError,
     },
+    #[snafu(display("strategy store error: {source}"))]
+    StrategyStore {
+        source: crate::research::strategy_store::StrategyStoreError,
+    },
+
+    #[snafu(display("strategy executor error: {source}"))]
+    StrategyExecutor {
+        source: rara_research::strategy_executor::ExecutorError,
+    },
+
+    #[snafu(display("paper trading error: {message}"))]
+    PaperTrading { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;

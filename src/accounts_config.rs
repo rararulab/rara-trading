@@ -5,9 +5,7 @@ use std::path::Path;
 use rara_trading_engine::account_config::{AccountsConfig, BrokerConfig};
 
 /// Load accounts from the default path with environment variable overrides.
-pub fn load_accounts() -> AccountsConfig {
-    load_accounts_from_path(&crate::paths::accounts_file())
-}
+pub fn load_accounts() -> AccountsConfig { load_accounts_from_path(&crate::paths::accounts_file()) }
 
 /// Load accounts from a specific path via the `config` crate.
 ///
@@ -17,7 +15,8 @@ pub fn load_accounts() -> AccountsConfig {
 /// - `RARA_ACCOUNT_{ID}_SECRET`
 /// - `RARA_ACCOUNT_{ID}_PASSPHRASE`
 ///
-/// where `{ID}` is the account id uppercased with hyphens replaced by underscores.
+/// where `{ID}` is the account id uppercased with hyphens replaced by
+/// underscores.
 pub fn load_accounts_from_path(path: &Path) -> AccountsConfig {
     let mut cfg: AccountsConfig = if path.exists() {
         let settings = config::Config::builder()
@@ -38,9 +37,7 @@ pub fn load_accounts_from_path(path: &Path) -> AccountsConfig {
 /// Uses the pattern `RARA_ACCOUNT_{ID}_{FIELD}` where ID is the account id
 /// uppercased with hyphens replaced by underscores. This is more user-friendly
 /// than index-based env vars since account order may change.
-fn apply_env_overrides(cfg: &mut AccountsConfig) {
-    apply_env_overrides_with(cfg, std::env::var);
-}
+fn apply_env_overrides(cfg: &mut AccountsConfig) { apply_env_overrides_with(cfg, std::env::var); }
 
 /// Apply overrides using a custom variable lookup function.
 ///
@@ -191,24 +188,22 @@ mod tests {
 
         let mut cfg = AccountsConfig {
             accounts: vec![AccountConfig {
-                id: "binance-main".to_string(),
-                label: None,
+                id:            "binance-main".to_string(),
+                label:         None,
                 broker_config: BrokerConfig::Ccxt(CcxtBrokerConfig {
-                    exchange: "binance".to_string(),
-                    sandbox: false,
-                    api_key: "file-key".to_string(),
-                    secret: "file-secret".to_string(),
+                    exchange:   "binance".to_string(),
+                    sandbox:    false,
+                    api_key:    "file-key".to_string(),
+                    secret:     "file-secret".to_string(),
                     passphrase: None,
                 }),
-                enabled: true,
-                contracts: vec![],
+                enabled:       true,
+                contracts:     vec![],
             }],
         };
 
         apply_env_overrides_with(&mut cfg, |key| {
-            env.get(&key)
-                .cloned()
-                .ok_or(std::env::VarError::NotPresent)
+            env.get(&key).cloned().ok_or(std::env::VarError::NotPresent)
         });
 
         if let BrokerConfig::Ccxt(ref ccxt) = cfg.accounts[0].broker_config {

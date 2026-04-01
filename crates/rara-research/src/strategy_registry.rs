@@ -7,14 +7,12 @@
 use std::path::PathBuf;
 
 use bon::Builder;
+use rara_strategy_api::API_VERSION;
 use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use tracing::{debug, info};
 
-use rara_strategy_api::API_VERSION;
-
-use crate::strategy_executor::StrategyExecutor;
-use crate::wasm_executor::WasmExecutor;
+use crate::{strategy_executor::StrategyExecutor, wasm_executor::WasmExecutor};
 
 /// Errors from strategy registry operations.
 #[derive(Debug, Snafu)]
@@ -33,7 +31,7 @@ pub enum RegistryError {
         /// HTTP status code.
         status: u16,
         /// Response body.
-        body: String,
+        body:   String,
     },
 
     /// No WASM asset found in the release.
@@ -45,13 +43,14 @@ pub enum RegistryError {
 
     /// WASM module API version is incompatible.
     #[snafu(display(
-        "API version mismatch: strategy requires v{strategy_version}, runtime supports v{runtime_version}"
+        "API version mismatch: strategy requires v{strategy_version}, runtime supports \
+         v{runtime_version}"
     ))]
     ApiVersionMismatch {
         /// The strategy's API version.
         strategy_version: u32,
         /// The runtime's supported API version.
-        runtime_version: u32,
+        runtime_version:  u32,
     },
 
     /// WASM runtime validation failed.
@@ -83,26 +82,26 @@ pub type Result<T> = std::result::Result<T, RegistryError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
     /// Release tag name (e.g. "btc-momentum-v0.1.0").
-    pub tag: String,
+    pub tag:           String,
     /// Strategy name derived from the tag.
-    pub name: String,
+    pub name:          String,
     /// Version string derived from the tag.
-    pub version: String,
+    pub version:       String,
     /// WASM asset download URL.
-    pub wasm_url: String,
+    pub wasm_url:      String,
     /// WASM asset filename.
     pub wasm_filename: String,
     /// Asset size in bytes.
-    pub size: u64,
+    pub size:          u64,
 }
 
 /// Metadata saved alongside a fetched registry strategy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchedStrategy {
     /// Original registry entry.
-    pub entry: RegistryEntry,
+    pub entry:     RegistryEntry,
     /// Strategy metadata extracted from the WASM module.
-    pub meta: rara_strategy_api::StrategyMeta,
+    pub meta:      rara_strategy_api::StrategyMeta,
     /// Local filesystem path to the saved WASM binary.
     pub wasm_path: PathBuf,
 }
@@ -110,8 +109,8 @@ pub struct FetchedStrategy {
 /// GitHub Release asset from the API response.
 #[derive(Debug, Deserialize)]
 struct GitHubAsset {
-    name: String,
-    size: u64,
+    name:                 String,
+    size:                 u64,
     browser_download_url: String,
 }
 
@@ -119,7 +118,7 @@ struct GitHubAsset {
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
-    assets: Vec<GitHubAsset>,
+    assets:   Vec<GitHubAsset>,
 }
 
 /// Client for the rara-strategies GitHub Release registry.
@@ -136,10 +135,7 @@ pub struct StrategyRegistry {
 impl StrategyRegistry {
     /// List all available strategies from the GitHub registry.
     pub async fn list_available(&self) -> Result<Vec<RegistryEntry>> {
-        let url = format!(
-            "https://api.github.com/repos/{}/releases",
-            self.repo
-        );
+        let url = format!("https://api.github.com/repos/{}/releases", self.repo);
 
         let client = reqwest::Client::new();
         let response = client
@@ -164,14 +160,11 @@ impl StrategyRegistry {
         let entries = releases
             .into_iter()
             .filter_map(|release| {
-                let wasm_asset = release
-                    .assets
-                    .into_iter()
-                    .find(|a| {
-                        std::path::Path::new(&a.name)
-                            .extension()
-                            .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
-                    })?;
+                let wasm_asset = release.assets.into_iter().find(|a| {
+                    std::path::Path::new(&a.name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
+                })?;
 
                 let (name, version) = parse_tag(&release.tag_name)?;
 
@@ -189,7 +182,8 @@ impl StrategyRegistry {
         Ok(entries)
     }
 
-    /// Fetch a strategy by name, validate it, and save to the promoted directory.
+    /// Fetch a strategy by name, validate it, and save to the promoted
+    /// directory.
     pub async fn fetch(&self, strategy_name: &str) -> Result<FetchedStrategy> {
         let entries = self.list_available().await?;
 
@@ -234,7 +228,7 @@ impl StrategyRegistry {
         if meta.api_version != API_VERSION {
             return Err(RegistryError::ApiVersionMismatch {
                 strategy_version: meta.api_version,
-                runtime_version: API_VERSION,
+                runtime_version:  API_VERSION,
             });
         }
 
@@ -248,9 +242,7 @@ impl StrategyRegistry {
         // Save to promoted directory
         std::fs::create_dir_all(&self.promoted_dir).context(IoSnafu)?;
 
-        let wasm_path = self
-            .promoted_dir
-            .join(format!("{}.wasm", entry.name));
+        let wasm_path = self.promoted_dir.join(format!("{}.wasm", entry.name));
         std::fs::write(&wasm_path, &wasm_bytes).context(IoSnafu)?;
 
         // Save metadata JSON alongside the WASM file
@@ -274,7 +266,8 @@ impl StrategyRegistry {
         Ok(fetched)
     }
 
-    /// List strategies that have been fetched from the registry and saved locally.
+    /// List strategies that have been fetched from the registry and saved
+    /// locally.
     pub fn list_installed(&self) -> Result<Vec<FetchedStrategy>> {
         if !self.promoted_dir.exists() {
             return Ok(Vec::new());

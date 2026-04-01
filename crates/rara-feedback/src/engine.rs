@@ -1,29 +1,32 @@
-//! `FeedbackBridge` engine — orchestrates the strategy evaluation feedback loop.
+//! `FeedbackBridge` engine — orchestrates the strategy evaluation feedback
+//! loop.
 
 use std::sync::Arc;
 
+use rara_domain::{
+    event::{Event, EventType},
+    feedback::{FeedbackDecision, StrategyReport},
+};
 use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 use uuid::Uuid;
-
-use rara_domain::event::{Event, EventType};
-use rara_domain::feedback::{FeedbackDecision, StrategyReport};
 
 /// Event payload published when a feedback decision is made.
 #[derive(Debug, Serialize)]
 struct FeedbackEventPayload<'a> {
     /// The lifecycle decision.
-    decision: &'a FeedbackDecision,
+    decision:         &'a FeedbackDecision,
     /// Strategy identifier.
-    strategy_id: &'a str,
+    strategy_id:      &'a str,
     /// Strategy version number.
     strategy_version: u32,
 }
-use rara_event_bus::bus::EventBus;
-use rara_event_bus::store::StoreError;
+use rara_event_bus::{bus::EventBus, store::StoreError};
 
-use crate::aggregator::{AggregatorError, MetricsAggregator};
-use crate::evaluator::StrategyEvaluator;
+use crate::{
+    aggregator::{AggregatorError, MetricsAggregator},
+    evaluator::StrategyEvaluator,
+};
 
 /// Errors from feedback bridge operations.
 #[derive(Debug, Snafu)]
@@ -50,8 +53,8 @@ pub type Result<T> = std::result::Result<T, FeedbackBridgeError>;
 /// and publish lifecycle events.
 pub struct FeedbackBridge {
     aggregator: MetricsAggregator,
-    evaluator: StrategyEvaluator,
-    event_bus: Arc<EventBus>,
+    evaluator:  StrategyEvaluator,
+    event_bus:  Arc<EventBus>,
 }
 
 impl FeedbackBridge {
@@ -139,7 +142,8 @@ impl FeedbackBridge {
         Ok(report)
     }
 
-    /// Check whether any of the given sentinel event IDs have Critical severity.
+    /// Check whether any of the given sentinel event IDs have Critical
+    /// severity.
     fn has_critical_sentinel(&self, event_ids: &[Uuid]) -> Result<bool> {
         let sentinel_events = self
             .event_bus
@@ -149,10 +153,7 @@ impl FeedbackBridge {
 
         let has_critical = sentinel_events.iter().any(|e| {
             event_ids.contains(&e.event_id)
-                && e.payload
-                    .get("severity")
-                    .and_then(|v| v.as_str())
-                    == Some("Critical")
+                && e.payload.get("severity").and_then(|v| v.as_str()) == Some("Critical")
         });
 
         Ok(has_critical)
@@ -214,7 +215,9 @@ mod tests {
         let (bus, _dir) = setup();
 
         // Publish winning trades with slight variance so Sharpe > 0
-        let pnls = ["120", "80", "110", "90", "130", "95", "105", "115", "100", "85"];
+        let pnls = [
+            "120", "80", "110", "90", "130", "95", "105", "115", "100", "85",
+        ];
         for pnl in &pnls {
             publish_fill(&bus, "strat-1", pnl);
         }
@@ -240,7 +243,9 @@ mod tests {
     fn demote_on_critical_sentinel() {
         let (bus, _dir) = setup();
 
-        let pnls = ["120", "80", "110", "90", "130", "95", "105", "115", "100", "85"];
+        let pnls = [
+            "120", "80", "110", "90", "130", "95", "105", "115", "100", "85",
+        ];
         for pnl in &pnls {
             publish_fill(&bus, "strat-1", pnl);
         }

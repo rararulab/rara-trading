@@ -13,11 +13,12 @@ use crate::tabs::research::ResearchState;
 #[derive(Debug, Clone)]
 pub struct StrategyStatus {
     /// Human-readable strategy name.
-    pub name: String,
-    /// Current lifecycle state (e.g. "Running", "Promoted", "Paper", "Stopped").
+    pub name:   String,
+    /// Current lifecycle state (e.g. "Running", "Promoted", "Paper",
+    /// "Stopped").
     pub status: String,
     /// Cumulative profit-and-loss.
-    pub pnl: f64,
+    pub pnl:    f64,
     /// Annualized Sharpe ratio.
     pub sharpe: f64,
 }
@@ -26,24 +27,24 @@ pub struct StrategyStatus {
 #[derive(Debug, Clone)]
 pub struct RecentEvent {
     /// Formatted timestamp (e.g. "14:32:01").
-    pub time: String,
+    pub time:       String,
     /// Event category tag (e.g. "TRADE", "ERROR", "INFO").
     pub event_type: String,
     /// One-line event description.
-    pub summary: String,
+    pub summary:    String,
 }
 
 /// Aggregate progress of the autonomous research pipeline.
 #[derive(Debug, Clone)]
 pub struct ResearchProgress {
     /// Number of backtests completed so far.
-    pub current: u32,
+    pub current:     u32,
     /// Total backtests planned for this sweep.
-    pub total: u32,
+    pub total:       u32,
     /// Strategies that passed acceptance criteria.
-    pub accepted: u32,
+    pub accepted:    u32,
     /// Strategies that failed acceptance criteria.
-    pub rejected: u32,
+    pub rejected:    u32,
     /// Strategies currently being evaluated.
     pub in_progress: u32,
     /// Best Sharpe ratio discovered so far, if any.
@@ -74,19 +75,19 @@ pub const EVENTS_TAB_INDEX: usize = 4;
 #[derive(Debug, Clone)]
 pub struct EventEntry {
     /// Monotonically increasing sequence number.
-    pub seq: u64,
+    pub seq:         u64,
     /// Human-readable timestamp string.
-    pub time: String,
+    pub time:        String,
     /// Event topic (trading, research, feedback, sentinel).
-    pub topic: String,
+    pub topic:       String,
     /// The type/kind of event within the topic.
-    pub event_type: String,
+    pub event_type:  String,
     /// One-line summary of the event.
-    pub summary: String,
+    pub summary:     String,
     /// Optional strategy identifier associated with this event.
     pub strategy_id: Option<String>,
     /// Full event payload, typically JSON.
-    pub payload: String,
+    pub payload:     String,
 }
 
 /// Topic-level filter for the events stream.
@@ -107,17 +108,17 @@ pub enum EventFilter {
 /// State for the Events tab.
 pub struct EventsState {
     /// All received events (unfiltered buffer).
-    pub events: Vec<EventEntry>,
+    pub events:          Vec<EventEntry>,
     /// Current topic filter.
-    pub filter: EventFilter,
+    pub filter:          EventFilter,
     /// Whether auto-scroll is enabled (newest events stay visible).
-    pub auto_scroll: bool,
+    pub auto_scroll:     bool,
     /// Currently selected row index within the filtered view.
-    pub selected_index: usize,
+    pub selected_index:  usize,
     /// Current search query text.
-    pub search_query: String,
+    pub search_query:    String,
     /// Whether the search input is actively accepting keystrokes.
-    pub search_active: bool,
+    pub search_active:   bool,
     /// Whether the detail pane is expanded.
     pub detail_expanded: bool,
 }
@@ -125,12 +126,12 @@ pub struct EventsState {
 impl Default for EventsState {
     fn default() -> Self {
         Self {
-            events: Vec::new(),
-            filter: EventFilter::All,
-            auto_scroll: true,
-            selected_index: 0,
-            search_query: String::new(),
-            search_active: false,
+            events:          Vec::new(),
+            filter:          EventFilter::All,
+            auto_scroll:     true,
+            selected_index:  0,
+            search_query:    String::new(),
+            search_active:   false,
             detail_expanded: false,
         }
     }
@@ -146,9 +147,9 @@ pub const TRADING_TAB: usize = 2;
 #[derive(Debug, Clone)]
 pub struct AccountState {
     /// Total portfolio equity.
-    pub equity: f64,
+    pub equity:         f64,
     /// Available cash balance.
-    pub cash: f64,
+    pub cash:           f64,
     /// Unrealized profit/loss across all open positions.
     pub unrealized_pnl: f64,
     /// Portfolio change percentage for the current day.
@@ -158,8 +159,8 @@ pub struct AccountState {
 impl Default for AccountState {
     fn default() -> Self {
         Self {
-            equity: 0.0,
-            cash: 0.0,
+            equity:         0.0,
+            cash:           0.0,
             unrealized_pnl: 0.0,
             day_change_pct: 0.0,
         }
@@ -170,38 +171,38 @@ impl Default for AccountState {
 #[derive(Debug, Clone)]
 pub struct PositionInfo {
     /// Trading instrument symbol (e.g. "BTCUSDT").
-    pub symbol: String,
+    pub symbol:        String,
     /// Position direction ("Buy" or "Sell").
-    pub side: String,
+    pub side:          String,
     /// Number of units held.
-    pub quantity: f64,
+    pub quantity:      f64,
     /// Average entry price.
-    pub entry_price: f64,
+    pub entry_price:   f64,
     /// Current market price.
     pub current_price: f64,
     /// Unrealized profit/loss for this position.
-    pub pnl: f64,
+    pub pnl:           f64,
     /// Name of the strategy that opened this position.
-    pub strategy: String,
+    pub strategy:      String,
 }
 
 /// A single order entry in the order log.
 #[derive(Debug, Clone)]
 pub struct OrderEntry {
     /// Timestamp when the order was placed (HH:MM:SS format).
-    pub time: String,
+    pub time:         String,
     /// Trading instrument symbol.
-    pub symbol: String,
+    pub symbol:       String,
     /// Order direction ("Buy" or "Sell").
-    pub side: String,
+    pub side:         String,
     /// Order quantity.
-    pub quantity: f64,
+    pub quantity:     f64,
     /// Order price.
-    pub price: f64,
+    pub price:        f64,
     /// Order status: "Filled", "Rejected", or "Submitted".
-    pub status: String,
+    pub status:       String,
     /// Name of the strategy that generated the order.
-    pub strategy: String,
+    pub strategy:     String,
     /// Guard check result: "Pass" or rejection reason (e.g. "`MaxPos`").
     pub guard_result: String,
 }
@@ -240,17 +241,17 @@ impl PnlRange {
 #[derive(Debug, Clone)]
 pub struct TradingState {
     /// Account-level summary.
-    pub account: AccountState,
+    pub account:           AccountState,
     /// Currently open positions.
-    pub positions: Vec<PositionInfo>,
+    pub positions:         Vec<PositionInfo>,
     /// Order log entries (most recent first).
-    pub orders: Vec<OrderEntry>,
+    pub orders:            Vec<OrderEntry>,
     /// `PnL` data points for the sparkline chart.
-    pub pnl_data: Vec<u64>,
+    pub pnl_data:          Vec<u64>,
     /// Currently selected time range for the `PnL` sparkline.
-    pub pnl_range: PnlRange,
+    pub pnl_range:         PnlRange,
     /// Index of the currently selected order in the orders list.
-    pub selected_order: usize,
+    pub selected_order:    usize,
     /// Whether the order detail overlay is shown.
     pub show_order_detail: bool,
 }
@@ -258,12 +259,12 @@ pub struct TradingState {
 impl Default for TradingState {
     fn default() -> Self {
         Self {
-            account: AccountState::default(),
-            positions: Vec::new(),
-            orders: Vec::new(),
-            pnl_data: Vec::new(),
-            pnl_range: PnlRange::Hour1,
-            selected_order: 0,
+            account:           AccountState::default(),
+            positions:         Vec::new(),
+            orders:            Vec::new(),
+            pnl_data:          Vec::new(),
+            pnl_range:         PnlRange::Hour1,
+            selected_order:    0,
             show_order_detail: false,
         }
     }
@@ -283,9 +284,7 @@ impl TradingState {
     }
 
     /// Cycle the `PnL` sparkline time range.
-    pub const fn cycle_pnl_range(&mut self) {
-        self.pnl_range = self.pnl_range.next();
-    }
+    pub const fn cycle_pnl_range(&mut self) { self.pnl_range = self.pnl_range.next(); }
 
     /// Toggle the order detail overlay.
     pub const fn toggle_order_detail(&mut self) {
@@ -306,39 +305,40 @@ pub enum StrategyLifecycle {
 
 /// A single strategy entry displayed in the strategy list table.
 ///
-/// Populated from real installed strategies via `StrategyRegistry::list_installed()`.
+/// Populated from real installed strategies via
+/// `StrategyRegistry::list_installed()`.
 #[derive(Debug, Clone)]
 pub struct StrategyEntry {
     /// Display name of the strategy.
-    pub name: String,
+    pub name:            String,
     /// Version number of the strategy (from WASM metadata).
-    pub version: u32,
+    pub version:         u32,
     /// Release tag from the GitHub registry.
-    pub tag: String,
+    pub tag:             String,
     /// Release version string (e.g. "v0.1.0").
     pub release_version: String,
     /// API version the strategy was compiled against.
-    pub api_version: u32,
+    pub api_version:     u32,
     /// Brief description from the WASM metadata.
-    pub description: String,
+    pub description:     String,
     /// Current lifecycle status.
-    pub status: StrategyLifecycle,
+    pub status:          StrategyLifecycle,
     /// Local filesystem path to the WASM binary.
-    pub wasm_path: PathBuf,
+    pub wasm_path:       PathBuf,
     /// WASM file size in bytes.
-    pub file_size: u64,
+    pub file_size:       u64,
     /// WASM asset download URL from the registry.
-    pub wasm_url: String,
+    pub wasm_url:        String,
 }
 
 /// State for the Strategies tab, managing list selection and detail expansion.
 pub struct StrategiesState {
     /// All strategy entries to display.
-    pub strategies: Vec<StrategyEntry>,
+    pub strategies:     Vec<StrategyEntry>,
     /// Index of the currently selected strategy in the list.
     pub selected_index: usize,
     /// Whether the full description is shown in the detail panel.
-    pub show_detail: bool,
+    pub show_detail:    bool,
 }
 
 impl StrategiesState {
@@ -369,9 +369,7 @@ impl StrategiesState {
     }
 
     /// Toggle the detail expansion for the selected strategy.
-    pub const fn toggle_detail(&mut self) {
-        self.show_detail = !self.show_detail;
-    }
+    pub const fn toggle_detail(&mut self) { self.show_detail = !self.show_detail; }
 }
 
 /// Phase of the TUI application lifecycle.
@@ -380,7 +378,7 @@ pub enum AppPhase {
     /// Waiting for the gRPC server to become ready.
     StartingServer {
         /// Status message to display.
-        message: String,
+        message:  String,
         /// Number of connection attempts so far.
         attempts: u32,
     },
@@ -391,35 +389,35 @@ pub enum AppPhase {
 /// Root application state driving the TUI.
 pub struct App {
     /// Index of the currently active tab.
-    pub active_tab: usize,
+    pub active_tab:        usize,
     /// Whether the application is still running.
-    pub running: bool,
+    pub running:           bool,
     /// Current connection state to the gRPC server.
     pub connection_status: ConnectionStatus,
     /// Last received system status from the server.
-    pub system_status: Option<SystemStatus>,
+    pub system_status:     Option<SystemStatus>,
     /// gRPC server address the client connects to.
-    pub server_addr: String,
+    pub server_addr:       String,
     /// Live strategy statuses displayed on the overview tab.
-    pub strategies: Vec<StrategyStatus>,
+    pub strategies:        Vec<StrategyStatus>,
     /// Open positions displayed on the overview tab.
-    pub positions: Vec<PositionInfo>,
+    pub positions:         Vec<PositionInfo>,
     /// Rolling window of recent events.
-    pub recent_events: Vec<RecentEvent>,
+    pub recent_events:     Vec<RecentEvent>,
     /// Active alert messages.
-    pub alerts: Vec<String>,
+    pub alerts:            Vec<String>,
     /// Current research pipeline progress, if any.
     pub research_progress: Option<ResearchProgress>,
     /// State for the Research tab.
-    pub research: ResearchState,
+    pub research:          ResearchState,
     /// State for the Events tab.
-    pub events_state: EventsState,
+    pub events_state:      EventsState,
     /// State for the Trading tab.
-    pub trading: TradingState,
+    pub trading:           TradingState,
     /// State for the Strategies tab.
-    pub strategies_state: StrategiesState,
+    pub strategies_state:  StrategiesState,
     /// Current lifecycle phase of the TUI application.
-    pub phase: AppPhase,
+    pub phase:             AppPhase,
 }
 
 impl App {
@@ -444,7 +442,7 @@ impl App {
             trading: TradingState::default(),
             strategies_state: StrategiesState::from_installed(promoted_dir),
             phase: AppPhase::StartingServer {
-                message: "Starting gRPC server...".to_string(),
+                message:  "Starting gRPC server...".to_string(),
                 attempts: 0,
             },
         }
@@ -458,24 +456,22 @@ impl App {
     }
 
     /// Signal the application to quit.
-    pub const fn quit(&mut self) {
-        self.running = false;
-    }
+    pub const fn quit(&mut self) { self.running = false; }
 }
 
 /// Convert a `FetchedStrategy` from the registry into a TUI view model.
 fn fetched_to_entry(fetched: FetchedStrategy) -> StrategyEntry {
     StrategyEntry {
-        name: fetched.meta.name,
-        version: fetched.meta.version,
-        tag: fetched.entry.tag,
+        name:            fetched.meta.name,
+        version:         fetched.meta.version,
+        tag:             fetched.entry.tag,
         release_version: fetched.entry.version,
-        api_version: fetched.meta.api_version,
-        description: fetched.meta.description,
-        status: StrategyLifecycle::Installed,
-        wasm_path: fetched.wasm_path,
-        file_size: fetched.entry.size,
-        wasm_url: fetched.entry.wasm_url,
+        api_version:     fetched.meta.api_version,
+        description:     fetched.meta.description,
+        status:          StrategyLifecycle::Installed,
+        wasm_path:       fetched.wasm_path,
+        file_size:       fetched.entry.size,
+        wasm_url:        fetched.entry.wasm_url,
     }
 }
 

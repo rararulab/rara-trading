@@ -4,25 +4,29 @@
 //! These tests exercise real implementations (sled stores, paper broker, guard
 //! pipeline) with temporary directories — no mocks.
 
+use rara_domain::{
+    event::{Event, EventType},
+    research::{
+        BacktestResult, Experiment, Hypothesis, HypothesisFeedback, ResearchStrategy,
+        ResearchStrategyStatus,
+    },
+    trading::{ActionType, OrderType, Side, StagedAction, TradingCommit},
+};
+use rara_event_bus::bus::EventBus;
+use rara_research::{
+    strategy_store::StrategyStore,
+    trace::{DagSelection, Trace},
+};
+use rara_trading_engine::{
+    broker::{Broker, OrderStatus},
+    brokers::paper::PaperBroker,
+    guard_pipeline::GuardPipeline,
+    guards::{GuardResult, symbol_whitelist::SymbolWhitelist},
+};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde_json::json;
 use uuid::Uuid;
-
-use rara_domain::event::{Event, EventType};
-use rara_domain::research::{
-    BacktestResult, Experiment, Hypothesis, HypothesisFeedback, ResearchStrategy,
-    ResearchStrategyStatus,
-};
-use rara_domain::trading::{ActionType, OrderType, Side, StagedAction, TradingCommit};
-use rara_event_bus::bus::EventBus;
-use rara_research::strategy_store::StrategyStore;
-use rara_research::trace::{DagSelection, Trace};
-use rara_trading_engine::broker::{Broker, OrderStatus};
-use rara_trading_engine::brokers::paper::PaperBroker;
-use rara_trading_engine::guard_pipeline::GuardPipeline;
-use rara_trading_engine::guards::symbol_whitelist::SymbolWhitelist;
-use rara_trading_engine::guards::GuardResult;
 
 // ---------------------------------------------------------------------------
 // Helpers — reusable experiment/hypothesis builders for the research DAG
@@ -124,11 +128,7 @@ fn seed_research_trace(
         .observations("Only 30 trades, likely curve-fitted")
         .build();
     trace
-        .record(
-            &exp_rejected,
-            &fb_rejected,
-            &DagSelection::Specific(idx0),
-        )
+        .record(&exp_rejected, &fb_rejected, &DagSelection::Specific(idx0))
         .unwrap();
 
     (
@@ -165,7 +165,8 @@ fn research_trace_dag_and_sota_selection() {
     assert_eq!(chain[0].id, refined_hyp.id);
     assert_eq!(chain[1].id, root_hyp.id);
 
-    // SOTA should pick exp_v2 (highest Sharpe among accepted, ignoring rejected 4.5)
+    // SOTA should pick exp_v2 (highest Sharpe among accepted, ignoring rejected
+    // 4.5)
     let sota = trace.get_sota().unwrap().expect("should have a SOTA");
     assert_eq!(
         sota.0.id, exp_v2.id,
@@ -206,7 +207,7 @@ fn research_trace_dag_and_sota_selection() {
 #[test]
 fn strategy_store_sota_promotion_lifecycle() {
     let dir = tempfile::tempdir().unwrap();
-    let (trace, _, refined_hyp, _, exp_v2, _, _, _) = seed_research_trace(dir.path());
+    let (trace, _, refined_hyp, _, exp_v2, ..) = seed_research_trace(dir.path());
 
     let db = sled::open(dir.path().join("strategy_db")).unwrap();
     let store = StrategyStore::open(&db, &dir.path().join("artifacts")).unwrap();
@@ -239,9 +240,7 @@ fn strategy_store_sota_promotion_lifecycle() {
         ResearchStrategyStatus::Promoted
     );
 
-    let promoted_list = store
-        .list(Some(ResearchStrategyStatus::Promoted))
-        .unwrap();
+    let promoted_list = store.list(Some(ResearchStrategyStatus::Promoted)).unwrap();
     assert_eq!(promoted_list.len(), 1);
     assert_eq!(promoted_list[0].id, promoted.id);
 }
@@ -485,13 +484,15 @@ async fn paper_broker_batch_and_guard_pipeline() {
         .message("Buy BTC per momentum signal")
         .strategy_id("strat-momentum")
         .strategy_version(1)
-        .actions(vec![StagedAction::builder()
-            .action_type(ActionType::PlaceOrder)
-            .contract_id("BTC-USD")
-            .side(Side::Buy)
-            .quantity(dec!(1.0))
-            .order_type(OrderType::Market)
-            .build()])
+        .actions(vec![
+            StagedAction::builder()
+                .action_type(ActionType::PlaceOrder)
+                .contract_id("BTC-USD")
+                .side(Side::Buy)
+                .quantity(dec!(1.0))
+                .order_type(OrderType::Market)
+                .build(),
+        ])
         .build();
 
     let allow_pipeline = GuardPipeline::new(vec![Box::new(SymbolWhitelist::new(vec![

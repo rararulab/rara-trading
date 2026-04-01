@@ -10,8 +10,7 @@ use snafu::ResultExt;
 use tracing::info;
 
 use super::{HistoryFetcher, HttpSnafu, ParseSnafu, Result, StoreSnafu};
-use crate::store::candle::CandleRow;
-use crate::store::MarketStore;
+use crate::store::{MarketStore, candle::CandleRow};
 
 /// Maximum candles per Binance klines request.
 const PAGE_LIMIT: u64 = 1000;
@@ -22,12 +21,12 @@ const BASE_URL: &str = "https://api.binance.com";
 /// Raw candle parsed from Binance JSON before DB insertion.
 struct RawKline {
     open_time_ms: i64,
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
-    volume: f64,
-    trade_count: u32,
+    open:         f64,
+    high:         f64,
+    low:          f64,
+    close:        f64,
+    volume:       f64,
+    trade_count:  u32,
 }
 
 /// Fetches historical 1m klines from Binance public API.
@@ -50,7 +49,8 @@ impl BinanceFetcher {
     /// Fetch one page of klines.
     async fn fetch_page(&self, start_ms: i64, end_ms: i64) -> Result<Vec<RawKline>> {
         let url = format!(
-            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime={start_ms}&endTime={end_ms}&limit={PAGE_LIMIT}",
+            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime={start_ms}&endTime={end_ms}&\
+             limit={PAGE_LIMIT}",
             self.symbol
         );
         let resp = self
@@ -79,10 +79,7 @@ impl HistoryFetcher for BinanceFetcher {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<usize> {
-        let range_start_ms = start
-            .and_time(NaiveTime::MIN)
-            .and_utc()
-            .timestamp_millis();
+        let range_start_ms = start.and_time(NaiveTime::MIN).and_utc().timestamp_millis();
         let range_end_ms = end
             .checked_add_days(Days::new(1))
             .expect("date overflow")
@@ -118,20 +115,23 @@ impl HistoryFetcher for BinanceFetcher {
             let candle_rows: Vec<CandleRow> = page
                 .iter()
                 .map(|k| CandleRow {
-                    ts: DateTime::from_timestamp_millis(k.open_time_ms)
+                    ts:            DateTime::from_timestamp_millis(k.open_time_ms)
                         .unwrap_or(DateTime::<Utc>::MIN_UTC),
                     instrument_id: instrument_id.to_string(),
-                    interval: "1m".to_string(),
-                    open: k.open,
-                    high: k.high,
-                    low: k.low,
-                    close: k.close,
-                    volume: k.volume,
-                    trade_count: k.trade_count.cast_signed(),
+                    interval:      "1m".to_string(),
+                    open:          k.open,
+                    high:          k.high,
+                    low:           k.low,
+                    close:         k.close,
+                    volume:        k.volume,
+                    trade_count:   k.trade_count.cast_signed(),
                 })
                 .collect();
 
-            let count = store.insert_candles(&candle_rows).await.context(StoreSnafu)?;
+            let count = store
+                .insert_candles(&candle_rows)
+                .await
+                .context(StoreSnafu)?;
             total += usize::try_from(count).expect("candle count fits in usize");
         }
 

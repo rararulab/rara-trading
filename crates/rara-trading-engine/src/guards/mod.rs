@@ -6,8 +6,8 @@ pub mod sentinel_gate;
 pub mod symbol_whitelist;
 
 use async_trait::async_trait;
-
 use rara_domain::trading::TradingCommit;
+
 use crate::broker::AccountInfo;
 
 /// Outcome of a guard check.

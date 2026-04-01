@@ -6,16 +6,17 @@
 
 use async_trait::async_trait;
 use bon::Builder;
+use rara_domain::research::{Hypothesis, ResearchStrategy, ResearchStrategyStatus};
 use uuid::Uuid;
 
-use rara_domain::research::{Hypothesis, ResearchStrategy, ResearchStrategyStatus};
-
-use crate::compiler::StrategyCompiler;
-use crate::strategy_coder::StrategyCoder;
-use crate::strategy_executor::{StrategyExecutor, StrategyHandle};
-use crate::strategy_manager::{Result, StrategyManager, StrategyManagerError};
-use crate::strategy_store::StrategyStore;
-use crate::wasm_executor::WasmExecutor;
+use crate::{
+    compiler::StrategyCompiler,
+    strategy_coder::StrategyCoder,
+    strategy_executor::{StrategyExecutor, StrategyHandle},
+    strategy_manager::{Result, StrategyManager, StrategyManagerError},
+    strategy_store::StrategyStore,
+    wasm_executor::WasmExecutor,
+};
 
 /// WASM-based strategy manager.
 ///
@@ -25,9 +26,9 @@ use crate::wasm_executor::WasmExecutor;
 #[derive(Builder)]
 pub struct WasmStrategyManager {
     /// Sled-backed strategy persistence.
-    store: StrategyStore,
+    store:    StrategyStore,
     /// LLM-backed code generator.
-    coder: StrategyCoder,
+    coder:    StrategyCoder,
     /// Rust → WASM compiler.
     compiler: StrategyCompiler,
     /// WASM runtime for loading artifacts.
@@ -46,13 +47,11 @@ impl StrategyManager for WasmStrategyManager {
     }
 
     async fn try_compile(&self, source_code: &str) -> Result<Vec<u8>> {
-        let result = self
-            .compiler
-            .compile(source_code)
-            .await
-            .map_err(|e| StrategyManagerError::Compile {
+        let result = self.compiler.compile(source_code).await.map_err(|e| {
+            StrategyManagerError::Compile {
                 message: e.to_string(),
-            })?;
+            }
+        })?;
 
         if !result.success {
             return Err(StrategyManagerError::CompileFailed {
@@ -104,12 +103,12 @@ impl StrategyManager for WasmStrategyManager {
     }
 
     fn load_handle(&self, strategy_id: Uuid) -> Result<Box<dyn StrategyHandle>> {
-        let artifact = self
-            .store
-            .load_artifact(strategy_id)
-            .map_err(|e| StrategyManagerError::Store {
-                message: e.to_string(),
-            })?;
+        let artifact =
+            self.store
+                .load_artifact(strategy_id)
+                .map_err(|e| StrategyManagerError::Store {
+                    message: e.to_string(),
+                })?;
 
         self.executor
             .load(&artifact)

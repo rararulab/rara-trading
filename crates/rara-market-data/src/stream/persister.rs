@@ -6,8 +6,7 @@
 use tokio::sync::broadcast;
 
 use super::aggregator::AggregatedCandle;
-use crate::store::candle::CandleRow;
-use crate::store::MarketStore;
+use crate::store::{MarketStore, candle::CandleRow};
 
 /// Run the candle persister loop, consuming candles and writing to the store.
 ///
@@ -25,15 +24,15 @@ pub async fn run_candle_persister(
             Ok(candle) => {
                 let instrument_id = format!("{}-{}", instrument_prefix, candle.symbol);
                 let row = CandleRow {
-                    ts: candle.ts,
+                    ts:            candle.ts,
                     instrument_id: instrument_id.clone(),
-                    interval: candle.interval.clone(),
-                    open: candle.open,
-                    high: candle.high,
-                    low: candle.low,
-                    close: candle.close,
-                    volume: candle.volume,
-                    trade_count: candle.trade_count,
+                    interval:      candle.interval.clone(),
+                    open:          candle.open,
+                    high:          candle.high,
+                    low:           candle.low,
+                    close:         candle.close,
+                    volume:        candle.volume,
+                    trade_count:   candle.trade_count,
                 };
 
                 match store.insert_candles(&[row]).await {

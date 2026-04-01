@@ -9,11 +9,11 @@ pub struct RawSignal {
     /// Name of the source that produced this signal.
     pub source_name: String,
     /// Raw textual content to be analyzed.
-    pub content: String,
+    pub content:     String,
     /// Arbitrary metadata from the source.
-    pub metadata: serde_json::Value,
+    pub metadata:    serde_json::Value,
     /// When the raw signal was captured.
-    pub timestamp: jiff::Timestamp,
+    pub timestamp:   jiff::Timestamp,
 }
 
 /// Errors that can occur when polling a data source.

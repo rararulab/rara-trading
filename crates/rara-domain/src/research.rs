@@ -13,28 +13,30 @@ use crate::timeframe::Timeframe;
 pub struct Hypothesis {
     /// Hypothesis identifier.
     #[builder(default = Uuid::new_v4())]
-    pub id: Uuid,
+    pub id:          Uuid,
     /// Hypothesis statement to validate.
     #[builder(into)]
-    pub text: String,
+    pub text:        String,
     /// Rationale for proposing the hypothesis.
     #[builder(into)]
-    pub reason: String,
+    pub reason:      String,
     /// What was observed in prior experiment results.
     #[builder(default, into)]
     pub observation: String,
     /// Domain knowledge applied when forming this hypothesis.
     #[builder(default, into)]
-    pub knowledge: String,
+    pub knowledge:   String,
     /// Optional parent hypothesis for lineage tracking.
-    pub parent: Option<Uuid>,
+    pub parent:      Option<Uuid>,
     /// Creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at: jiff::Timestamp,
+    pub created_at:  jiff::Timestamp,
 }
 
 /// Lifecycle status of an experiment.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString,
+)]
 pub enum ExperimentStatus {
     /// Awaiting execution.
     #[default]
@@ -56,63 +58,63 @@ pub enum ExperimentStatus {
 pub struct Experiment {
     /// Experiment identifier.
     #[builder(default = Uuid::new_v4())]
-    pub id: Uuid,
+    pub id:              Uuid,
     /// Referenced hypothesis under test.
-    pub hypothesis_id: Uuid,
+    pub hypothesis_id:   Uuid,
     /// Generated strategy source code for this run.
     #[builder(into)]
-    pub strategy_code: String,
+    pub strategy_code:   String,
     /// Current experiment lifecycle state.
     #[builder(default)]
-    pub status: ExperimentStatus,
+    pub status:          ExperimentStatus,
     /// Backtest output, populated when execution completes.
     pub backtest_result: Option<BacktestResult>,
     /// Creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at: jiff::Timestamp,
+    pub created_at:      jiff::Timestamp,
 }
 
 /// Results from a backtest run.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct BacktestResult {
     /// Profit and loss.
-    pub pnl: Decimal,
+    pub pnl:          Decimal,
     /// Sharpe ratio.
     pub sharpe_ratio: f64,
     /// Maximum drawdown.
     pub max_drawdown: Decimal,
     /// Win rate as a fraction.
-    pub win_rate: f64,
+    pub win_rate:     f64,
     /// Total number of trades.
-    pub trade_count: u32,
+    pub trade_count:  u32,
     /// Timeframe this result was evaluated on, if applicable.
-    pub timeframe: Option<Timeframe>,
+    pub timeframe:    Option<Timeframe>,
 }
 
 /// Feedback on an experiment guiding the next research iteration.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct HypothesisFeedback {
     /// Experiment this feedback belongs to.
-    pub experiment_id: Uuid,
+    pub experiment_id:         Uuid,
     /// Whether the experiment outcome supports continuation.
-    pub decision: bool,
+    pub decision:              bool,
     /// Decision rationale.
     #[builder(into)]
-    pub reason: String,
+    pub reason:                String,
     /// Key observations from the run.
     #[builder(into)]
-    pub observations: String,
+    pub observations:          String,
     /// Whether the hypothesis was validated, refuted, or inconclusive.
     #[builder(default, into)]
     pub hypothesis_evaluation: String,
     /// LLM suggestion for the next research round.
-    pub new_hypothesis: Option<String>,
+    pub new_hypothesis:        Option<String>,
     /// Summary of code changes from the previous experiment.
     #[builder(default, into)]
-    pub code_change_summary: String,
+    pub code_change_summary:   String,
     /// Feedback creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at: jiff::Timestamp,
+    pub created_at:            jiff::Timestamp,
 }
 
 /// Lifecycle status of a research-generated strategy.
@@ -136,16 +138,16 @@ pub enum ResearchStrategyStatus {
 pub struct ResearchStrategy {
     /// Strategy identifier.
     #[builder(default = Uuid::new_v4())]
-    pub id: Uuid,
+    pub id:            Uuid,
     /// Hypothesis that generated this strategy.
     pub hypothesis_id: Uuid,
     /// Generated source code.
     #[builder(into)]
-    pub source_code: String,
+    pub source_code:   String,
     /// Current lifecycle status.
     #[builder(default)]
-    pub status: ResearchStrategyStatus,
+    pub status:        ResearchStrategyStatus,
     /// Creation timestamp.
     #[builder(default = jiff::Timestamp::now())]
-    pub created_at: jiff::Timestamp,
+    pub created_at:    jiff::Timestamp,
 }

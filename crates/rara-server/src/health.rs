@@ -1,7 +1,9 @@
 //! Lightweight health probes for external service dependencies.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use tokio::net::TcpStream;
 use tracing::debug;
@@ -9,11 +11,11 @@ use tracing::debug;
 /// Configuration for health probes.
 pub struct HealthConfig {
     /// `PostgreSQL` connection URL (parsed for host:port TCP probe).
-    pub database_url: String,
+    pub database_url:   String,
     /// Agent backend command name to look up in PATH.
-    pub llm_backend: String,
+    pub llm_backend:    String,
     /// Shared flag set by the WebSocket layer when a connection is active.
-    pub ws_connected: Arc<AtomicBool>,
+    pub ws_connected:   Arc<AtomicBool>,
     /// Number of configured trading contracts.
     pub contract_count: u32,
 }
@@ -21,11 +23,11 @@ pub struct HealthConfig {
 /// Probe results for a single status poll.
 pub struct HealthStatus {
     /// Whether the database TCP port is reachable.
-    pub database_connected: bool,
+    pub database_connected:  bool,
     /// Whether the WebSocket market-data feed is active.
     pub websocket_connected: bool,
     /// Whether the configured LLM backend CLI is found in PATH.
-    pub llm_available: bool,
+    pub llm_available:       bool,
 }
 
 /// Run all health probes and return aggregated status.
@@ -57,9 +59,7 @@ async fn probe_database(url: &str) -> bool {
 }
 
 /// Check if the LLM backend command exists in PATH.
-fn probe_llm(backend: &str) -> bool {
-    which::which(backend).is_ok()
-}
+fn probe_llm(backend: &str) -> bool { which::which(backend).is_ok() }
 
 /// Extract `host:port` from a `PostgreSQL` URL.
 ///

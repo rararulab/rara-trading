@@ -19,48 +19,36 @@ pub enum TradingMode {
 pub struct StrategyBinding {
     /// Strategy identifier.
     #[builder(into)]
-    strategy_id: String,
+    strategy_id:       String,
     /// Strategy version number.
-    strategy_version: u32,
+    strategy_version:  u32,
     /// Target contract identifier.
     #[builder(into)]
-    contract_id: String,
+    contract_id:       String,
     /// Paper or live trading mode.
-    mode: TradingMode,
+    mode:              TradingMode,
     /// Capital allocated to this binding.
     allocated_capital: Decimal,
     /// When this binding was activated.
-    activated_at: jiff::Timestamp,
+    activated_at:      jiff::Timestamp,
 }
 
 impl StrategyBinding {
     /// Returns the strategy identifier.
-    pub fn strategy_id(&self) -> &str {
-        &self.strategy_id
-    }
+    pub fn strategy_id(&self) -> &str { &self.strategy_id }
 
     /// Returns the strategy version.
-    pub const fn strategy_version(&self) -> u32 {
-        self.strategy_version
-    }
+    pub const fn strategy_version(&self) -> u32 { self.strategy_version }
 
     /// Returns the target contract identifier.
-    pub fn contract_id(&self) -> &str {
-        &self.contract_id
-    }
+    pub fn contract_id(&self) -> &str { &self.contract_id }
 
     /// Returns the trading mode.
-    pub const fn mode(&self) -> &TradingMode {
-        &self.mode
-    }
+    pub const fn mode(&self) -> &TradingMode { &self.mode }
 
     /// Returns the allocated capital.
-    pub const fn allocated_capital(&self) -> Decimal {
-        self.allocated_capital
-    }
+    pub const fn allocated_capital(&self) -> Decimal { self.allocated_capital }
 
     /// Returns the activation timestamp.
-    pub const fn activated_at(&self) -> jiff::Timestamp {
-        self.activated_at
-    }
+    pub const fn activated_at(&self) -> jiff::Timestamp { self.activated_at }
 }

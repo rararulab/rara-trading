@@ -4,8 +4,7 @@ pub mod candle;
 pub mod tick;
 
 use snafu::{ResultExt, Snafu};
-use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 
 /// Errors from market data store operations.
 #[derive(Debug, Snafu)]

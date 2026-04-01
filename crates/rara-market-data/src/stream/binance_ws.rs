@@ -37,27 +37,27 @@ pub type Result<T> = std::result::Result<T, WsError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawKline {
     /// Symbol (e.g., "BTCUSDT").
-    pub symbol: String,
+    pub symbol:      String,
     /// Kline open time in milliseconds since epoch.
-    pub open_time: i64,
+    pub open_time:   i64,
     /// Kline close time in milliseconds since epoch.
-    pub close_time: i64,
+    pub close_time:  i64,
     /// Interval string (e.g., "1m", "1h").
-    pub interval: String,
+    pub interval:    String,
     /// Open price.
-    pub open: f64,
+    pub open:        f64,
     /// High price.
-    pub high: f64,
+    pub high:        f64,
     /// Low price.
-    pub low: f64,
+    pub low:         f64,
     /// Close price.
-    pub close: f64,
+    pub close:       f64,
     /// Base asset volume.
-    pub volume: f64,
+    pub volume:      f64,
     /// Number of trades in this kline.
     pub trade_count: i32,
     /// Whether this kline is closed (final).
-    pub is_closed: bool,
+    pub is_closed:   bool,
 }
 
 /// Binance kline event wrapper matching the raw JSON structure.
@@ -66,32 +66,32 @@ struct BinanceKlineEvent {
     #[serde(rename = "s")]
     symbol: String,
     #[serde(rename = "k")]
-    kline: BinanceKlineData,
+    kline:  BinanceKlineData,
 }
 
 /// Inner kline data fields from the Binance stream.
 #[derive(Debug, Deserialize)]
 struct BinanceKlineData {
     #[serde(rename = "t")]
-    open_time: i64,
+    open_time:   i64,
     #[serde(rename = "T")]
-    close_time: i64,
+    close_time:  i64,
     #[serde(rename = "i")]
-    interval: String,
+    interval:    String,
     #[serde(rename = "o")]
-    open: String,
+    open:        String,
     #[serde(rename = "h")]
-    high: String,
+    high:        String,
     #[serde(rename = "l")]
-    low: String,
+    low:         String,
     #[serde(rename = "c")]
-    close: String,
+    close:       String,
     #[serde(rename = "v")]
-    volume: String,
+    volume:      String,
     #[serde(rename = "n")]
     trade_count: i32,
     #[serde(rename = "x")]
-    is_closed: bool,
+    is_closed:   bool,
 }
 
 /// Combined stream wrapper used by Binance multi-symbol endpoints.
@@ -116,11 +116,10 @@ impl Default for BinanceWsClient {
 
 impl BinanceWsClient {
     /// Create a new client with the default Binance WebSocket URL.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
-    /// Create a client with a custom WebSocket URL (useful for testing or proxies).
+    /// Create a client with a custom WebSocket URL (useful for testing or
+    /// proxies).
     pub fn with_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
@@ -140,9 +139,12 @@ impl BinanceWsClient {
 
         tracing::info!(%symbol, %interval, %url, "connecting to Binance kline stream");
 
-        let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| WsError::Connection { source: Box::new(e) })?;
+        let (ws_stream, _) =
+            tokio_tungstenite::connect_async(&url)
+                .await
+                .map_err(|e| WsError::Connection {
+                    source: Box::new(e),
+                })?;
 
         tracing::info!(%symbol, %interval, "WebSocket connected");
 
@@ -159,7 +161,9 @@ impl BinanceWsClient {
                     tracing::warn!("WebSocket closed by server");
                     Some(Err(WsError::StreamEnded))
                 }
-                Err(e) => Some(Err(WsError::Connection { source: Box::new(e) })),
+                Err(e) => Some(Err(WsError::Connection {
+                    source: Box::new(e),
+                })),
                 _ => None,
             };
             std::future::ready(result)
@@ -186,9 +190,12 @@ impl BinanceWsClient {
 
         tracing::info!(?subscriptions, %url, "connecting to combined kline stream");
 
-        let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| WsError::Connection { source: Box::new(e) })?;
+        let (ws_stream, _) =
+            tokio_tungstenite::connect_async(&url)
+                .await
+                .map_err(|e| WsError::Connection {
+                    source: Box::new(e),
+                })?;
 
         tracing::info!("combined WebSocket connected");
 
@@ -202,7 +209,9 @@ impl BinanceWsClient {
                     tracing::warn!("WebSocket closed by server");
                     Some(Err(WsError::StreamEnded))
                 }
-                Err(e) => Some(Err(WsError::Connection { source: Box::new(e) })),
+                Err(e) => Some(Err(WsError::Connection {
+                    source: Box::new(e),
+                })),
                 _ => None,
             };
             std::future::ready(result)
@@ -231,17 +240,17 @@ fn parse_combined_message(text: &str) -> Result<RawKline> {
 fn kline_event_to_raw(event: BinanceKlineEvent) -> RawKline {
     let k = event.kline;
     RawKline {
-        symbol: event.symbol,
-        open_time: k.open_time,
-        close_time: k.close_time,
-        interval: k.interval,
-        open: k.open.parse().unwrap_or(0.0),
-        high: k.high.parse().unwrap_or(0.0),
-        low: k.low.parse().unwrap_or(0.0),
-        close: k.close.parse().unwrap_or(0.0),
-        volume: k.volume.parse().unwrap_or(0.0),
+        symbol:      event.symbol,
+        open_time:   k.open_time,
+        close_time:  k.close_time,
+        interval:    k.interval,
+        open:        k.open.parse().unwrap_or(0.0),
+        high:        k.high.parse().unwrap_or(0.0),
+        low:         k.low.parse().unwrap_or(0.0),
+        close:       k.close.parse().unwrap_or(0.0),
+        volume:      k.volume.parse().unwrap_or(0.0),
         trade_count: k.trade_count,
-        is_closed: k.is_closed,
+        is_closed:   k.is_closed,
     }
 }
 

@@ -1,20 +1,20 @@
 //! Feedback loop — periodic evaluation of strategies via the consumer,
 //! with lifecycle event publishing on promote/demote/retire decisions.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bon::Builder;
+use rara_domain::{
+    event::{Event, EventType},
+    feedback::FeedbackDecision,
+};
+use rara_event_bus::{bus::EventBus, store::StoreError};
 use snafu::{ResultExt, Snafu};
 
-use rara_domain::event::{Event, EventType};
-use rara_domain::feedback::FeedbackDecision;
-use rara_event_bus::bus::EventBus;
-use rara_event_bus::store::StoreError;
-
-use crate::consumer::{ConsumerError, FeedbackConsumer};
-use crate::evaluator::StrategyEvaluator;
+use crate::{
+    consumer::{ConsumerError, FeedbackConsumer},
+    evaluator::StrategyEvaluator,
+};
 
 /// Errors from the feedback loop.
 #[derive(Debug, Snafu)]
@@ -42,8 +42,9 @@ pub type Result<T> = std::result::Result<T, FeedbackLoopError>;
 pub struct FeedbackLoopConfig {
     /// Interval between evaluation ticks.
     #[builder(default = Duration::from_secs(3600))]
-    pub eval_interval: Duration,
-    /// Minimum new trades since last evaluation before re-evaluating a strategy.
+    pub eval_interval:            Duration,
+    /// Minimum new trades since last evaluation before re-evaluating a
+    /// strategy.
     #[builder(default = 100)]
     pub min_trades_between_evals: u32,
 }
@@ -51,7 +52,7 @@ pub struct FeedbackLoopConfig {
 impl Default for FeedbackLoopConfig {
     fn default() -> Self {
         Self {
-            eval_interval: Duration::from_secs(3600),
+            eval_interval:            Duration::from_secs(3600),
             min_trades_between_evals: 100,
         }
     }
@@ -174,19 +175,18 @@ pub async fn run_feedback_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
+    use rara_domain::{
+        event::{Event, EventType},
+        feedback::FeedbackDecision,
+    };
+    use rara_event_bus::bus::EventBus;
     use rust_decimal_macros::dec;
     use serde_json::json;
 
-    use rara_domain::event::{Event, EventType};
-    use rara_domain::feedback::FeedbackDecision;
-    use rara_event_bus::bus::EventBus;
-
-    use crate::evaluator::StrategyEvaluator;
-
     use super::*;
+    use crate::evaluator::StrategyEvaluator;
 
     fn setup() -> (Arc<EventBus>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -205,16 +205,16 @@ mod tests {
         bus.publish(&event).unwrap();
     }
 
-    fn default_evaluator() -> StrategyEvaluator {
-        StrategyEvaluator::new(1.5, dec!(0.20), 5)
-    }
+    fn default_evaluator() -> StrategyEvaluator { StrategyEvaluator::new(1.5, dec!(0.20), 5) }
 
     #[test]
     fn evaluate_tick_publishes_promote_on_strong_performance() {
         let (bus, _dir) = setup();
 
         // Publish enough winning trades to exceed min_trades and get promotion
-        let pnls = ["120", "80", "110", "90", "130", "95", "105", "115", "100", "85"];
+        let pnls = [
+            "120", "80", "110", "90", "130", "95", "105", "115", "100", "85",
+        ];
         for pnl in &pnls {
             publish_fill(&bus, "strat-1", pnl);
         }
@@ -233,10 +233,7 @@ mod tests {
             feedback_events[0].event_type,
             EventType::FeedbackStrategyPromote
         );
-        assert_eq!(
-            feedback_events[0].strategy_id.as_deref(),
-            Some("strat-1")
-        );
+        assert_eq!(feedback_events[0].strategy_id.as_deref(), Some("strat-1"));
     }
 
     #[test]
@@ -295,8 +292,7 @@ mod tests {
         let mut last_eval = HashMap::new();
 
         // First tick evaluates (10 new trades >= min 5)
-        let evaluated =
-            evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
+        let evaluated = evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
         assert_eq!(evaluated, 1);
 
         // Add 3 more trades (below min_trades_between_evals of 5)
@@ -305,8 +301,7 @@ mod tests {
         }
 
         // Second tick should skip (only 3 new trades < min 5)
-        let evaluated =
-            evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
+        let evaluated = evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
         assert_eq!(evaluated, 0);
 
         // Only 1 feedback event from the first evaluation
@@ -356,8 +351,7 @@ mod tests {
         }
 
         // Second evaluation should trigger
-        let evaluated =
-            evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
+        let evaluated = evaluate_tick(&mut consumer, &evaluator, &bus, &mut last_eval, 5).unwrap();
         assert_eq!(evaluated, 1);
 
         let feedback_events = bus.store().read_topic("feedback", 0, 10).unwrap();
@@ -400,8 +394,14 @@ mod tests {
             .trade_count(30)
             .build();
 
-        publish_decision_event(&bus, "strat-1", FeedbackDecision::Demote, "bad sharpe", &metrics)
-            .unwrap();
+        publish_decision_event(
+            &bus,
+            "strat-1",
+            FeedbackDecision::Demote,
+            "bad sharpe",
+            &metrics,
+        )
+        .unwrap();
 
         let events = bus.store().read_topic("feedback", 0, 10).unwrap();
         assert_eq!(events[0].event_type, EventType::FeedbackStrategyDemote);

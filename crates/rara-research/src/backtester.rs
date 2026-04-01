@@ -1,10 +1,8 @@
 //! Backtester trait for strategy evaluation.
 
 use async_trait::async_trait;
+use rara_domain::{research::BacktestResult, timeframe::Timeframe};
 use snafu::Snafu;
-
-use rara_domain::research::BacktestResult;
-use rara_domain::timeframe::Timeframe;
 
 use crate::strategy_executor::StrategyHandle;
 

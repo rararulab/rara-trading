@@ -4,25 +4,25 @@
 use std::collections::HashMap;
 
 use dialoguer::{Confirm, Input, Password, Select};
+use rara_trading_engine::{
+    account_config::AccountConfig,
+    broker_registry::{BROKER_REGISTRY, BrokerRegistryEntry, ConfigField, ConfigFieldType},
+};
 use snafu::ResultExt;
 
-use crate::accounts_config;
-use crate::app_config::{self, AppConfig};
-use crate::error::{self, IoSnafu};
-use crate::paths;
-use crate::validation;
-
-use rara_trading_engine::account_config::AccountConfig;
-use rara_trading_engine::broker_registry::{
-    BrokerRegistryEntry, ConfigField, ConfigFieldType, BROKER_REGISTRY,
+use crate::{
+    accounts_config,
+    app_config::{self, AppConfig},
+    error::{self, IoSnafu},
+    paths, validation,
 };
 
 // ---------------------------------------------------------------------------
 // Dialoguer helpers
 // ---------------------------------------------------------------------------
 
-/// Convert `dialoguer::Error` (which wraps `std::io::Error`) into `std::io::Error`
-/// so it can be used with `IoSnafu`.
+/// Convert `dialoguer::Error` (which wraps `std::io::Error`) into
+/// `std::io::Error` so it can be used with `IoSnafu`.
 fn dialog_io(e: dialoguer::Error) -> std::io::Error {
     match e {
         dialoguer::Error::IO(io) => io,
@@ -39,17 +39,15 @@ fn confirm(prompt: &str, default: bool) -> error::Result<bool> {
         .context(IoSnafu)
 }
 
-/// Helper to run a dialoguer `Input<String>` prompt with consistent error handling.
+/// Helper to run a dialoguer `Input<String>` prompt with consistent error
+/// handling.
 fn input(prompt: &str, default: Option<&str>) -> error::Result<String> {
     let builder = Input::new().with_prompt(prompt);
     let builder = match default {
         Some(d) => builder.default(d.to_string()),
         None => builder,
     };
-    builder
-        .interact_text()
-        .map_err(dialog_io)
-        .context(IoSnafu)
+    builder.interact_text().map_err(dialog_io).context(IoSnafu)
 }
 
 /// Helper to run a dialoguer `Password` prompt with consistent error handling.
@@ -246,7 +244,11 @@ async fn step_accounts() -> error::Result<Vec<String>> {
         eprintln!("  You have {existing_count} account(s) configured:");
         for acc in &existing.accounts {
             let status = if acc.enabled { "enabled" } else { "disabled" };
-            eprintln!("    - {} ({}, {status})", acc.id, acc.broker_config.type_key());
+            eprintln!(
+                "    - {} ({}, {status})",
+                acc.id,
+                acc.broker_config.type_key()
+            );
         }
     } else {
         eprintln!("  No accounts configured yet.");
@@ -278,7 +280,8 @@ async fn step_accounts() -> error::Result<Vec<String>> {
     Ok(added)
 }
 
-/// Test broker connectivity by creating a broker instance and calling `account_info`.
+/// Test broker connectivity by creating a broker instance and calling
+/// `account_info`.
 async fn test_broker_connection(
     entry: &BrokerRegistryEntry,
     fields: &HashMap<String, String>,
@@ -289,9 +292,10 @@ async fn test_broker_connection(
 
 /// Prompt the user interactively for account details and save to accounts.toml.
 ///
-/// Uses a broker-first flow: select broker type, collect broker-specific config,
-/// then suggest a short account ID derived from broker context (e.g. `bybit`
-/// for CCXT/Bybit, `paper` for Paper). Tests the connection before saving.
+/// Uses a broker-first flow: select broker type, collect broker-specific
+/// config, then suggest a short account ID derived from broker context (e.g.
+/// `bybit` for CCXT/Bybit, `paper` for Paper). Tests the connection before
+/// saving.
 async fn add_account_interactive() -> error::Result<Option<String>> {
     // 1. Broker type selection
     let registry = &*BROKER_REGISTRY;
@@ -317,8 +321,8 @@ async fn add_account_interactive() -> error::Result<Option<String>> {
             break candidate;
         }
         eprintln!(
-            "  \"{candidate}\" already exists — try a different name \
-             (e.g. {suggested_id}-demo, {suggested_id}-test)."
+            "  \"{candidate}\" already exists — try a different name (e.g. {suggested_id}-demo, \
+             {suggested_id}-test)."
         );
     };
 
@@ -467,7 +471,11 @@ fn print_summary(cfg: &AppConfig, added_accounts: &[String]) {
     eprintln!("  Accounts:    {total} configured");
 
     if !added_accounts.is_empty() {
-        eprintln!("               ({} new: {})", added_accounts.len(), added_accounts.join(", "));
+        eprintln!(
+            "               ({} new: {})",
+            added_accounts.len(),
+            added_accounts.join(", ")
+        );
     }
 
     eprintln!();

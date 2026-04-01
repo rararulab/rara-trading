@@ -14,14 +14,18 @@
 //! └───────────────────────────────────────────────────────────────┘
 //! ```
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
-use ratatui::Frame;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+};
 
-use crate::app::{StrategiesState, StrategyLifecycle};
-use crate::theme;
+use crate::{
+    app::{StrategiesState, StrategyLifecycle},
+    theme,
+};
 
 /// Render the full strategies tab into the given area.
 pub fn render(frame: &mut Frame, state: &StrategiesState, area: Rect) {

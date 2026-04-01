@@ -1,4 +1,5 @@
-//! Abstract strategy execution interface, decoupled from any specific runtime (WASM, Python, etc.).
+//! Abstract strategy execution interface, decoupled from any specific runtime
+//! (WASM, Python, etc.).
 
 use rara_strategy_api::{Candle, RiskLevels, Side, Signal, StrategyMeta};
 use snafu::Snafu;
@@ -33,7 +34,8 @@ pub trait StrategyExecutor: Send + Sync {
     fn load(&self, artifact: &[u8]) -> Result<Box<dyn StrategyHandle>>;
 }
 
-/// Executable strategy handle — runtime-agnostic interface for calling strategy functions.
+/// Executable strategy handle — runtime-agnostic interface for calling strategy
+/// functions.
 pub trait StrategyHandle: Send {
     /// Return strategy metadata.
     fn meta(&mut self) -> Result<StrategyMeta>;

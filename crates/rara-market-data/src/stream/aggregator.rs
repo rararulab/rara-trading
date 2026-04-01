@@ -15,21 +15,21 @@ use super::binance_ws::RawKline;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregatedCandle {
     /// Symbol (e.g., "BTCUSDT").
-    pub symbol: String,
+    pub symbol:      String,
     /// Candle open timestamp (aligned to interval boundary).
-    pub ts: DateTime<Utc>,
+    pub ts:          DateTime<Utc>,
     /// Timeframe interval string (e.g., "5m", "1h").
-    pub interval: String,
+    pub interval:    String,
     /// Open price (first candle's open).
-    pub open: f64,
+    pub open:        f64,
     /// Highest price across all constituent candles.
-    pub high: f64,
+    pub high:        f64,
     /// Lowest price across all constituent candles.
-    pub low: f64,
+    pub low:         f64,
     /// Close price (last candle's close).
-    pub close: f64,
+    pub close:       f64,
     /// Total volume summed across all constituent candles.
-    pub volume: f64,
+    pub volume:      f64,
     /// Total trade count summed across all constituent candles.
     pub trade_count: i32,
 }
@@ -37,15 +37,15 @@ pub struct AggregatedCandle {
 /// Tracks partial candle state during aggregation.
 struct PartialCandle {
     /// Aligned open timestamp for this bucket.
-    open_ts: DateTime<Utc>,
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
-    volume: f64,
+    open_ts:     DateTime<Utc>,
+    open:        f64,
+    high:        f64,
+    low:         f64,
+    close:       f64,
+    volume:      f64,
     trade_count: i32,
     /// Number of 1m candles absorbed so far.
-    count: u32,
+    count:       u32,
 }
 
 impl PartialCandle {
@@ -73,14 +73,14 @@ impl PartialCandle {
 
     fn into_candle(self, symbol: &str, interval: &str) -> AggregatedCandle {
         AggregatedCandle {
-            symbol: symbol.to_string(),
-            ts: self.open_ts,
-            interval: interval.to_string(),
-            open: self.open,
-            high: self.high,
-            low: self.low,
-            close: self.close,
-            volume: self.volume,
+            symbol:      symbol.to_string(),
+            ts:          self.open_ts,
+            interval:    interval.to_string(),
+            open:        self.open,
+            high:        self.high,
+            low:         self.low,
+            close:       self.close,
+            volume:      self.volume,
             trade_count: self.trade_count,
         }
     }
@@ -99,9 +99,9 @@ pub struct CandleAggregator {
     /// Target intervals to aggregate into: (`interval_name`, minutes).
     intervals: Vec<(String, u32)>,
     /// Partial candle buffers keyed by (symbol, interval).
-    buffers: HashMap<AggKey, PartialCandle>,
+    buffers:   HashMap<AggKey, PartialCandle>,
     /// Broadcast sender for completed candles.
-    sender: broadcast::Sender<AggregatedCandle>,
+    sender:    broadcast::Sender<AggregatedCandle>,
 }
 
 impl CandleAggregator {
@@ -129,9 +129,7 @@ impl CandleAggregator {
     }
 
     /// Subscribe to receive completed candles.
-    pub fn subscribe(&self) -> broadcast::Receiver<AggregatedCandle> {
-        self.sender.subscribe()
-    }
+    pub fn subscribe(&self) -> broadcast::Receiver<AggregatedCandle> { self.sender.subscribe() }
 
     /// Process a closed 1m kline, potentially emitting aggregated candles.
     ///
@@ -214,20 +212,25 @@ mod tests {
     use super::*;
 
     /// Helper to create a closed 1m `RawKline` at a given minute offset.
-    fn make_kline(symbol: &str, hour: u32, minute: u32, ohlcv: (f64, f64, f64, f64, f64, i32)) -> RawKline {
+    fn make_kline(
+        symbol: &str,
+        hour: u32,
+        minute: u32,
+        ohlcv: (f64, f64, f64, f64, f64, i32),
+    ) -> RawKline {
         let ts = Utc.with_ymd_and_hms(2025, 1, 15, hour, minute, 0).unwrap();
         RawKline {
-            symbol: symbol.to_string(),
-            open_time: ts.timestamp_millis(),
-            close_time: ts.timestamp_millis() + 59_999,
-            interval: "1m".to_string(),
-            open: ohlcv.0,
-            high: ohlcv.1,
-            low: ohlcv.2,
-            close: ohlcv.3,
-            volume: ohlcv.4,
+            symbol:      symbol.to_string(),
+            open_time:   ts.timestamp_millis(),
+            close_time:  ts.timestamp_millis() + 59_999,
+            interval:    "1m".to_string(),
+            open:        ohlcv.0,
+            high:        ohlcv.1,
+            low:         ohlcv.2,
+            close:       ohlcv.3,
+            volume:      ohlcv.4,
             trade_count: ohlcv.5,
-            is_closed: true,
+            is_closed:   true,
         }
     }
 
@@ -260,19 +263,44 @@ mod tests {
         let (mut agg, mut rx) = CandleAggregator::new(&intervals);
 
         // Minute 0: open=100, high=105, low=99, close=102, vol=10, trades=5
-        agg.process_kline(&make_kline("BTCUSDT", 10, 0, (100.0, 105.0, 99.0, 102.0, 10.0, 5)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            0,
+            (100.0, 105.0, 99.0, 102.0, 10.0, 5),
+        ));
         // Minute 1: high spike
-        agg.process_kline(&make_kline("BTCUSDT", 10, 1, (102.0, 110.0, 101.0, 108.0, 20.0, 8)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            1,
+            (102.0, 110.0, 101.0, 108.0, 20.0, 8),
+        ));
         // Minute 2: low dip
-        agg.process_kline(&make_kline("BTCUSDT", 10, 2, (108.0, 109.0, 95.0, 97.0, 15.0, 3)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            2,
+            (108.0, 109.0, 95.0, 97.0, 15.0, 3),
+        ));
         // Minute 3
-        agg.process_kline(&make_kline("BTCUSDT", 10, 3, (97.0, 100.0, 96.0, 99.0, 12.0, 6)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            3,
+            (97.0, 100.0, 96.0, 99.0, 12.0, 6),
+        ));
 
         // After 4 candles, nothing should be emitted yet
         assert!(rx.try_recv().is_err());
 
         // Minute 4: completes the 5m bucket
-        agg.process_kline(&make_kline("BTCUSDT", 10, 4, (99.0, 103.0, 98.0, 101.0, 18.0, 7)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            4,
+            (99.0, 103.0, 98.0, 101.0, 18.0, 7),
+        ));
 
         let candle = rx.try_recv().expect("should emit 5m candle");
         assert_eq!(candle.symbol, "BTCUSDT");
@@ -297,17 +325,39 @@ mod tests {
         let (mut agg, mut rx) = CandleAggregator::new(&intervals);
 
         // Feed 3 of 5 candles in the 10:00-10:04 bucket
-        agg.process_kline(&make_kline("BTCUSDT", 10, 0, (100.0, 105.0, 99.0, 102.0, 10.0, 5)));
-        agg.process_kline(&make_kline("BTCUSDT", 10, 1, (102.0, 106.0, 101.0, 104.0, 8.0, 3)));
-        agg.process_kline(&make_kline("BTCUSDT", 10, 2, (104.0, 107.0, 103.0, 105.0, 12.0, 4)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            0,
+            (100.0, 105.0, 99.0, 102.0, 10.0, 5),
+        ));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            1,
+            (102.0, 106.0, 101.0, 104.0, 8.0, 3),
+        ));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            2,
+            (104.0, 107.0, 103.0, 105.0, 12.0, 4),
+        ));
 
         // No emission yet
         assert!(rx.try_recv().is_err());
 
         // Jump to next bucket (10:05) -- should flush the partial
-        agg.process_kline(&make_kline("BTCUSDT", 10, 5, (105.0, 108.0, 104.0, 107.0, 15.0, 6)));
+        agg.process_kline(&make_kline(
+            "BTCUSDT",
+            10,
+            5,
+            (105.0, 108.0, 104.0, 107.0, 15.0, 6),
+        ));
 
-        let candle = rx.try_recv().expect("partial bucket should be emitted on new bucket");
+        let candle = rx
+            .try_recv()
+            .expect("partial bucket should be emitted on new bucket");
         assert_eq!(candle.interval, "5m");
         // Partial had 3 candles: open from first, close from third
         assert!((candle.open - 100.0).abs() < f64::EPSILON);
@@ -323,10 +373,20 @@ mod tests {
 
         // Feed 5 candles for BTC and only 3 for ETH
         for m in 0..5 {
-            agg.process_kline(&make_kline("BTCUSDT", 10, m, (100.0, 105.0, 99.0, 102.0, 10.0, 1)));
+            agg.process_kline(&make_kline(
+                "BTCUSDT",
+                10,
+                m,
+                (100.0, 105.0, 99.0, 102.0, 10.0, 1),
+            ));
         }
         for m in 0..3 {
-            agg.process_kline(&make_kline("ETHUSDT", 10, m, (3000.0, 3100.0, 2900.0, 3050.0, 5.0, 2)));
+            agg.process_kline(&make_kline(
+                "ETHUSDT",
+                10,
+                m,
+                (3000.0, 3100.0, 2900.0, 3050.0, 5.0, 2),
+            ));
         }
 
         // BTC should have emitted, ETH should not
@@ -371,7 +431,12 @@ mod tests {
 
         // Feed 5 candles (minute 0-4) -- should complete 5m but not 15m
         for m in 0..5 {
-            agg.process_kline(&make_kline("BTCUSDT", 10, m, (100.0, 105.0, 99.0, 102.0, 10.0, 1)));
+            agg.process_kline(&make_kline(
+                "BTCUSDT",
+                10,
+                m,
+                (100.0, 105.0, 99.0, 102.0, 10.0, 1),
+            ));
         }
 
         let candle = rx.try_recv().expect("5m candle should emit");
@@ -382,10 +447,16 @@ mod tests {
 
         // Feed remaining 10 candles to complete the 15m bucket
         for m in 5..15 {
-            agg.process_kline(&make_kline("BTCUSDT", 10, m, (102.0, 106.0, 98.0, 103.0, 8.0, 2)));
+            agg.process_kline(&make_kline(
+                "BTCUSDT",
+                10,
+                m,
+                (102.0, 106.0, 98.0, 103.0, 8.0, 2),
+            ));
         }
 
-        // Should have emitted two more 5m candles (10:05-10:09, 10:10-10:14) and one 15m
+        // Should have emitted two more 5m candles (10:05-10:09, 10:10-10:14) and one
+        // 15m
         let mut intervals_seen = Vec::new();
         while let Ok(c) = rx.try_recv() {
             intervals_seen.push(c.interval.clone());
@@ -401,7 +472,12 @@ mod tests {
         let mut rx2 = agg.subscribe();
 
         for m in 0..5 {
-            agg.process_kline(&make_kline("BTCUSDT", 10, m, (100.0, 105.0, 99.0, 102.0, 10.0, 1)));
+            agg.process_kline(&make_kline(
+                "BTCUSDT",
+                10,
+                m,
+                (100.0, 105.0, 99.0, 102.0, 10.0, 1),
+            ));
         }
 
         // Both receivers should get the candle
