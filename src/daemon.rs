@@ -3,7 +3,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, atomic::AtomicBool},
 };
 
 use chrono::NaiveDate;
@@ -36,7 +36,8 @@ use crate::{
     app_config,
     app_config::SentinelConfig,
     error::{
-        self, AgentBackendSnafu, EventBusSnafu, MarketStoreSnafu, PromptRendererSnafu, TraceSnafu,
+        self, AgentBackendSnafu, EventBusSnafu, GrpcServeSnafu, MarketStoreSnafu,
+        PromptRendererSnafu, TraceSnafu,
     },
     event_bus::bus::EventBus,
     paths,
@@ -83,19 +84,7 @@ pub async fn run(iterations: u32, grpc_addr: String) -> error::Result<()> {
     let mut tasks = JoinSet::new();
 
     // --- gRPC server task ---
-    // TODO: spawn rara-server gRPC service once the crate is available on main.
-    // Expected usage:
-    //   let addr = grpc_addr.parse().expect("valid socket addr");
-    //   let svc = rara_server::build_service(Arc::clone(&event_bus));
-    //   tasks.spawn(async move { tonic::transport::Server::builder()
-    //       .add_service(svc).serve(addr).await });
-    let grpc_addr_clone = grpc_addr.clone();
-    tasks.spawn(async move {
-        info!(addr = %grpc_addr_clone, "gRPC server placeholder — waiting for rara-server crate");
-        // Block until cancelled so the task stays alive in the JoinSet
-        std::future::pending::<()>().await;
-        Ok::<(), error::AppError>(())
-    });
+    spawn_grpc_task(&mut tasks, &event_bus, &contract_list, &grpc_addr);
 
     // --- Research loop task ---
     if iterations > 0 {
@@ -398,6 +387,32 @@ fn has_pending_retrain_events(event_bus: &EventBus) -> bool {
         .unwrap_or_default()
         .iter()
         .any(|e| e.event_type == EventType::FeedbackResearchRetrainRequested)
+}
+
+/// Spawn the gRPC server task with health probes and event streaming.
+fn spawn_grpc_task(
+    tasks: &mut JoinSet<error::Result<()>>,
+    event_bus: &Arc<EventBus>,
+    contract_list: &[String],
+    grpc_addr: &str,
+) {
+    let cfg = app_config::load();
+    let health_config = rara_server::health::HealthConfig {
+        database_url:   cfg.database.url.clone(),
+        llm_backend:    cfg.agent.backend.clone(),
+        ws_connected:   Arc::new(AtomicBool::new(false)),
+        contract_count: u32::try_from(contract_list.len()).unwrap_or(u32::MAX),
+    };
+    let svc = rara_server::build_service(Arc::clone(event_bus), health_config);
+    let addr: std::net::SocketAddr = grpc_addr.parse().expect("valid gRPC socket address");
+    tasks.spawn(async move {
+        info!(%addr, "gRPC server starting");
+        tonic::transport::Server::builder()
+            .add_service(svc)
+            .serve(addr)
+            .await
+            .context(GrpcServeSnafu)
+    });
 }
 
 /// Spawn the sentinel monitoring task if enabled in config.
