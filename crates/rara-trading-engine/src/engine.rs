@@ -29,6 +29,14 @@ struct OrderOutcomePayload<'a> {
     contract_id: &'a str,
     /// Order status.
     status: &'a OrderStatus,
+    /// Trade direction.
+    side: &'a Side,
+    /// Filled quantity as decimal string.
+    quantity: String,
+    /// Execution price as decimal string.
+    price: String,
+    /// Realized `PnL` as decimal string (zero for new positions).
+    realized_pnl: String,
 }
 use rara_event_bus::bus::EventBus;
 use crate::binding::StrategyBinding;
@@ -159,6 +167,10 @@ impl TradingEngine {
                         order_id: &result.order_id,
                         contract_id: &result.contract_id,
                         status: &result.status,
+                        side: &result.side,
+                        quantity: result.quantity.to_string(),
+                        price: result.price.to_string(),
+                        realized_pnl: result.realized_pnl.to_string(),
                     })
                     .expect("OrderOutcomePayload must serialize"),
                 )
