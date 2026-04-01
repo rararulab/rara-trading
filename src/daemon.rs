@@ -833,8 +833,8 @@ fn build_strategy_evaluator(
 
 /// Consume feedback lifecycle events and update strategy status accordingly.
 ///
-/// Listens on the event bus for [`FeedbackStrategyPromote`] and
-/// [`FeedbackStrategyDemote`] events. When a promote event arrives the
+/// Listens on the event bus for `FeedbackStrategyPromote` and
+/// `FeedbackStrategyDemote` events. When a promote event arrives the
 /// referenced strategy is moved to `Promoted`; demote events move it to
 /// `Archived`. This closes the loop so live trading can hot-reload newly
 /// promoted strategies.
