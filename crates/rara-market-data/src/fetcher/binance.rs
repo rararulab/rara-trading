@@ -1,38 +1,39 @@
 //! Binance historical kline fetcher.
 //!
-//! Uses the public `/api/v3/klines` endpoint (no authentication required).
+//! Uses the official `binance-sdk` crate to access the public Binance API.
 //! Paginates at 1000 candles per request (~16.6 hours of 1m data).
 //! Resumes from the latest stored candle via `MAX(ts)` query.
 
 use async_trait::async_trait;
+use binance_sdk::spot::rest_api::{
+    ExchangeInfoParams, KlinesIntervalEnum, KlinesItemInner, KlinesParams, RestApi,
+};
+use binance_sdk::common::config::ConfigurationRestApi;
 use chrono::{DateTime, Days, NaiveDate, NaiveTime, Utc};
 use snafu::ResultExt;
 use tracing::info;
 
-use super::{HistoryFetcher, HttpSnafu, ParseSnafu, Result, StoreSnafu};
+use super::{HistoryFetcher, ParseSnafu, Result, StoreSnafu};
 use crate::store::{MarketStore, candle::CandleRow};
 
 /// Maximum candles per Binance klines request.
-const PAGE_LIMIT: u64 = 1000;
+const PAGE_LIMIT: i32 = 1000;
 
-/// Binance public API base URL.
-const BASE_URL: &str = "https://api.binance.com";
-
-/// Raw candle parsed from Binance JSON before DB insertion.
-struct RawKline {
-    open_time_ms: i64,
-    open:         f64,
-    high:         f64,
-    low:          f64,
-    close:        f64,
-    volume:       f64,
-    trade_count:  u32,
+/// Create a Binance REST API client (no auth needed for market data).
+fn create_client() -> Result<RestApi> {
+    let config = ConfigurationRestApi::builder().build().map_err(|e| {
+        ParseSnafu {
+            message: format!("failed to build Binance config: {e}"),
+        }
+        .build()
+    })?;
+    Ok(RestApi::new(config))
 }
 
 /// Fetches historical 1m klines from Binance public API.
 pub struct BinanceFetcher {
-    /// HTTP client.
-    pub client: reqwest::Client,
+    /// Binance REST API client.
+    api: RestApi,
     /// Binance symbol, e.g. `"BTCUSDT"`.
     pub symbol: String,
 }
@@ -41,7 +42,7 @@ impl BinanceFetcher {
     /// Create a new fetcher for the given Binance symbol.
     pub fn new(symbol: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            api: create_client().expect("Binance client must build"),
             symbol: symbol.into(),
         }
     }
@@ -51,56 +52,56 @@ impl BinanceFetcher {
     /// Fetches a single candle starting from epoch to discover when Binance
     /// first has data for the symbol. Returns `None` if no data exists.
     pub async fn earliest_available(&self) -> Result<Option<NaiveDate>> {
-        let url = format!(
-            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime=0&limit=1",
-            self.symbol
-        );
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context(HttpSnafu)?
-            .error_for_status()
-            .context(HttpSnafu)?;
-        let rows = resp
-            .json::<Vec<Vec<serde_json::Value>>>()
-            .await
-            .context(HttpSnafu)?;
+        let params = KlinesParams::builder(
+            self.symbol.clone(),
+            KlinesIntervalEnum::Interval1m,
+        )
+        .start_time(0_i64)
+        .limit(1)
+        .build()
+        .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
 
-        Ok(rows
-            .first()
-            .and_then(|row| parse_binance_kline(row).ok())
-            .and_then(|k| {
-                DateTime::from_timestamp_millis(k.open_time_ms).map(|dt| dt.date_naive())
-            }))
+        let resp = self.api.klines(params).await.map_err(|e| {
+            ParseSnafu { message: format!("klines request failed: {e}") }.build()
+        })?;
+
+        let klines = resp.data().await.map_err(|e| {
+            ParseSnafu { message: format!("klines parse failed: {e}") }.build()
+        })?;
+
+        Ok(klines.first().and_then(|row| {
+            extract_open_time(row).and_then(|ms| {
+                DateTime::from_timestamp_millis(ms).map(|dt| dt.date_naive())
+            })
+        }))
     }
 
-    /// Fetch one page of klines.
-    async fn fetch_page(&self, start_ms: i64, end_ms: i64) -> Result<Vec<RawKline>> {
-        let url = format!(
-            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime={start_ms}&endTime={end_ms}&\
-             limit={PAGE_LIMIT}",
-            self.symbol
-        );
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context(HttpSnafu)?
-            .error_for_status()
-            .context(HttpSnafu)?;
+    /// Fetch one page of klines via the SDK.
+    async fn fetch_page(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<Vec<Vec<KlinesItemInner>>> {
+        let params = KlinesParams::builder(
+            self.symbol.clone(),
+            KlinesIntervalEnum::Interval1m,
+        )
+        .start_time(start_ms)
+        .end_time(end_ms)
+        .limit(PAGE_LIMIT)
+        .build()
+        .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
 
-        let rows = resp
-            .json::<Vec<Vec<serde_json::Value>>>()
-            .await
-            .context(HttpSnafu)?;
-        rows.iter().map(|row| parse_binance_kline(row)).collect()
+        let resp = self.api.klines(params).await.map_err(|e| {
+            ParseSnafu { message: format!("klines request failed: {e}") }.build()
+        })?;
+
+        let klines = resp.data().await.map_err(|e| {
+            ParseSnafu { message: format!("klines parse failed: {e}") }.build()
+        })?;
+        Ok(klines)
     }
-}
 
-impl BinanceFetcher {
     /// Fetch and store candles with a per-page progress callback.
     ///
     /// `on_progress` is called after each page with the number of candles
@@ -113,7 +114,8 @@ impl BinanceFetcher {
         end: NaiveDate,
         on_progress: impl Fn(usize) + Send + Sync,
     ) -> Result<usize> {
-        Self::fetch_core(self, store, instrument_id, start, end, &on_progress).await
+        self.fetch_core(store, instrument_id, start, end, &on_progress)
+            .await
     }
 
     /// Core fetch loop shared by trait impl and progress variant.
@@ -156,22 +158,15 @@ impl BinanceFetcher {
                 break;
             }
 
-            cursor_ms = page.last().expect("non-empty page").open_time_ms + 60_001;
+            let last_open_time = page
+                .last()
+                .and_then(|row| extract_open_time(row))
+                .expect("non-empty page must have open_time");
+            cursor_ms = last_open_time + 60_001;
 
             let candle_rows: Vec<CandleRow> = page
                 .iter()
-                .map(|k| CandleRow {
-                    ts:            DateTime::from_timestamp_millis(k.open_time_ms)
-                        .unwrap_or(DateTime::<Utc>::MIN_UTC),
-                    instrument_id: instrument_id.to_string(),
-                    interval:      "1m".to_string(),
-                    open:          k.open,
-                    high:          k.high,
-                    low:           k.low,
-                    close:         k.close,
-                    volume:        k.volume,
-                    trade_count:   k.trade_count.cast_signed(),
-                })
+                .filter_map(|row| parse_sdk_kline(row, instrument_id))
                 .collect();
 
             let count = store
@@ -190,29 +185,34 @@ impl BinanceFetcher {
 
 /// Search Binance for tradeable USDT-margined spot symbols.
 ///
-/// Fetches `/api/v3/exchangeInfo` and filters by `query` substring
+/// Uses the SDK's `exchange_info` endpoint and filters by `query` substring
 /// (case-insensitive). Returns matching symbol names.
 pub async fn search_symbols(query: &str) -> Result<Vec<String>> {
-    let url = format!("{BASE_URL}/api/v3/exchangeInfo?permissions=SPOT");
-    let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.context(HttpSnafu)?;
-    let body: serde_json::Value = resp.json().await.context(HttpSnafu)?;
+    let api = create_client()?;
+    let params = ExchangeInfoParams::builder()
+        .build()
+        .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
+
+    let resp = api.exchange_info(params).await.map_err(|e| {
+        ParseSnafu { message: format!("exchange_info request failed: {e}") }.build()
+    })?;
+
+    let info = resp.data().await.map_err(|e| {
+        ParseSnafu { message: format!("exchange_info parse failed: {e}") }.build()
+    })?;
 
     let query_upper = query.to_uppercase();
-    let symbols = body["symbols"]
-        .as_array()
-        .unwrap_or(&Vec::new())
-        .iter()
-        .filter_map(|s| {
-            let symbol = s["symbol"].as_str()?;
-            let status = s["status"].as_str()?;
-            let quote = s["quoteAsset"].as_str()?;
-            if status == "TRADING" && quote == "USDT" && symbol.contains(&query_upper) {
-                Some(symbol.to_string())
-            } else {
-                None
-            }
+    let symbols = info
+        .symbols
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| {
+            let symbol = s.symbol.as_deref().unwrap_or_default();
+            let status_match = s.status.as_deref() == Some("TRADING");
+            let quote_match = s.quote_asset.as_deref() == Some("USDT");
+            status_match && quote_match && symbol.to_uppercase().contains(&query_upper)
         })
+        .filter_map(|s| s.symbol)
         .collect();
 
     Ok(symbols)
@@ -227,43 +227,58 @@ impl HistoryFetcher for BinanceFetcher {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<usize> {
-        Self::fetch_core(self, store, instrument_id, start, end, &|_| {}).await
+        self.fetch_core(store, instrument_id, start, end, &|_| {})
+            .await
     }
 }
 
-/// Parse a single Binance kline JSON array.
-fn parse_binance_kline(row: &[serde_json::Value]) -> Result<RawKline> {
-    let parse_f64 = |idx: usize, name: &str| -> Result<f64> {
-        row.get(idx)
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<f64>().ok())
-            .ok_or_else(|| {
-                ParseSnafu {
-                    message: format!("missing {name} at index {idx}"),
-                }
-                .build()
-            })
-    };
+/// Extract the open time (ms) from a SDK kline row.
+fn extract_open_time(row: &[KlinesItemInner]) -> Option<i64> {
+    match row.first()? {
+        KlinesItemInner::Integer(ms) => Some(*ms),
+        _ => None,
+    }
+}
 
-    let open_time_ms = row
-        .first()
-        .and_then(serde_json::Value::as_i64)
-        .ok_or_else(|| {
-            ParseSnafu {
-                message: "missing open_time".to_string(),
-            }
-            .build()
-        })?;
+/// Parse a SDK kline row into a `CandleRow`.
+fn parse_sdk_kline(row: &[KlinesItemInner], instrument_id: &str) -> Option<CandleRow> {
+    let open_time_ms = extract_open_time(row)?;
+    let open = extract_f64(row, 1)?;
+    let high = extract_f64(row, 2)?;
+    let low = extract_f64(row, 3)?;
+    let close = extract_f64(row, 4)?;
+    let volume = extract_f64(row, 5)?;
+    let trade_count = extract_i64(row, 8).unwrap_or(0);
 
-    let trade_count = row.get(8).and_then(serde_json::Value::as_u64).unwrap_or(0);
-
-    Ok(RawKline {
-        open_time_ms,
-        open: parse_f64(1, "open")?,
-        high: parse_f64(2, "high")?,
-        low: parse_f64(3, "low")?,
-        close: parse_f64(4, "close")?,
-        volume: parse_f64(5, "volume")?,
-        trade_count: u32::try_from(trade_count).unwrap_or(u32::MAX),
+    Some(CandleRow {
+        ts:            DateTime::from_timestamp_millis(open_time_ms)
+            .unwrap_or(DateTime::<Utc>::MIN_UTC),
+        instrument_id: instrument_id.to_string(),
+        interval:      "1m".to_string(),
+        open,
+        high,
+        low,
+        close,
+        volume,
+        trade_count:   i32::try_from(trade_count).unwrap_or(i32::MAX),
     })
+}
+
+/// Extract an f64 from a kline row (SDK returns strings for decimal values).
+fn extract_f64(row: &[KlinesItemInner], idx: usize) -> Option<f64> {
+    match row.get(idx)? {
+        KlinesItemInner::String(s) => s.parse().ok(),
+        #[allow(clippy::cast_precision_loss)]
+        KlinesItemInner::Integer(n) => Some(*n as f64),
+        KlinesItemInner::Other(v) => v.as_f64(),
+    }
+}
+
+/// Extract an i64 from a kline row.
+fn extract_i64(row: &[KlinesItemInner], idx: usize) -> Option<i64> {
+    match row.get(idx)? {
+        KlinesItemInner::Integer(n) => Some(*n),
+        KlinesItemInner::String(s) => s.parse().ok(),
+        KlinesItemInner::Other(v) => v.as_i64(),
+    }
 }
