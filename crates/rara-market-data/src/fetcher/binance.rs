@@ -6,9 +6,11 @@
 //! so re-runs with an earlier start date correctly backfill missing history.
 
 use async_trait::async_trait;
-use binance_sdk::common::config::ConfigurationRestApi;
-use binance_sdk::spot::rest_api::{
-    ExchangeInfoParams, KlinesIntervalEnum, KlinesItemInner, KlinesParams, RestApi,
+use binance_sdk::{
+    common::config::ConfigurationRestApi,
+    spot::rest_api::{
+        ExchangeInfoParams, KlinesIntervalEnum, KlinesItemInner, KlinesParams, RestApi,
+    },
 };
 use chrono::{DateTime, Days, NaiveDate, NaiveTime, Utc};
 use snafu::ResultExt;
@@ -34,7 +36,7 @@ fn create_client() -> Result<RestApi> {
 /// Fetches historical 1m klines from Binance using the official SDK.
 pub struct BinanceFetcher {
     /// Binance REST API client.
-    api: RestApi,
+    api:        RestApi,
     /// Binance symbol, e.g. `"BTCUSDT"`.
     pub symbol: String,
 }
@@ -43,7 +45,7 @@ impl BinanceFetcher {
     /// Create a new fetcher for the given Binance symbol.
     pub fn new(symbol: impl Into<String>) -> Self {
         Self {
-            api: create_client().expect("Binance client must build"),
+            api:    create_client().expect("Binance client must build"),
             symbol: symbol.into(),
         }
     }
@@ -57,7 +59,12 @@ impl BinanceFetcher {
             .start_time(0_i64)
             .limit(1)
             .build()
-            .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
+            .map_err(|e| {
+                ParseSnafu {
+                    message: e.to_string(),
+                }
+                .build()
+            })?;
 
         let resp = self.api.klines(params).await.map_err(|e| {
             ParseSnafu {
@@ -80,17 +87,18 @@ impl BinanceFetcher {
     }
 
     /// Fetch one page of klines via the SDK.
-    async fn fetch_page(
-        &self,
-        start_ms: i64,
-        end_ms: i64,
-    ) -> Result<Vec<Vec<KlinesItemInner>>> {
+    async fn fetch_page(&self, start_ms: i64, end_ms: i64) -> Result<Vec<Vec<KlinesItemInner>>> {
         let params = KlinesParams::builder(self.symbol.clone(), KlinesIntervalEnum::Interval1m)
             .start_time(start_ms)
             .end_time(end_ms)
             .limit(PAGE_LIMIT)
             .build()
-            .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
+            .map_err(|e| {
+                ParseSnafu {
+                    message: e.to_string(),
+                }
+                .build()
+            })?;
 
         let resp = self.api.klines(params).await.map_err(|e| {
             ParseSnafu {
@@ -146,8 +154,14 @@ impl BinanceFetcher {
             .timestamp_millis()
             - 1;
 
-        let stored_min = store.min_ts(instrument_id, "1m").await.context(StoreSnafu)?;
-        let stored_max = store.max_ts(instrument_id, "1m").await.context(StoreSnafu)?;
+        let stored_min = store
+            .min_ts(instrument_id, "1m")
+            .await
+            .context(StoreSnafu)?;
+        let stored_max = store
+            .max_ts(instrument_id, "1m")
+            .await
+            .context(StoreSnafu)?;
 
         let mut total = 0usize;
 
@@ -156,16 +170,15 @@ impl BinanceFetcher {
             let min_ms = min_ts.timestamp_millis();
             if range_start_ms < min_ms {
                 let head_end = min_ms - 1; // up to just before the first stored candle
-                info!(
-                    "binance: head gap detected, fetching {range_start_ms} → {head_end}"
-                );
+                info!("binance: head gap detected, fetching {range_start_ms} → {head_end}");
                 total += self
                     .fetch_range(store, instrument_id, range_start_ms, head_end, on_progress)
                     .await?;
             }
         }
 
-        // Tail gap: resume from last stored candle + 1 minute (or from start if no data)
+        // Tail gap: resume from last stored candle + 1 minute (or from start if no
+        // data)
         let tail_start = stored_max.map_or(range_start_ms, |ts| ts.timestamp_millis() + 60_000);
         if tail_start <= range_end_ms {
             total += self
@@ -229,9 +242,12 @@ impl BinanceFetcher {
 /// (case-insensitive). Returns matching symbol names.
 pub async fn search_symbols(query: &str) -> Result<Vec<String>> {
     let api = create_client()?;
-    let params = ExchangeInfoParams::builder()
+    let params = ExchangeInfoParams::builder().build().map_err(|e| {
+        ParseSnafu {
+            message: e.to_string(),
+        }
         .build()
-        .map_err(|e| ParseSnafu { message: e.to_string() }.build())?;
+    })?;
 
     let resp = api.exchange_info(params).await.map_err(|e| {
         ParseSnafu {
@@ -297,16 +313,15 @@ fn parse_sdk_kline(row: &[KlinesItemInner], instrument_id: &str) -> Option<Candl
     let trade_count = extract_i64(row, 8).unwrap_or(0);
 
     Some(CandleRow {
-        ts:            DateTime::from_timestamp_millis(open_time_ms)
-            .unwrap_or(DateTime::<Utc>::MIN_UTC),
+        ts: DateTime::from_timestamp_millis(open_time_ms).unwrap_or(DateTime::<Utc>::MIN_UTC),
         instrument_id: instrument_id.to_string(),
-        interval:      "1m".to_string(),
+        interval: "1m".to_string(),
         open,
         high,
         low,
         close,
         volume,
-        trade_count:   i32::try_from(trade_count).unwrap_or(i32::MAX),
+        trade_count: i32::try_from(trade_count).unwrap_or(i32::MAX),
     })
 }
 

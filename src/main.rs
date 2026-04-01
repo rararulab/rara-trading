@@ -27,7 +27,6 @@ use rara_trading::{
 use rust_decimal_macros::dec;
 use serde::Serialize;
 use snafu::ResultExt;
-
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -1785,6 +1784,11 @@ async fn run_strategy(action: StrategyAction) -> error::Result<()> {
         StrategyAction::List { repo } => run_strategy_list(&repo).await,
         StrategyAction::Fetch { name, repo } => run_strategy_fetch(&name, &repo).await,
         StrategyAction::Installed => run_strategy_installed(),
+        StrategyAction::Backtest {
+            name,
+            contract,
+            timeframe,
+        } => run_strategy_backtest(&name, &contract, &timeframe).await,
     }
 }
 
@@ -1876,6 +1880,119 @@ fn run_strategy_installed() -> error::Result<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct BacktestResponse {
+    ok:           bool,
+    action:       &'static str,
+    strategy:     String,
+    contract:     String,
+    timeframe:    String,
+    pnl:          String,
+    sharpe_ratio: f64,
+    max_drawdown: String,
+    win_rate:     f64,
+    trade_count:  u32,
+}
+
+/// Run a backtest on a fetched WASM strategy against historical market data.
+async fn run_strategy_backtest(
+    name: &str,
+    contract: &str,
+    timeframe_str: &str,
+) -> error::Result<()> {
+    use rara_trading::research::{
+        backtester::Backtester, barter_backtester::BarterBacktester, wasm_executor::WasmExecutor,
+    };
+    use rust_decimal_macros::dec;
+    use tracing::info;
+
+    let timeframe: rara_domain::timeframe::Timeframe =
+        timeframe_str.parse().map_err(|_| error::AppError::Config {
+            message: format!("invalid timeframe: {timeframe_str}"),
+        })?;
+
+    // Load WASM from promoted directory
+    let wasm_path = paths::strategies_promoted_dir().join(format!("{name}.wasm"));
+    if !wasm_path.exists() {
+        return Err(error::AppError::Config {
+            message: format!(
+                "strategy '{name}' not found at {}. Run `rara strategy fetch {name}` first.",
+                wasm_path.display()
+            ),
+        });
+    }
+
+    let wasm_bytes = std::fs::read(&wasm_path).map_err(|e| error::AppError::Config {
+        message: format!("failed to read {}: {e}", wasm_path.display()),
+    })?;
+
+    let executor = WasmExecutor::builder().build();
+    let handle = executor
+        .load(&wasm_bytes)
+        .map_err(|e| error::AppError::Config {
+            message: format!("failed to load WASM module: {e}"),
+        })?;
+
+    let meta = {
+        let mut h = executor
+            .load(&wasm_bytes)
+            .map_err(|e| error::AppError::Config {
+                message: format!("failed to load WASM for metadata: {e}"),
+            })?;
+        h.meta().map_err(|e| error::AppError::Config {
+            message: format!("failed to read strategy metadata: {e}"),
+        })?
+    };
+
+    info!(
+        strategy = meta.name,
+        version = meta.version,
+        contract,
+        %timeframe,
+        "starting backtest"
+    );
+
+    // Build backtester
+    let cfg = app_config::load();
+    let market_store = rara_market_data::store::MarketStore::connect(&cfg.database.url)
+        .await
+        .context(MarketStoreSnafu)?;
+
+    let backtester = BarterBacktester::builder()
+        .store(market_store)
+        .initial_capital(dec!(10000))
+        .fees_percent(dec!(0.1))
+        .backtest_start(chrono::NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date"))
+        .backtest_end(chrono::NaiveDate::from_ymd_opt(2030, 12, 31).expect("valid date"))
+        .build();
+
+    let result = backtester
+        .run(handle, contract, timeframe)
+        .await
+        .map_err(|e| error::AppError::Config {
+            message: format!("backtest failed: {e}"),
+        })?;
+
+    println!(
+        "{}",
+        serde_json::to_string(&BacktestResponse {
+            ok:           true,
+            action:       "strategy.backtest",
+            strategy:     meta.name,
+            contract:     contract.to_string(),
+            timeframe:    timeframe_str.to_string(),
+            pnl:          result.pnl.to_string(),
+            sharpe_ratio: result.sharpe_ratio,
+            max_drawdown: result.max_drawdown.to_string(),
+            win_rate:     result.win_rate,
+            trade_count:  result.trade_count,
+        })
+        .expect("BacktestResponse must serialize")
+    );
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Setup command handlers
 // ---------------------------------------------------------------------------
@@ -1914,7 +2031,10 @@ async fn run_setup_data(
         })
     };
 
-    let start = start.as_deref().map(|s| parse_date(s, "start")).transpose()?;
+    let start = start
+        .as_deref()
+        .map(|s| parse_date(s, "start"))
+        .transpose()?;
     let end = end.as_deref().map(|s| parse_date(s, "end")).transpose()?;
 
     // Symbol search mode (Binance only)

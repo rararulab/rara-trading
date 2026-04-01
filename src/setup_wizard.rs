@@ -3,13 +3,13 @@
 
 use std::collections::HashMap;
 
+use chrono::{NaiveDate, Utc};
 use dialoguer::{Confirm, Input, Password, Select};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rara_trading_engine::{
     account_config::AccountConfig,
     broker_registry::{BROKER_REGISTRY, BrokerRegistryEntry, ConfigField, ConfigFieldType},
 };
-use chrono::{NaiveDate, Utc};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use snafu::ResultExt;
 
 use crate::{
@@ -175,10 +175,7 @@ const DATA_SOURCE_OPTIONS: &[&str] = &["binance", "yahoo"];
 /// backtesting. Lets the user pick a data source, then downloads BTC + ETH
 /// in parallel with progress bars.
 async fn step_market_data(database_url: &str) -> error::Result<()> {
-    if !confirm(
-        "  Download historical market data for backtesting?",
-        true,
-    )? {
+    if !confirm("  Download historical market data for backtesting?", true)? {
         eprintln!("  Skipped. You can add data later with: rara setup data");
         eprintln!();
         return Ok(());
@@ -187,10 +184,7 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
     let source_idx = select("  Data source", DATA_SOURCE_OPTIONS, 0)?;
     let source = DATA_SOURCE_OPTIONS[source_idx];
 
-    let symbols_raw = input(
-        "  Symbols (comma-separated)",
-        Some("BTCUSDT,ETHUSDT"),
-    )?;
+    let symbols_raw = input("  Symbols (comma-separated)", Some("BTCUSDT,ETHUSDT"))?;
     let symbols: Vec<String> = symbols_raw
         .split(',')
         .map(|s| s.trim().to_uppercase())
@@ -203,20 +197,28 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
         return Ok(());
     }
 
-    let date_mode_options = &["Auto-detect (earliest available per symbol)", "Custom range"];
+    let date_mode_options = &[
+        "Auto-detect (earliest available per symbol)",
+        "Custom range",
+    ];
     let date_mode = select("  Date range", date_mode_options, 0)?;
 
     let (start, end) = if date_mode == 1 {
         let start_str = input("  Start date (YYYY-MM-DD)", Some("2020-01-01"))?;
-        let end_str = input("  End date (YYYY-MM-DD)", Some(&Utc::now().format("%Y-%m-%d").to_string()))?;
-        let start = NaiveDate::parse_from_str(&start_str, "%Y-%m-%d")
-            .map_err(|_| error::AppError::Config {
+        let end_str = input(
+            "  End date (YYYY-MM-DD)",
+            Some(&Utc::now().format("%Y-%m-%d").to_string()),
+        )?;
+        let start = NaiveDate::parse_from_str(&start_str, "%Y-%m-%d").map_err(|_| {
+            error::AppError::Config {
                 message: format!("invalid start date: {start_str}"),
-            })?;
-        let end = NaiveDate::parse_from_str(&end_str, "%Y-%m-%d")
-            .map_err(|_| error::AppError::Config {
+            }
+        })?;
+        let end = NaiveDate::parse_from_str(&end_str, "%Y-%m-%d").map_err(|_| {
+            error::AppError::Config {
                 message: format!("invalid end date: {end_str}"),
-            })?;
+            }
+        })?;
         (Some(start), Some(end))
     } else {
         (None, None)
@@ -272,10 +274,12 @@ pub async fn download_symbols_parallel(
             // Auto-detect start date if not provided
             let sym_start = match start {
                 Some(d) => d,
-                None => detect_start_date(&source, &symbol).await.unwrap_or_else(|_| {
-                    // Fallback: 2017-01-01 covers most major symbols
-                    NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")
-                }),
+                None => detect_start_date(&source, &symbol)
+                    .await
+                    .unwrap_or_else(|_| {
+                        // Fallback: 2017-01-01 covers most major symbols
+                        NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")
+                    }),
             };
 
             let est_total =
@@ -283,8 +287,7 @@ pub async fn download_symbols_parallel(
             pb.set_length(est_total);
             pb.set_message(format!("{sym_start} → {end}"));
 
-            let result =
-                fetch_symbol(&source, &store, &symbol, sym_start, end, &pb_clone).await;
+            let result = fetch_symbol(&source, &store, &symbol, sym_start, end, &pb_clone).await;
 
             match &result {
                 Ok(count) => pb.finish_with_message(format!("{count} total")),
@@ -314,10 +317,12 @@ pub async fn download_symbols_parallel(
     eprintln!();
     eprintln!("  Data coverage:");
     for c in &coverage {
-        let min =
-            c.min_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
-        let max =
-            c.max_ts.map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let min = c
+            .min_ts
+            .map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
+        let max = c
+            .max_ts
+            .map_or_else(|| "-".into(), |t| t.format("%Y-%m-%d").to_string());
         eprintln!(
             "    {} ({}): {} candles  [{} → {}]",
             c.instrument_id, c.interval, c.count, min, max
@@ -372,11 +377,9 @@ async fn fetch_symbol(
             let fetcher = rara_market_data::fetcher::yahoo::YahooFetcher::new(symbol);
             fetcher.fetch_and_store(store, symbol, start, end).await
         }
-        _ => {
-            Err(rara_market_data::fetcher::FetchError::Parse {
-                message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
-            })
-        }
+        _ => Err(rara_market_data::fetcher::FetchError::Parse {
+            message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
+        }),
     }
 }
 
