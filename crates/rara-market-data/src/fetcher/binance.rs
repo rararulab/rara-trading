@@ -46,6 +46,36 @@ impl BinanceFetcher {
         }
     }
 
+    /// Query the earliest available kline timestamp for this symbol.
+    ///
+    /// Fetches a single candle starting from epoch to discover when Binance
+    /// first has data for the symbol. Returns `None` if no data exists.
+    pub async fn earliest_available(&self) -> Result<Option<NaiveDate>> {
+        let url = format!(
+            "{BASE_URL}/api/v3/klines?symbol={}&interval=1m&startTime=0&limit=1",
+            self.symbol
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context(HttpSnafu)?
+            .error_for_status()
+            .context(HttpSnafu)?;
+        let rows = resp
+            .json::<Vec<Vec<serde_json::Value>>>()
+            .await
+            .context(HttpSnafu)?;
+
+        Ok(rows
+            .first()
+            .and_then(|row| parse_binance_kline(row).ok())
+            .and_then(|k| {
+                DateTime::from_timestamp_millis(k.open_time_ms).map(|dt| dt.date_naive())
+            }))
+    }
+
     /// Fetch one page of klines.
     async fn fetch_page(&self, start_ms: i64, end_ms: i64) -> Result<Vec<RawKline>> {
         let url = format!(

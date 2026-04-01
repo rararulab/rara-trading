@@ -1880,8 +1880,10 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
         SetupAction::Data {
             source,
             search,
+            start,
+            end,
             symbols,
-        } => run_setup_data(&source, search, symbols).await?,
+        } => run_setup_data(&source, search, start, end, symbols).await?,
     }
     Ok(())
 }
@@ -1889,12 +1891,24 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
 /// Download historical market data for backtesting.
 ///
 /// With `--search`, queries Binance for matching symbols. Otherwise downloads
-/// the given symbols (defaulting to BTCUSDT + ETHUSDT).
+/// the given symbols (defaulting to BTCUSDT + ETHUSDT). When `--start` is
+/// omitted, auto-detects the earliest available date per symbol.
 async fn run_setup_data(
     source: &str,
     search: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
     mut symbols: Vec<String>,
 ) -> error::Result<()> {
+    let parse_date = |s: &str, label: &str| -> error::Result<NaiveDate> {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| AppError::Config {
+            message: format!("invalid {label} date: {s}"),
+        })
+    };
+
+    let start = start.as_deref().map(|s| parse_date(s, "start")).transpose()?;
+    let end = end.as_deref().map(|s| parse_date(s, "end")).transpose()?;
+
     // Symbol search mode (Binance only)
     if let Some(query) = search {
         eprintln!("Searching Binance for \"{query}\"…");
@@ -1923,8 +1937,14 @@ async fn run_setup_data(
     }
 
     let cfg = app_config::load();
-    rara_trading::setup_wizard::download_symbols_parallel(&cfg.database.url, source, &symbols)
-        .await
+    rara_trading::setup_wizard::download_symbols_parallel(
+        &cfg.database.url,
+        source,
+        &symbols,
+        start,
+        end,
+    )
+    .await
 }
 
 /// Generate config.toml and accounts.toml templates.

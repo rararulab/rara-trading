@@ -188,30 +188,28 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
     let source = DATA_SOURCE_OPTIONS[source_idx];
 
     let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-    download_symbols_parallel(database_url, source, &symbols).await
+    download_symbols_parallel(database_url, source, &symbols, None, None).await
 }
 
 /// Download multiple symbols in parallel with per-symbol progress bars.
 ///
 /// Connects to `TimescaleDB`, runs migrations, then spawns one task per symbol.
-/// Each task fetches 1m candles from the chosen source (2016-01-01 → today)
-/// and reports progress via an `indicatif` bar. Prints coverage on completion.
+/// Each task fetches 1m candles from the chosen source and reports progress via
+/// an `indicatif` bar. When `start` is `None`, auto-detects the earliest
+/// available date per symbol from the exchange. Prints coverage on completion.
 pub async fn download_symbols_parallel(
     database_url: &str,
     source: &str,
     symbols: &[String],
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
 ) -> error::Result<()> {
     let store = rara_market_data::store::MarketStore::connect(database_url)
         .await
         .context(MarketStoreSnafu)?;
     store.migrate().await.context(MarketStoreSnafu)?;
 
-    let start = NaiveDate::from_ymd_opt(2016, 1, 1).expect("valid date");
-    let end = Utc::now().date_naive();
-
-    // ~minutes from 2016-01-01 to today as estimated total per symbol
-    let est_total =
-        u64::try_from((end - start).num_minutes().max(0)).unwrap_or(5_000_000);
+    let end = end.unwrap_or_else(|| Utc::now().date_naive());
 
     let mp = MultiProgress::new();
     let style = ProgressStyle::with_template(
@@ -224,10 +222,11 @@ pub async fn download_symbols_parallel(
     let mut handles = Vec::with_capacity(symbols.len());
 
     for symbol in symbols {
-        let pb = mp.add(ProgressBar::new(est_total));
+        // Placeholder bar — real length set after detecting start date
+        let pb = mp.add(ProgressBar::new(0));
         pb.set_style(style.clone());
         pb.set_prefix(symbol.clone());
-        pb.set_message("fetching…");
+        pb.set_message("detecting range…");
 
         let store = store.clone();
         let symbol = symbol.clone();
@@ -235,7 +234,22 @@ pub async fn download_symbols_parallel(
         let pb_clone = pb.clone();
 
         handles.push(tokio::spawn(async move {
-            let result = fetch_symbol(&source, &store, &symbol, start, end, &pb_clone).await;
+            // Auto-detect start date if not provided
+            let sym_start = match start {
+                Some(d) => d,
+                None => detect_start_date(&source, &symbol).await.unwrap_or_else(|_| {
+                    // Fallback: 2017-01-01 covers most major symbols
+                    NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")
+                }),
+            };
+
+            let est_total =
+                u64::try_from((end - sym_start).num_minutes().max(0)).unwrap_or(5_000_000);
+            pb.set_length(est_total);
+            pb.set_message(format!("{sym_start} → {end}"));
+
+            let result =
+                fetch_symbol(&source, &store, &symbol, sym_start, end, &pb_clone).await;
 
             match &result {
                 Ok(count) => pb.finish_with_message(format!("{count} total")),
@@ -277,6 +291,23 @@ pub async fn download_symbols_parallel(
     eprintln!();
 
     Ok(())
+}
+
+/// Auto-detect the earliest available data date for a symbol on the exchange.
+async fn detect_start_date(
+    source: &str,
+    symbol: &str,
+) -> std::result::Result<NaiveDate, rara_market_data::fetcher::FetchError> {
+    match source {
+        "binance" => {
+            let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(symbol);
+            fetcher.earliest_available().await.map(|opt| {
+                opt.unwrap_or_else(|| NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date"))
+            })
+        }
+        // Yahoo doesn't have a cheap "earliest" query — use a safe default
+        _ => Ok(NaiveDate::from_ymd_opt(2017, 1, 1).expect("valid date")),
+    }
 }
 
 /// Fetch one symbol from the given source with progress reporting.
