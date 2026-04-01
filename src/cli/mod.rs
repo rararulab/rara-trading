@@ -272,7 +272,10 @@ pub enum SetupAction {
     /// Without arguments, downloads BTC + ETH (10 years, 1m candles).
     /// Use `--search` to find and add other symbols from Binance.
     Data {
-        /// Search Binance for a symbol (e.g. "SOL", "DOGE").
+        /// Data source: "binance" or "yahoo".
+        #[arg(long, default_value = "binance")]
+        source: String,
+        /// Search for a symbol (e.g. "SOL", "DOGE").
         #[arg(long)]
         search: Option<String>,
         /// Symbols to download (e.g. BTCUSDT ETHUSDT). Defaults to BTC + ETH.

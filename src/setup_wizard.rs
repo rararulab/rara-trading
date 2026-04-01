@@ -168,9 +168,12 @@ async fn step_database() -> error::Result<AppConfig> {
 // Step 1b — Market Data
 // ---------------------------------------------------------------------------
 
+/// Available data source choices for the select prompt.
+const DATA_SOURCE_OPTIONS: &[&str] = &["binance", "yahoo"];
+
 /// After database connects, offer to download historical candles for
-/// backtesting. Downloads 10 years of 1m data for BTC and ETH from Binance,
-/// with parallel fetching and progress bars.
+/// backtesting. Lets the user pick a data source, then downloads BTC + ETH
+/// in parallel with progress bars.
 async fn step_market_data(database_url: &str) -> error::Result<()> {
     if !confirm(
         "  Download historical market data for backtesting? (BTC + ETH, ~10 years)",
@@ -181,17 +184,21 @@ async fn step_market_data(database_url: &str) -> error::Result<()> {
         return Ok(());
     }
 
+    let source_idx = select("  Data source", DATA_SOURCE_OPTIONS, 0)?;
+    let source = DATA_SOURCE_OPTIONS[source_idx];
+
     let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-    download_symbols_parallel(database_url, &symbols).await
+    download_symbols_parallel(database_url, source, &symbols).await
 }
 
 /// Download multiple symbols in parallel with per-symbol progress bars.
 ///
 /// Connects to `TimescaleDB`, runs migrations, then spawns one task per symbol.
-/// Each task fetches 1m candles from Binance (2016-01-01 → today) and reports
-/// progress via an `indicatif` bar. Prints a coverage summary on completion.
+/// Each task fetches 1m candles from the chosen source (2016-01-01 → today)
+/// and reports progress via an `indicatif` bar. Prints coverage on completion.
 pub async fn download_symbols_parallel(
     database_url: &str,
+    source: &str,
     symbols: &[String],
 ) -> error::Result<()> {
     let store = rara_market_data::store::MarketStore::connect(database_url)
@@ -213,6 +220,7 @@ pub async fn download_symbols_parallel(
     .expect("valid template")
     .progress_chars("█▓░");
 
+    let source = source.to_string();
     let mut handles = Vec::with_capacity(symbols.len());
 
     for symbol in symbols {
@@ -223,22 +231,11 @@ pub async fn download_symbols_parallel(
 
         let store = store.clone();
         let symbol = symbol.clone();
+        let source = source.clone();
         let pb_clone = pb.clone();
 
         handles.push(tokio::spawn(async move {
-            let fetcher =
-                rara_market_data::fetcher::binance::BinanceFetcher::new(&symbol);
-            let result = fetcher
-                .fetch_and_store_with_progress(
-                    &store,
-                    &symbol,
-                    start,
-                    end,
-                    |batch| {
-                        pb_clone.inc(u64::try_from(batch).unwrap_or(0));
-                    },
-                )
-                .await;
+            let result = fetch_symbol(&source, &store, &symbol, start, end, &pb_clone).await;
 
             match &result {
                 Ok(count) => pb.finish_with_message(format!("{count} total")),
@@ -280,6 +277,41 @@ pub async fn download_symbols_parallel(
     eprintln!();
 
     Ok(())
+}
+
+/// Fetch one symbol from the given source with progress reporting.
+async fn fetch_symbol(
+    source: &str,
+    store: &rara_market_data::store::MarketStore,
+    symbol: &str,
+    start: NaiveDate,
+    end: NaiveDate,
+    pb: &ProgressBar,
+) -> std::result::Result<usize, rara_market_data::fetcher::FetchError> {
+    let on_progress = |batch: usize| {
+        pb.inc(u64::try_from(batch).unwrap_or(0));
+    };
+
+    match source {
+        "binance" => {
+            let fetcher = rara_market_data::fetcher::binance::BinanceFetcher::new(symbol);
+            fetcher
+                .fetch_and_store_with_progress(store, symbol, start, end, on_progress)
+                .await
+        }
+        "yahoo" => {
+            // Yahoo fetcher doesn't support progress callbacks yet — fall back
+            // to the trait method (no per-page progress, bar jumps to done).
+            use rara_market_data::fetcher::HistoryFetcher;
+            let fetcher = rara_market_data::fetcher::yahoo::YahooFetcher::new(symbol);
+            fetcher.fetch_and_store(store, symbol, start, end).await
+        }
+        _ => {
+            Err(rara_market_data::fetcher::FetchError::Parse {
+                message: format!("unknown source: {source}, expected 'binance' or 'yahoo'"),
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

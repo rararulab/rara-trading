@@ -1877,7 +1877,11 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
         SetupAction::Init { force } => run_setup_init(force)?,
         SetupAction::Validate => run_setup_validate().await?,
         SetupAction::Account { action } => run_setup_account(*action).await?,
-        SetupAction::Data { search, symbols } => run_setup_data(search, symbols).await?,
+        SetupAction::Data {
+            source,
+            search,
+            symbols,
+        } => run_setup_data(&source, search, symbols).await?,
     }
     Ok(())
 }
@@ -1887,10 +1891,11 @@ async fn run_setup(action: SetupAction) -> error::Result<()> {
 /// With `--search`, queries Binance for matching symbols. Otherwise downloads
 /// the given symbols (defaulting to BTCUSDT + ETHUSDT).
 async fn run_setup_data(
+    source: &str,
     search: Option<String>,
     mut symbols: Vec<String>,
 ) -> error::Result<()> {
-    // Symbol search mode
+    // Symbol search mode (Binance only)
     if let Some(query) = search {
         eprintln!("Searching Binance for \"{query}\"…");
         let results = rara_market_data::fetcher::binance::search_symbols(&query)
@@ -1918,7 +1923,8 @@ async fn run_setup_data(
     }
 
     let cfg = app_config::load();
-    rara_trading::setup_wizard::download_symbols_parallel(&cfg.database.url, &symbols).await
+    rara_trading::setup_wizard::download_symbols_parallel(&cfg.database.url, source, &symbols)
+        .await
 }
 
 /// Generate config.toml and accounts.toml templates.
