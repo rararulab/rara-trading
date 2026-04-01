@@ -47,6 +47,8 @@ rara-tui = { path = "crates/rara-tui" }
 tonic = "0.13"
 prost = "0.13"
 prost-types = "0.13"
+ratatui = "0.29"
+crossterm = "0.28"
 dialoguer = "0.11"
 indicatif = "0.18"
 
